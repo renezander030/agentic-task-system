@@ -1,39 +1,74 @@
 /**
  * Reference TickTick adapter for AKB.
- *
- * v0.1 status: skeleton — full implementation to be ported from
- * ~/ticktick-cli/lib/. See REFACTOR-PLAN.md for the file-level mapping.
- *
- * Required (per AKB adapter interface):
- *   listProjects, listTasksInProject, getTask, createTask, updateTask, urlFor
- * Optional:
- *   searchByQuery (TickTick OpenAPI v1 has none — leave undefined)
- *   bulkFetch (TickTick v2 batch sync — implement to avoid 200/min throttle)
- *   embeddings (delegate to local nomic-embed via ollama — separate from TT)
- * Auth:
- *   authStatus, authLogin, authExchange (OAuth code exchange)
+ * Implements the AKB adapter contract on top of TickTick OpenAPI v1
+ * (with optional qdrant + ollama-via-nomic-embed-text retrieval backend).
  */
 
-const NOT_PORTED = (name) => () => {
-  throw new Error(`@reneza/akb-adapter-ticktick: ${name}() not yet ported from ~/ticktick-cli. See REFACTOR-PLAN.md.`);
-};
+import * as auth from './auth.js';
+import * as projects from './projects.js';
+import * as tasks from './tasks.js';
+import * as notes from './notes.js';
 
+// Required: 6 methods + auth lifecycle.
 export default {
-  // Required
-  listProjects: NOT_PORTED('listProjects'),
-  listTasksInProject: NOT_PORTED('listTasksInProject'),
-  getTask: NOT_PORTED('getTask'),
-  createTask: NOT_PORTED('createTask'),
-  updateTask: NOT_PORTED('updateTask'),
+  // --- Storage ---
+  listProjects: () => projects.list(),
+
+  listTasksInProject: async (projectId) => {
+    const list = await tasks.list(projectId);
+    return list.map((t) => ({
+      id: t.fullId || t.id,
+      title: t.title,
+      content: t.content || '',
+      projectId,
+      tags: t.tags || [],
+      dueDate: t.dueDate,
+      modifiedTime: t.modifiedTime || new Date().toISOString(),
+    }));
+  },
+
+  getTask: async (projectId, taskId) => {
+    const t = await tasks.get(projectId, taskId);
+    return {
+      id: t.fullId,
+      title: t.title,
+      content: t.content || '',
+      projectId: t.fullProjectId || projectId,
+      tags: t.tags || [],
+      dueDate: t.dueDate,
+      modifiedTime: t.modifiedTime || new Date().toISOString(),
+      raw: t,
+    };
+  },
+
+  createTask: async (input) => {
+    const r = await tasks.create(input.projectId || '', input.title, {
+      content: input.content,
+      tags: input.tags,
+      dueDate: input.dueDate,
+    });
+    return r.task;
+  },
+
+  updateTask: async (projectId, taskId, patch) =>
+    (await tasks.update(projectId, taskId, patch)).task,
+
   urlFor: ({ projectId, taskId }) =>
     `https://ticktick.com/webapp/#p/${projectId}/tasks/${taskId}`,
 
-  // Auth
-  authStatus: NOT_PORTED('authStatus'),
-  authLogin: NOT_PORTED('authLogin'),
-  authExchange: NOT_PORTED('authExchange'),
+  // --- Optional ---
+  searchByQuery: async (query) => (await tasks.search(query)).tasks,
 
-  // Optional — left undefined so Core falls back to its own logic.
-  // bulkFetch: ...
-  // embeddings: ...
+  // --- Auth ---
+  authStatus: () => auth.status(),
+  authLogin: () => auth.login(),
+  authExchange: (code) => auth.exchange(code),
+
+  // --- Adapter-specific extensions (used by CLI commands that delegate) ---
+  __ext: {
+    auth,
+    projects,
+    tasks,
+    notes,
+  },
 };

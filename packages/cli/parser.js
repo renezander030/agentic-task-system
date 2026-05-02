@@ -1,0 +1,520 @@
+/**
+ * TickTick CLI - Argument parsing and output formatting
+ */
+
+import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Parse command-line arguments
+ * @param {string[]} args - process.argv.slice(2)
+ * @returns {{ command: string, subcommand: string, positional: string[], options: object }}
+ */
+export function parseArgs(args) {
+  const result = {
+    command: null,
+    subcommand: null,
+    positional: [],
+    options: {
+      format: 'text',
+      help: false,
+      version: false,
+    },
+  };
+
+  let i = 0;
+  while (i < args.length) {
+    const arg = args[i];
+
+    if (arg === '--help' || arg === '-h') {
+      result.options.help = true;
+    } else if (arg === '--version' || arg === '-v') {
+      result.options.version = true;
+    } else if (arg === '--format' && args[i + 1]) {
+      result.options.format = args[++i];
+    } else if (arg.startsWith('--') && args[i + 1] && !args[i + 1].startsWith('-')) {
+      // Generic option with value
+      const key = arg.slice(2);
+      result.options[key] = args[++i];
+    } else if (arg.startsWith('--')) {
+      // Boolean flag
+      const key = arg.slice(2);
+      result.options[key] = true;
+    } else if (!result.command) {
+      result.command = arg;
+    } else if (!result.subcommand) {
+      result.subcommand = arg;
+    } else {
+      result.positional.push(arg);
+    }
+
+    i++;
+  }
+
+  return result;
+}
+
+/**
+ * Format output based on format option
+ * @param {any} data - Data to format
+ * @param {string} format - 'json' or 'text'
+ * @returns {string}
+ */
+export function formatOutput(data, format = 'json') {
+  if (format === 'json') {
+    return JSON.stringify(data, null, 2);
+  }
+
+  // Text format - simple table-like output
+  if (Array.isArray(data)) {
+    return formatArray(data);
+  }
+
+  if (typeof data === 'object' && data !== null) {
+    return formatObject(data);
+  }
+
+  return String(data);
+}
+
+/**
+ * Format array as text table
+ */
+function formatArray(arr) {
+  if (arr.length === 0) {
+    return '(no items)';
+  }
+
+  // Check if this is a task list or project list
+  const first = arr[0];
+  if (typeof first !== 'object' || first === null) {
+    return arr.map((item, i) => `${i + 1}. ${item}`).join('\n');
+  }
+
+  // Format as table
+  const lines = [];
+
+  // Detect type and format accordingly
+  if ('title' in first) {
+    // Task list
+    lines.push('ID       | Title                          | Due        | Pri    | Tags');
+    lines.push('-'.repeat(80));
+    for (const item of arr) {
+      const id = (item.id || '').padEnd(8);
+      const title = truncate(item.title || '', 30).padEnd(30);
+      const due = (item.dueDate ? item.dueDate.slice(0, 10) : '').padEnd(10);
+      const pri = (item.priority || 'none').padEnd(6);
+      const tags = (item.tags || []).join(', ');
+      lines.push(`${id} | ${title} | ${due} | ${pri} | ${tags}`);
+    }
+  } else if ('name' in first) {
+    // Project list
+    lines.push('ID       | Name                           | Color');
+    lines.push('-'.repeat(55));
+    for (const item of arr) {
+      const id = (item.id || '').padEnd(8);
+      const name = truncate(item.name || '', 30).padEnd(30);
+      const color = item.color || '';
+      lines.push(`${id} | ${name} | ${color}`);
+    }
+  } else {
+    // Generic object list
+    for (const item of arr) {
+      lines.push(formatObject(item));
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Format object as key-value pairs
+ */
+function formatObject(obj) {
+  const lines = [];
+
+  // Handle nested task/project in result objects
+  if (obj.task && typeof obj.task === 'object') {
+    if (obj.success) lines.push('Success!');
+    lines.push('');
+    lines.push(formatTaskDetail(obj.task));
+    return lines.join('\n');
+  }
+
+  if (obj.project && typeof obj.project === 'object') {
+    if (obj.success) lines.push('Success!');
+    lines.push('');
+    lines.push(formatProjectDetail(obj.project));
+    if (obj.tasks) {
+      lines.push('');
+      lines.push(`Tasks (${obj.taskCount}):`);
+      lines.push(formatArray(obj.tasks));
+    }
+    return lines.join('\n');
+  }
+
+  // Handle semantic search results
+  if (obj.tasks && Array.isArray(obj.tasks) && obj.mode) {
+    lines.push(`Search: "${obj.query}" (${obj.mode})`);
+    if (obj.reason) lines.push(`Fallback reason: ${obj.reason}`);
+    lines.push(`Found: ${obj.count} tasks`);
+    lines.push('');
+    if (obj.mode === 'semantic' && obj.tasks.length > 0) {
+      lines.push(formatScoredResults(obj.tasks));
+    } else {
+      lines.push(formatArray(obj.tasks));
+    }
+    return lines.join('\n');
+  }
+
+  // Handle similar tasks results
+  if (obj.source && obj.similar) {
+    lines.push(`Similar to: "${obj.source.title}" (${obj.source.id})`);
+    lines.push(`Found: ${obj.similar.length} similar tasks`);
+    lines.push('');
+    if (obj.similar.length > 0) {
+      lines.push(formatScoredResults(obj.similar));
+    }
+    return lines.join('\n');
+  }
+
+  // Handle search/due/priority results
+  if (obj.tasks && Array.isArray(obj.tasks)) {
+    if (obj.keyword !== undefined) lines.push(`Search: "${obj.keyword}"`);
+    if (obj.days !== undefined) lines.push(`Due within: ${obj.days} days`);
+    lines.push(`Found: ${obj.count} tasks`);
+    lines.push('');
+    lines.push(formatArray(obj.tasks));
+    return lines.join('\n');
+  }
+
+  // Handle task detail
+  if ('title' in obj && 'fullId' in obj) {
+    return formatTaskDetail(obj);
+  }
+
+  // Handle auth status
+  if ('authenticated' in obj) {
+    return formatAuthStatus(obj);
+  }
+
+  // Generic key-value format
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === null || value === undefined) continue;
+    if (key === 'fullId' || key === 'fullProjectId') continue; // Skip full IDs in text mode
+    if (Array.isArray(value)) {
+      if (value.length === 0) continue;
+      lines.push(`${formatKey(key)}: ${value.join(', ')}`);
+    } else if (typeof value === 'object') {
+      lines.push(`${formatKey(key)}:`);
+      lines.push(indent(formatObject(value), 2));
+    } else {
+      lines.push(`${formatKey(key)}: ${value}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Format a task detail view
+ */
+function formatTaskDetail(task) {
+  const lines = [];
+  lines.push(`Title: ${task.title}`);
+  lines.push(`ID: ${task.id}${task.fullId ? ` (${task.fullId})` : ''}`);
+  if (task.projectId) lines.push(`Project: ${task.projectId}`);
+  if (task.content) lines.push(`Description: ${task.content}`);
+  if (task.dueDate) lines.push(`Due: ${task.dueDate}`);
+  lines.push(`Priority: ${task.priority || 'none'}`);
+  if (task.tags?.length) lines.push(`Tags: ${task.tags.join(', ')}`);
+  if (task.status) lines.push(`Status: ${task.status}`);
+  if (task.createdTime) lines.push(`Created: ${task.createdTime}`);
+  if (task.modifiedTime) lines.push(`Modified: ${task.modifiedTime}`);
+  return lines.join('\n');
+}
+
+/**
+ * Format a project detail view
+ */
+function formatProjectDetail(project) {
+  const lines = [];
+  lines.push(`Name: ${project.name}`);
+  lines.push(`ID: ${project.id}${project.fullId ? ` (${project.fullId})` : ''}`);
+  if (project.color) lines.push(`Color: ${project.color}`);
+  if (project.viewMode) lines.push(`View: ${project.viewMode}`);
+  return lines.join('\n');
+}
+
+/**
+ * Format auth status
+ */
+function formatAuthStatus(status) {
+  if (!status.authenticated) {
+    return `Not authenticated\n${status.message || ''}`;
+  }
+  const lines = ['Authenticated'];
+  if (status.expired) lines.push('Token: EXPIRED');
+  else lines.push(`Token: valid (expires ${status.expiresIn})`);
+  if (status.tokenPath) lines.push(`Config: ${status.tokenPath}`);
+  return lines.join('\n');
+}
+
+/**
+ * Format search results that include relevance scores
+ */
+function formatScoredResults(results) {
+  const lines = [];
+  lines.push('Score | Title                          | Project              | Pri    | Due');
+  lines.push('-'.repeat(90));
+  for (const r of results) {
+    const score = String(r.score).padEnd(5);
+    const title = truncate(r.title || '', 30).padEnd(30);
+    const project = truncate(r.project || '', 20).padEnd(20);
+    const pri = (r.priority || 'none').padEnd(6);
+    const due = r.dueDate ? r.dueDate.slice(0, 10) : '';
+    lines.push(`${score} | ${title} | ${project} | ${pri} | ${due}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Truncate string to max length
+ */
+function truncate(str, maxLen) {
+  if (str.length <= maxLen) return str;
+  return str.slice(0, maxLen - 1) + '…';
+}
+
+/**
+ * Format key name (camelCase to Title Case)
+ */
+function formatKey(key) {
+  return key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase());
+}
+
+/**
+ * Indent text
+ */
+function indent(text, spaces) {
+  const pad = ' '.repeat(spaces);
+  return text.split('\n').map((line) => pad + line).join('\n');
+}
+
+/**
+ * Get package version
+ */
+export async function getVersion() {
+  try {
+    const pkgPath = join(__dirname, '..', 'package.json');
+    const content = await readFile(pkgPath, 'utf-8');
+    const pkg = JSON.parse(content);
+    return pkg.version;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Generate main help text
+ */
+export function getMainHelp() {
+  return `TickTick CLI - Manage tasks and projects
+
+Usage: ticktick <command> [options]
+
+Commands:
+  setup      Interactive setup wizard (start here!)
+  auth       Authentication management
+  projects   Project operations
+  tasks      Task operations
+  notes      Note operations (Permanent Notes wiki)
+
+Global options:
+  --help, -h        Show help
+  --version, -v     Show version
+  --format <type>   Output format: text (default) or json
+
+Run 'ticktick <command> --help' for command-specific help.
+
+Quick start:
+  ticktick setup                              # First-time setup
+  ticktick tasks create "Buy groceries"       # Create a task
+  ticktick tasks due                          # See tasks due soon`;
+}
+
+/**
+ * Generate auth command help
+ */
+export function getAuthHelp() {
+  return `ticktick auth - Authentication management
+
+Usage: ticktick auth <subcommand>
+
+Subcommands:
+  status     Check authentication status
+  login      Get authorization URL for OAuth flow
+  exchange   Exchange authorization code for tokens
+  refresh    Manually refresh access token
+  logout     Clear stored tokens
+
+Examples:
+  ticktick auth status
+  ticktick auth login
+  ticktick auth exchange AUTH_CODE`;
+}
+
+/**
+ * Generate projects command help
+ */
+export function getProjectsHelp() {
+  return `ticktick projects - Project operations
+
+Usage: ticktick projects <subcommand> [options]
+
+Subcommands:
+  list                   List all projects
+  get <project_id>       Get project with tasks
+  create <name>          Create new project
+  delete <project_id>    Delete project
+
+Create options:
+  --color <hex>          Project color (e.g., "#ff6b6b")
+  --view <mode>          View mode: list, kanban, or timeline
+
+Examples:
+  ticktick projects list
+  ticktick projects get PROJECT_ID
+  ticktick projects create "My Project" --color "#ff6b6b"`;
+}
+
+/**
+ * Generate notes command help
+ */
+export function getNotesHelp() {
+  return `ticktick notes - Note operations (Permanent Notes wiki)
+
+Notes are tasks living in a designated project (default: "Permanent Notes").
+This wraps them as a wiki layer with two roles:
+  - Reference notes: human-readable markdown prose.
+  - Agent-data notes: a fenced \`\`\`json or \`\`\`yaml block embedded in the
+    note body. Extracted via --extract for piping to scripts/agents.
+
+Cross-references use TickTick's native deep-link markdown form:
+  [Display Title](https://ticktick.com/webapp/#p/<projectId>/tasks/<taskId>)
+'notes links' extracts these from any task body and resolves them.
+
+Usage: ticktick notes <subcommand> [options]
+
+Subcommands:
+  find <query>                          Search note titles (fuzzy match)
+  get <id-or-title>                     Get note (default: structured object)
+  url <id-or-title>                     Emit a markdown link to the note,
+                                        ready to paste into a task body
+  links <src_project_id> <src_task_id>  Resolve TT deep-link refs in a task body
+
+Common options:
+  --project <name-or-id>   Override notes project (default "Permanent Notes")
+
+find options:
+  --limit <n>              Max results (default 10)
+
+get options:
+  --extract <raw|json|yaml>  Extract from note body:
+                             raw  → markdown content as a string
+                             json → parse first \`\`\`json block (object/array)
+                             yaml → first \`\`\`yaml block as string
+                             omit → full structured note object
+  --exact                  Require exact-title match (no fuzzy)
+
+Examples:
+  ticktick notes find "deployment runbook"
+  ticktick notes get "Trunk Catalog" --extract json | jq '.trunks[].name'
+  ticktick notes get abc123 --extract raw
+  ticktick notes url "Parallel Agent Work"          # paste-ready markdown link
+  ticktick notes url "ffmpeg" --display "see ffmpeg cheatsheet"
+  ticktick notes links INBOX EXAMPLE_TASK_ID
+  ticktick notes find "config" --project "Agent Data"`;
+}
+
+/**
+ * Generate tasks command help
+ */
+export function getTasksHelp() {
+  return `ticktick tasks - Task operations
+
+Usage: ticktick tasks <subcommand> [options]
+
+Subcommands:
+  list <project_id>                List tasks in project
+  get <project_id> <task_id>       Get task details
+  create <title>                   Create task (in default project)
+  create <project_id> <title>      Create task (in specific project)
+  update <project_id> <task_id>    Update task
+  complete <project_id> <task_id>  Complete task
+  delete <project_id> <task_id>    Delete task
+  search <keyword>                 Search all tasks (keyword match)
+  semantic <query>                 Semantic search (vector similarity)
+  hybrid <query>                   Hybrid retrieval — semantic + keyword fusion (RRF)
+  find <query>                     Time-bounded parallel retrieval — fans out
+                                   hybrid + keyword + notes_find concurrently,
+                                   merges via RRF. Best for "max accurate info
+                                   per unit time" agent flows.
+  similar <task_id>                Find semantically similar tasks
+  due [days]                       Tasks due within N days (default: 7)
+  priority                         High priority tasks
+  completed                        List completed tasks in a date range
+  vector-sync                      Sync tasks into vector index
+  vector-status                    Check vector index health
+
+Create/Update options:
+  --project <id>         Project ID (for create, optional)
+  --content <text>       Task description
+  --due <date>           Due date (ISO 8601 or YYYY-MM-DD)
+  --priority <level>     Priority: none, low, medium, high
+  --tags <tags>          Comma-separated tags
+  --reminder <time>      Reminder: 15m, 1h, 1d (before due)
+  --title <text>         New title (update only)
+  --relevance            (create) Append a Relevance Rule instruction block
+                         after the result so the active Claude session can
+                         decide a trunk and follow up with 'tasks update'.
+                         Same effect as TICKTICK_RELEVANCE=on env var.
+
+Search options:
+  --tags <tags>          Filter by tags (comma-separated)
+  --priority <level>     Filter by priority
+
+Completed/Due options:
+  --folder <groupId>     Filter by project folder (groupId)
+
+Completed options:
+  --from <date>          Start of date range (ISO 8601)
+  --to <date>            End of date range (ISO 8601)
+  --projects <ids>       Comma-separated project IDs to filter
+
+Semantic search options:
+  --limit <n>            Max results (default: 5)
+  --priority <level>     Filter by priority
+
+Vector sync options:
+  --full                 Re-embed all tasks (default: incremental)
+  --max <n>              Max embeddings per run (default: 200)
+
+Examples:
+  ticktick tasks create "Buy groceries" --due 2026-01-30 --priority high
+  ticktick tasks create "Call mom" --tags "personal,family"
+  ticktick tasks create PROJECT_ID "Task in specific project"
+  ticktick tasks list PROJECT_ID
+  ticktick tasks complete PROJECT_ID TASK_ID
+  ticktick tasks search "meeting"
+  ticktick tasks search --tags "work"
+  ticktick tasks semantic "tasks related to deployment"
+  ticktick tasks similar TASK_ID --limit 3
+  ticktick tasks vector-sync
+  ticktick tasks due 3
+  ticktick tasks completed --from 2026-03-06T00:00:00.000+0000 --to 2026-03-06T23:59:59.000+0000
+  ticktick tasks completed --projects PROJECT_ID1,PROJECT_ID2`;
+}

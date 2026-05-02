@@ -1,0 +1,130 @@
+/**
+ * TickTick CLI - Project operations
+ */
+
+import * as coreFunctions from './api.js';
+
+/**
+ * List all projects
+ * @returns {Promise<object[]>}
+ */
+export async function list(deps = {}) {
+  const { apiRequest = coreFunctions.apiRequest, shortId = coreFunctions.shortId } = deps;
+  const projects = await apiRequest('GET', '/project', undefined, deps);
+  return projects.map((p) => ({
+    id: shortId(p.id),
+    fullId: p.id,
+    name: p.name,
+    color: p.color,
+    viewMode: p.viewMode,
+    kind: p.kind,
+    closed: p.closed,
+    groupId: p.groupId,
+  }));
+}
+
+/**
+ * Get project with tasks
+ * @param {string} projectId - Project ID
+ * @returns {Promise<object>}
+ */
+export async function get(projectId, deps = {}) {
+  const {
+    apiRequest = coreFunctions.apiRequest,
+    shortId = coreFunctions.shortId,
+    formatPriority = coreFunctions.formatPriority,
+  } = deps;
+  const resolvedId = await resolveProjectId(projectId, deps);
+  const data = await apiRequest(
+    'GET',
+    `/project/${encodeURIComponent(resolvedId)}/data`,
+    undefined,
+    deps
+  );
+  return {
+    project: {
+      id: shortId(data.project.id),
+      fullId: data.project.id,
+      name: data.project.name,
+      color: data.project.color,
+      viewMode: data.project.viewMode,
+    },
+    tasks: data.tasks.map((t) => ({
+      id: shortId(t.id),
+      fullId: t.id,
+      title: t.title,
+      content: t.content,
+      dueDate: t.dueDate,
+      priority: formatPriority(t.priority),
+      tags: t.tags || [],
+      status: t.status === 2 ? 'completed' : 'active',
+      completedTime: t.completedTime,
+    })),
+    taskCount: data.tasks.length,
+  };
+}
+
+/**
+ * Create a new project
+ * @param {string} name - Project name
+ * @param {object} options - Optional settings
+ * @param {string} options.color - Project color
+ * @param {string} options.viewMode - View mode
+ * @returns {Promise<object>}
+ */
+export async function create(name, options = {}, deps = {}) {
+  const { apiRequest = coreFunctions.apiRequest, shortId = coreFunctions.shortId } = deps;
+  const input = { name };
+  if (options.color) input.color = options.color;
+  if (options.viewMode) input.viewMode = options.viewMode;
+
+  const project = await apiRequest('POST', '/project', input, deps);
+  return {
+    success: true,
+    project: {
+      id: shortId(project.id),
+      fullId: project.id,
+      name: project.name,
+      color: project.color,
+      viewMode: project.viewMode,
+    },
+  };
+}
+
+/**
+ * Delete a project
+ * @param {string} projectId - Project ID
+ * @returns {Promise<object>}
+ */
+export async function remove(projectId, deps = {}) {
+  const { apiRequest = coreFunctions.apiRequest, shortId = coreFunctions.shortId } = deps;
+  const resolvedId = await resolveProjectId(projectId, deps);
+  await apiRequest('DELETE', `/project/${encodeURIComponent(resolvedId)}`, undefined, deps);
+  return {
+    success: true,
+    message: `Project ${shortId(resolvedId)} deleted`,
+  };
+}
+
+/**
+ * Resolve a project ID (handles short IDs)
+ * @param {string} projectId - Project ID or short ID
+ * @returns {Promise<string>} - Full project ID
+ */
+async function resolveProjectId(projectId, deps = {}) {
+  const { apiRequest = coreFunctions.apiRequest, isShortId = coreFunctions.isShortId } = deps;
+  // If it looks like a full ID, return as-is
+  if (!isShortId(projectId)) {
+    return projectId;
+  }
+
+  // Try to find matching project
+  const projects = await apiRequest('GET', '/project', undefined, deps);
+  const match = projects.find((p) => p.id.startsWith(projectId));
+  if (match) {
+    return match.id;
+  }
+
+  // Return as-is if no match (let API handle the error)
+  return projectId;
+}
