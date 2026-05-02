@@ -53,8 +53,8 @@ Same project, fenced JSON or YAML in the body:
 ```json
 {
   "trunks": [
-    { "name": "bronze-age-banter", "desc": "long-form documentary pipeline" },
-    { "name": "freelance-pipeline", "desc": "Upwork / Malt / freelance.de" }
+    { "name": "release-engineering", "desc": "shipping cadence, deployment rituals, on-call rotation" },
+    { "name": "writing-projects", "desc": "drafts and edits across personal and client channels" }
   ]
 }
 ```
