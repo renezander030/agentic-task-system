@@ -1,6 +1,6 @@
 {
   "name": "@reneza/akb-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Command-line interface for Agentic Knowledge Base. Routes to the configured storage adapter and exposes find / get / url / links / hybrid / similar / create / update / bench.",
   "type": "module",
   "bin": {
@@ -9,5 +9,15 @@
   "license": "MIT",
   "dependencies": {
     "@reneza/akb-core": "^0.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renezander030/agentic-knowledge-base.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/renezander030/agentic-knowledge-base#readme",
+  "bugs": {
+    "url": "https://github.com/renezander030/agentic-knowledge-base/issues"
+  },
+  "author": "Ren\u00e9 Zander"
 }

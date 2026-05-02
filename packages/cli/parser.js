@@ -322,9 +322,9 @@ export async function getVersion() {
  * Generate main help text
  */
 export function getMainHelp() {
-  return `TickTick CLI - Manage tasks and projects
+  return `akb — Agentic Knowledge Base CLI
 
-Usage: ticktick <command> [options]
+Usage: akb <command> [options]
 
 Commands:
   setup      Interactive setup wizard (start here!)
@@ -338,10 +338,10 @@ Global options:
   --version, -v     Show version
   --format <type>   Output format: text (default) or json
 
-Run 'ticktick <command> --help' for command-specific help.
+Run 'akb <command> --help' for command-specific help.
 
 Quick start:
-  ticktick setup                              # First-time setup
+  akb config use ticktick                              # First-time setup
   ticktick tasks create "Buy groceries"       # Create a task
   ticktick tasks due                          # See tasks due soon`;
 }
