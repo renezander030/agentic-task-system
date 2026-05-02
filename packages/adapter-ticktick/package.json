@@ -1,6 +1,6 @@
 {
   "name": "@reneza/akb-adapter-ticktick",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Reference TickTick adapter for Agentic Knowledge Base. Wraps TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) into the AKB adapter contract.",
   "type": "module",
   "main": "index.js",
@@ -18,5 +18,21 @@
   "bugs": {
     "url": "https://github.com/renezander030/agentic-knowledge-base/issues"
   },
-  "author": "Ren\u00e9 Zander"
+  "author": "Ren\u00e9 Zander",
+  "keywords": [
+    "ticktick",
+    "ticktick-cli",
+    "ticktick-api",
+    "task-management-cli",
+    "note-taking-cli",
+    "tasks-as-knowledge-base",
+    "llm-wiki",
+    "knowledge-base",
+    "agentic",
+    "claude",
+    "qdrant",
+    "nomic-embed",
+    "mcp",
+    "agent-retrieval"
+  ]
 }
