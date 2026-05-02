@@ -7,9 +7,10 @@ import { readFile as readFileFs, writeFile as writeFileFs, mkdir as mkdirFs } fr
 import { existsSync as existsSyncFs } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { webcrypto as crypto } from 'node:crypto';
 
 // Config paths (XDG-compliant)
-export const CONFIG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'ticktick');
+export const CONFIG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'akb');
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 export const TOKEN_PATH = join(CONFIG_DIR, 'tokens.json');
 

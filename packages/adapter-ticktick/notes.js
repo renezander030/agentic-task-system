@@ -135,7 +135,7 @@ export async function get(idOrTitle, options = {}, deps = {}) {
   if (!idOrTitle) throw new Error('Note id or title required');
   const projectId = await resolveNotesProject(options.project, deps);
 
-  let taskId = null;
+  let taskId;
   if (FULL_ID_RE.test(idOrTitle)) {
     taskId = idOrTitle;
   } else if (SHORT_ID_RE.test(idOrTitle) && !idOrTitle.includes(' ')) {
@@ -174,7 +174,7 @@ export async function get(idOrTitle, options = {}, deps = {}) {
     try {
       return JSON.parse(m[1]);
     } catch (err) {
-      throw new Error(`Note "${task.title}": malformed JSON in fenced block: ${err.message}`);
+      throw new Error(`Note "${task.title}": malformed JSON in fenced block: ${err.message}`, { cause: err });
     }
   }
   if (options.extract === 'yaml') {
@@ -223,7 +223,7 @@ export async function url(idOrTitle, options = {}, deps = {}) {
  * @param {object} options - { project (notes project), extract }
  * @returns {Promise<{source, links}>}
  */
-export async function links(sourceProjectId, sourceTaskId, options = {}, deps = {}) {
+export async function links(sourceProjectId, sourceTaskId, _options = {}, deps = {}) {
   const { apiRequest = coreFunctions.apiRequest, shortId = coreFunctions.shortId } = deps;
   if (!sourceProjectId || !sourceTaskId) throw new Error('Source project and task IDs required');
 

@@ -1,0 +1,3 @@
+# Pre-commit gate — fail commit unless lint AND fast tests pass.
+npm run lint || { echo "✗ lint failed"; exit 1; }
+npm run test:fast || { echo "✗ fast tests failed"; exit 1; }

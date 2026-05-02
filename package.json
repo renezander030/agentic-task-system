@@ -2,16 +2,25 @@
   "name": "agentic-knowledge-base",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Karpathy-style LLM wiki framework with pluggable storage adapters",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "test": "echo workspace tests not yet wired"
+    "prepare": "husky",
+    "lint": "eslint packages",
+    "test:fast": "node --test --test-timeout=5000 packages/core/test/*.test.js",
+    "test": "npm run lint && npm run test:fast"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/<verify-before-publish: gh-handle>/agentic-knowledge-base.git"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.3.0",
+    "husky": "^9.1.7"
   }
 }
