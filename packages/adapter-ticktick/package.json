@@ -1,0 +1,12 @@
+{
+  "name": "@reneza/akb-adapter-ticktick",
+  "version": "0.1.0",
+  "description": "Reference TickTick adapter for Agentic Knowledge Base. Wraps TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) into the AKB adapter contract.",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "peerDependencies": {
+    "@reneza/akb-core": "^0.1.0"
+  },
+  "dependencies": {}
+}

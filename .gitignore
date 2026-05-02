@@ -1,0 +1,10 @@
+node_modules
+.DS_Store
+*.log
+.env
+.env.local
+
+# AKB-specific runtime caches (per-user, not for VCS)
+~/.config/akb/
+corpus-cache.json
+search-log.jsonl

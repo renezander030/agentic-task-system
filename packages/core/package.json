@@ -1,0 +1,16 @@
+{
+  "name": "@reneza/akb-core",
+  "version": "0.1.0",
+  "description": "Adapter-agnostic core for Agentic Knowledge Base — retrieval (RRF parallel fan-out), corpus cache, bench harness, usage logging, adapter interface",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./retrieval": "./retrieval.js",
+    "./corpus-cache": "./corpus-cache.js",
+    "./usage-log": "./usage-log.js",
+    "./adapter-interface": "./adapter-interface.js"
+  },
+  "license": "MIT",
+  "dependencies": {}
+}

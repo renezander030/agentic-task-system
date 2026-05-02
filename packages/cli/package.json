@@ -1,0 +1,13 @@
+{
+  "name": "@reneza/akb-cli",
+  "version": "0.1.0",
+  "description": "Command-line interface for Agentic Knowledge Base. Routes to the configured storage adapter and exposes find / get / url / links / hybrid / similar / create / update / bench.",
+  "type": "module",
+  "bin": {
+    "akb": "bin/akb.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@reneza/akb-core": "^0.1.0"
+  }
+}
