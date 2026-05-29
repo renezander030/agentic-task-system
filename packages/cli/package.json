@@ -1,14 +1,18 @@
 {
   "name": "@reneza/ats-cli",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Command-line interface for Agentic Task System. Routes to the configured storage adapter and exposes find / get / url / links / hybrid / similar / create / update / bench.",
   "type": "module",
   "bin": {
     "ats": "bin/ats.js"
   },
+  "files": [
+    "bin/",
+    "*.js"
+  ],
   "license": "MIT",
   "dependencies": {
-    "@reneza/ats-core": "^0.2.0"
+    "@reneza/ats-core": "^0.3.0"
   },
   "repository": {
     "type": "git",

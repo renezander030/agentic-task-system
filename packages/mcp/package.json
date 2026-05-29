@@ -1,0 +1,52 @@
+{
+  "name": "@reneza/ats-mcp",
+  "version": "0.3.0",
+  "description": "Model Context Protocol server for Agentic Task System — exposes the task app you already use to any MCP client, backed by hybrid + RRF retrieval. Storage-agnostic over the ATS adapter contract.",
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "ats-mcp": "server.js"
+  },
+  "exports": {
+    ".": "./server.js"
+  },
+  "files": [
+    "server.js"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@reneza/ats-core": "^0.3.0",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "@reneza/ats-adapter-ticktick": "^0.3.0"
+  },
+  "peerDependenciesMeta": {
+    "@reneza/ats-adapter-ticktick": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renezander030/agentic-task-system.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/renezander030/agentic-task-system#readme",
+  "bugs": {
+    "url": "https://github.com/renezander030/agentic-task-system/issues"
+  },
+  "author": "René Zander",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agent-memory",
+    "agent-context",
+    "context-engineering",
+    "retrieval",
+    "rrf",
+    "hybrid-search",
+    "task-management",
+    "ticktick"
+  ]
+}

@@ -6,6 +6,7 @@ import * as coreFunctions from './api.js';
 import * as vectorFunctions from './embedding.js';
 import * as usageLog from '@reneza/ats-core/usage-log';
 import * as corpusCache from '@reneza/ats-core/corpus-cache';
+import * as retrieval from '@reneza/ats-core/retrieval';
 
 /**
  * List tasks in a project
@@ -465,197 +466,97 @@ export async function priority(deps = {}) {
  */
 export async function find(query, options = {}, deps = {}) {
   const { limit = 5, budgetMs = 3000 } = options;
-  const { apiRequest = coreFunctions.apiRequest, formatPriority = coreFunctions.formatPriority } = deps;
-  const t0 = Date.now();
+  const {
+    apiRequest = coreFunctions.apiRequest,
+    formatPriority = coreFunctions.formatPriority,
+    vectorHybrid = vectorFunctions.hybrid,
+  } = deps;
 
-  // SHARED CORPUS — try cache first; refetch only when stale or missing.
-  // Cuts ~14s wall-clock to <100ms on repeat calls within TTL.
-  let corpus = corpusCache.read();
-  let corpusAgeMs = null;
-  let corpusFromCache = false;
-  if (corpus) {
-    corpusFromCache = true;
-    const cm = corpusCache.meta();
-    corpusAgeMs = cm.ageMs;
-  } else {
-    try {
-      const projects = await apiRequest('GET', '/project', undefined, deps);
-      const tasks = [];
-      for (const p of projects) {
-        try {
-          const data = await apiRequest('GET', `/project/${encodeURIComponent(p.id)}/data`, undefined, deps);
-          for (const t of data.tasks || []) {
-            tasks.push({
-              id: t.id,
-              fullId: t.id,
-              title: t.title || '',
-              content: t.content || '',
-              projectId: t.projectId,
-              fullProjectId: t.projectId,
-              projectName: p.name,
-              priority: formatPriority(t.priority),
-              tags: t.tags || [],
-              dueDate: t.dueDate,
-            });
-          }
-        } catch {
-          // skip projects that fail individually
-        }
-      }
-      corpus = tasks;
-      corpusCache.write(corpus);
-    } catch (err) {
-      return {
-        query,
-        mode: 'find-failed',
-        error: `corpus prefetch failed: ${err.message}`,
-        count: 0,
-        elapsedMs: Date.now() - t0,
-        branches: [],
-        tasks: [],
-      };
+  // TickTick-specific corpus loader: prefetch every project's tasks, TTL-cached.
+  // Cuts ~14s wall-clock to <100ms on repeat calls within TTL. Core's generic
+  // loadCorpus() would also work, but this preserves the exact TickTick shape
+  // (id === fullId, fullProjectId, projectName) the branches below rely on.
+  const loadCorpus = async () => {
+    const cached = corpusCache.read();
+    if (cached) {
+      const m = corpusCache.meta();
+      return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null };
     }
-  }
-
-  // Branches now operate on the shared corpus — pure CPU work, no API I/O.
-  const branches = [
-    {
-      name: 'hybrid',
-      run: async () => {
-        const r = await vectorFunctions.hybrid(query, {
-          limit: 20,
-          fetchTasksForKeyword: async () => corpus,
-        });
-        return r.map((t) => ({
-          id: t.id,
-          fullId: t.id,
-          title: t.title,
-          projectId: t.projectId,
-          projectName: t.project,
-        }));
-      },
-    },
-    {
-      name: 'keyword',
-      run: async () => {
-        const lower = (query || '').toLowerCase();
-        const matches = corpus.filter((t) =>
-          t.title.toLowerCase().includes(lower) ||
-          t.content.toLowerCase().includes(lower)
-        );
-        return matches.slice(0, 20).map((t) => ({
-          id: t.fullId,
-          fullId: t.fullId,
-          title: t.title,
-          projectId: t.fullProjectId,
-          projectName: t.projectName,
-        }));
-      },
-    },
-    {
-      name: 'notes_find',
-      run: async () => {
-        // Token-aware match restricted to Permanent Notes project.
-        const PERM_NOTES = 'YOUR_NOTES_PROJECT_ID';
-        const candidates = corpus.filter((t) => t.fullProjectId === PERM_NOTES);
-        const q = (query || '').toLowerCase();
-        const scored = candidates
-          .map((t) => {
-            const title = (t.title || '').toLowerCase();
-            let score = 0;
-            if (title === q) score = 100;
-            else if (title.startsWith(q)) score = 60;
-            else if (title.includes(q)) score = 30;
-            else {
-              const words = q.split(/\s+/).filter((w) => w.length >= 3);
-              if (words.length > 1 && words.every((w) => title.includes(w))) score = 15;
-            }
-            return { t, score };
-          })
-          .filter((r) => r.score > 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 20);
-        return scored.map(({ t }) => ({
-          id: t.fullId,
-          fullId: t.fullId,
-          title: t.title,
-          projectId: t.fullProjectId,
-        }));
-      },
-    },
-  ];
-
-  // Per-branch deadline. We use shared budgetMs; each branch races against it.
-  const withDeadline = (p, ms) =>
-    Promise.race([
-      p.then((value) => ({ ok: true, value })).catch((err) => ({ ok: false, error: err.message })),
-      new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: `timeout ${ms}ms` }), ms)),
-    ]);
-
-  const settled = await Promise.all(
-    branches.map(async (b) => {
-      const start = Date.now();
-      const r = await withDeadline(b.run(), budgetMs);
-      return { name: b.name, ok: r.ok, value: r.value || [], error: r.error, elapsedMs: Date.now() - start };
-    })
-  );
-
-  // RRF fusion. k=60 is the canonical default.
-  const RRF_K = 60;
-  const fused = new Map(); // id -> { score, doc, sources }
-  for (const branch of settled) {
-    if (!branch.ok) continue;
-    branch.value.forEach((doc, i) => {
-      const id = doc.id;
-      if (!id) return;
-      const rank = i + 1;
-      const contribution = 1 / (RRF_K + rank);
-      const cur = fused.get(id);
-      if (cur) {
-        cur.score += contribution;
-        cur.sources.push(branch.name);
-        // Prefer the doc with more populated fields.
-        if (!cur.doc.title && doc.title) cur.doc = { ...cur.doc, ...doc };
-      } else {
-        fused.set(id, { score: contribution, doc, sources: [branch.name] });
+    const projects = await apiRequest('GET', '/project', undefined, deps);
+    const tasks = [];
+    for (const p of projects) {
+      try {
+        const data = await apiRequest('GET', `/project/${encodeURIComponent(p.id)}/data`, undefined, deps);
+        for (const t of data.tasks || []) {
+          tasks.push({
+            id: t.id,
+            fullId: t.id,
+            title: t.title || '',
+            content: t.content || '',
+            projectId: t.projectId,
+            fullProjectId: t.projectId,
+            projectName: p.name,
+            priority: formatPriority(t.priority),
+            tags: t.tags || [],
+            dueDate: t.dueDate,
+          });
+        }
+      } catch {
+        // skip projects that fail individually
       }
-    });
-  }
-
-  const tasks = [...fused.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map((entry) => ({
-      ...entry.doc,
-      rrf: Math.round(entry.score * 10000) / 10000,
-      sources: entry.sources,
-    }));
-
-  const branchSummary = settled.map((b) => ({
-    name: b.name,
-    ok: b.ok,
-    count: b.value.length,
-    elapsedMs: b.elapsedMs,
-    error: b.error || undefined,
-  }));
-
-  usageLog.record({
-    tool: 'find',
-    query,
-    resultCount: tasks.length,
-    topId: tasks[0]?.id || null,
-    meta: { budgetMs, branches: branchSummary },
-  });
-
-  return {
-    query,
-    mode: 'find',
-    count: tasks.length,
-    elapsedMs: Date.now() - t0,
-    corpus: { fromCache: corpusFromCache, ageMs: corpusAgeMs, size: corpus.length },
-    branches: branchSummary,
-    tasks,
+    }
+    corpusCache.write(tasks);
+    return { corpus: tasks, fromCache: false, ageMs: null };
   };
+
+  // TickTick-specific retriever: token-aware match restricted to the wiki/notes
+  // project (default "Permanent Notes"). Matched by decoration-stripped NAME so
+  // it works for any user's vault — never a hardcoded project ID. This is the
+  // kind of store-specific branch core can't know about — injected.
+  const notesProjectName = options.notesProject || 'Permanent Notes';
+  const stripDecorations = (s) =>
+    (s || '').normalize('NFKC').replace(/^[^\p{L}\p{N}]+/u, '').trim().toLowerCase();
+  const notesTarget = stripDecorations(notesProjectName);
+  const notesFind = {
+    name: 'notes_find',
+    run: async (q, corpus) => {
+      const candidates = corpus.filter((t) => stripDecorations(t.projectName) === notesTarget);
+      const ql = (q || '').toLowerCase();
+      return candidates
+        .map((t) => {
+          const title = (t.title || '').toLowerCase();
+          let score = 0;
+          if (title === ql) score = 100;
+          else if (title.startsWith(ql)) score = 60;
+          else if (title.includes(ql)) score = 30;
+          else {
+            const words = ql.split(/\s+/).filter((w) => w.length >= 3);
+            if (words.length > 1 && words.every((w) => title.includes(w))) score = 15;
+          }
+          return { t, score };
+        })
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20)
+        .map(({ t }) => ({
+          id: t.fullId,
+          fullId: t.fullId,
+          title: t.title,
+          projectId: t.fullProjectId,
+        }));
+    },
+  };
+
+  // Delegate the fan-out + RRF fusion to core. The branches are:
+  //   hybrid (dense+sparse via the embedder) | keyword (core built-in) | notes_find
+  return retrieval.find(query, {
+    limit,
+    budgetMs,
+    embedder: { hybrid: vectorHybrid },
+    retrievers: [notesFind],
+    loadCorpus,
+    log: usageLog.record,
+  });
 }
 
 export async function hybridSearch(query, options = {}, deps = {}) {
@@ -769,11 +670,12 @@ export async function semanticSearch(query, options = {}, deps = {}) {
  * @returns {Promise<object>}
  */
 export async function findSimilar(taskId, options = {}, deps = {}) {
-  const {
-    vectorFindSimilar = vectorFunctions.findSimilar,
-  } = deps;
+  const { vectorFindSimilar = vectorFunctions.findSimilar } = deps;
   const resolvedTaskId = await resolveTaskId(taskId, null, deps);
-  return await vectorFindSimilar(resolvedTaskId, options);
+  return retrieval.similar(resolvedTaskId, {
+    embedder: { findSimilar: vectorFindSimilar },
+    limit: options.limit ?? 5,
+  });
 }
 
 /**

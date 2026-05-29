@@ -1,6 +1,6 @@
 {
   "name": "agentic-task-system",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Your task manager is the best agent memory you're not using. Agent-native context layer over your existing task app, with hybrid retrieval (RRF) and pluggable storage adapters.",
@@ -10,7 +10,7 @@
   "scripts": {
     "prepare": "husky",
     "lint": "eslint packages",
-    "test:fast": "node --test --test-timeout=5000 packages/core/test/*.test.js",
+    "test:fast": "node --test --test-timeout=10000 packages/core/test/*.test.js packages/mcp/test/*.test.js packages/cli/test/*.test.js",
     "test": "npm run lint && npm run test:fast"
   },
   "license": "MIT",

@@ -13,8 +13,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseArgs, formatOutput, getMainHelp, getNotesHelp, getTasksHelp, getAuthHelp, getProjectsHelp } from '../parser.js';
-import { validateAdapter } from '@reneza/ats-core';
+import { pathToFileURL } from 'node:url';
+import { parseArgs, formatOutput, getMainHelp, getNotesHelp, getTasksHelp, getAuthHelp, getProjectsHelp, getAdapterHelp } from '../parser.js';
+import { validateAdapter, runConformance, formatConformance } from '@reneza/ats-core';
+import { scaffoldAdapter } from '../scaffold.js';
+import { runDoctor, formatDoctor } from '../doctor.js';
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -26,16 +29,41 @@ function atsConfigDir() {
   return (!fs.existsSync(cur) && fs.existsSync(legacy)) ? legacy : cur;
 }
 
-async function loadAdapter() {
-  const fromEnv = process.env.ATS_ADAPTER;
+// Resolve which adapter package is active and where that choice came from.
+function resolveAdapterPkg() {
   const configPath = path.join(atsConfigDir(), 'adapter');
-  let pkg = fromEnv;
-  if (!pkg && fs.existsSync(configPath)) {
-    pkg = fs.readFileSync(configPath, 'utf8').trim();
+  if (process.env.ATS_ADAPTER) return { pkg: process.env.ATS_ADAPTER, origin: 'ATS_ADAPTER env', configPath };
+  if (fs.existsSync(configPath)) {
+    const pkg = fs.readFileSync(configPath, 'utf8').trim();
+    if (pkg) return { pkg, origin: configPath, configPath };
   }
-  if (!pkg) pkg = '@reneza/ats-adapter-ticktick';
+  return { pkg: '@reneza/ats-adapter-ticktick', origin: 'built-in default', configPath };
+}
+
+async function loadAdapter() {
+  const { pkg } = resolveAdapterPkg();
   const mod = await import(pkg);
   return validateAdapter(mod.default || mod);
+}
+
+// Import an arbitrary adapter target (package name OR a local path/dir) for
+// `ats adapter test`. Directories resolve via their package.json "main".
+async function importAdapterTarget(target) {
+  const looksLikePath = target.startsWith('.') || target.startsWith('/') || fs.existsSync(target);
+  let specifier = target;
+  if (looksLikePath) {
+    let abs = path.resolve(target);
+    if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+      const pkgJson = path.join(abs, 'package.json');
+      const main = fs.existsSync(pkgJson)
+        ? JSON.parse(fs.readFileSync(pkgJson, 'utf8')).main || 'index.js'
+        : 'index.js';
+      abs = path.join(abs, main);
+    }
+    specifier = pathToFileURL(abs).href;
+  }
+  const mod = await import(specifier);
+  return mod.default || mod;
 }
 
 async function main() {
@@ -49,12 +77,32 @@ async function main() {
       console.log(getMainHelp());
       return;
     }
+    // `ats <command> --help` → that command's help.
+    if (args.options.help) {
+      console.log(helpFor(args.command));
+      return;
+    }
 
     let result;
     switch (args.command) {
+      case 'help':
+        console.log(helpFor(args.subcommand));
+        return;
+      case 'completion':
+        printCompletion(args.subcommand || args.positional[0]);
+        return;
+      case 'init':
+        await handleInit();
+        return;
       case 'config':
         result = await handleConfig();
         break;
+      case 'doctor':
+        await handleDoctor();
+        return;
+      case 'adapter':
+        await handleAdapter();
+        return;
       case 'auth':
         result = await handleAuth();
         break;
@@ -121,6 +169,146 @@ async function handleConfig() {
   }
   console.error('Usage: ats config use <adapter-name|@scope/ats-adapter-name>');
   process.exit(1);
+}
+
+// Map a command name to its help text.
+function helpFor(command) {
+  switch (command) {
+    case 'auth': return getAuthHelp();
+    case 'projects': return getProjectsHelp();
+    case 'tasks': return getTasksHelp();
+    case 'notes': return getNotesHelp();
+    case 'adapter': return getAdapterHelp();
+    default: return getMainHelp();
+  }
+}
+
+const COMPLETION_COMMANDS = [
+  'find', 'get', 'doctor', 'adapter', 'init', 'config', 'auth',
+  'projects', 'tasks', 'notes', 'help', 'completion',
+];
+
+// Emit a shell completion script for the given shell. Built from single-quoted
+// lines (no template interpolation) so shell '$' tokens pass through verbatim.
+function printCompletion(shell) {
+  const cmds = COMPLETION_COMMANDS.join(' ');
+  const scripts = {
+    bash: [
+      '# ats bash completion — add to ~/.bashrc:  source <(ats completion bash)',
+      '_ats_complete() {',
+      '  local cur="${COMP_WORDS[COMP_CWORD]}"',
+      '  if [ "$COMP_CWORD" -eq 1 ]; then',
+      '    COMPREPLY=( $(compgen -W "' + cmds + '" -- "$cur") )',
+      '  fi',
+      '}',
+      'complete -F _ats_complete ats',
+    ],
+    zsh: [
+      '# ats zsh completion — add to ~/.zshrc:  source <(ats completion zsh)',
+      '_ats() {',
+      '  local -a cmds',
+      '  cmds=(' + cmds + ')',
+      '  if (( CURRENT == 2 )); then',
+      '    compadd -- ${cmds}',
+      '  fi',
+      '}',
+      'compdef _ats ats',
+    ],
+    fish: [
+      '# ats fish completion — save to ~/.config/fish/completions/ats.fish',
+      'complete -c ats -f',
+      'for cmd in ' + cmds,
+      '  complete -c ats -n "__fish_use_subcommand" -a "$cmd"',
+      'end',
+    ],
+  };
+  if (!scripts[shell]) {
+    console.error('Usage: ats completion <bash|zsh|fish>');
+    process.exit(1);
+  }
+  console.log(scripts[shell].join('\n'));
+}
+
+// `ats init [adapter]` — select an adapter (if given) and run a health check.
+async function handleInit() {
+  const requested = args.positional[0];
+  if (requested) {
+    const adapterPkg = requested.startsWith('@') || requested.includes('/')
+      ? requested
+      : `@reneza/ats-adapter-${requested}`;
+    const dir = atsConfigDir();
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(dir, 'adapter'), adapterPkg + '\n');
+    console.log(`Active adapter set to ${adapterPkg}`);
+  } else {
+    console.log(`Active adapter: ${resolveAdapterPkg().pkg} (set one with: ats init <adapter>)`);
+  }
+  console.log('');
+  await handleDoctor();
+}
+
+async function handleDoctor() {
+  const source = resolveAdapterPkg();
+  const report = await runDoctor({
+    loadAdapter,
+    adapterSource: { pkg: source.pkg, origin: source.origin },
+    configPath: source.configPath,
+    nodeVersion: process.version,
+  });
+  if (args.options.format === 'json') {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    console.log(formatDoctor(report));
+  }
+  if (!report.ok) process.exit(1);
+}
+
+async function handleAdapter() {
+  switch (args.subcommand) {
+    case 'test': {
+      const target = args.positional[0] || resolveAdapterPkg().pkg;
+      let adapter;
+      try {
+        adapter = await importAdapterTarget(target);
+      } catch (e) {
+        console.error(`Error: could not import adapter "${target}": ${e.message}`);
+        process.exit(1);
+      }
+      const report = await runConformance(adapter, { write: !!args.options.write });
+      if (args.options.format === 'json') {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(`Target: ${target}\n`);
+        console.log(formatConformance(report));
+      }
+      if (!report.ok) process.exit(1);
+      return;
+    }
+    case 'new': {
+      const name = args.positional[0];
+      if (!name) {
+        console.error('Usage: ats adapter new <name> [--dir <path>] [--force]');
+        process.exit(1);
+      }
+      const { slug, dir, files } = scaffoldAdapter(name, {
+        dir: args.options.dir,
+        force: !!args.options.force,
+      });
+      if (args.options.format === 'json') {
+        console.log(JSON.stringify({ slug, dir, files }, null, 2));
+      } else {
+        console.log(`Created ats-adapter-${slug} in ${dir}`);
+        for (const f of files) console.log(`  + ${f}`);
+        const rel = path.relative(process.cwd(), dir);
+        const testTarget = !rel ? '.' : rel.startsWith('..') ? dir : rel;
+        console.log(`\nNext:\n  1. Implement the six methods in ${path.join(dir, 'index.js')}`);
+        console.log(`  2. Verify: ats adapter test ${testTarget}`);
+      }
+      return;
+    }
+    default:
+      console.log(getAdapterHelp());
+  }
 }
 
 async function handleAuth() {

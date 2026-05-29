@@ -1,6 +1,51 @@
 
 # Changelog
 
+## 0.3.0 — Storage-agnostic core, MCP server, and the adapter toolkit
+
+The release that makes "adapter, not migration" *true* and *verifiable*.
+Retrieval moved out of the TickTick adapter and into core, so any adapter — not
+just TickTick — gets hybrid + RRF fan-out. On top of that: an MCP server, a
+conformance kit, a scaffold, diagnostics, and shipped TypeScript types.
+
+### Added
+
+- **`@reneza/ats-mcp`** — a Model Context Protocol server exposing the active
+  adapter to any MCP client (Claude Desktop, Cursor, …) as seven tools (`find`,
+  `get_task`, `list_projects`, `create_task`, `update_task`, `similar`,
+  `url_for`), backed by core's hybrid + RRF retrieval. Storage-agnostic: works
+  over any adapter; embedder-backed adapters get the full dense/sparse hybrid.
+- **Adapter conformance kit** — `ats adapter test [target]` (and the
+  programmatic `runConformance()` in core) run an adapter through the full
+  contract and report pass/fail/skip per check, including that core retrieval
+  integrates over it. `--write` also exercises the create/update path.
+- **Adapter scaffold** — `ats adapter new <name>` generates a contract-complete
+  starter package (six stubbed methods + `package.json` + README) ready for
+  `ats adapter test`.
+- **`ats doctor`** — diagnoses adapter resolution, import, contract compliance,
+  auth, optional capabilities, corpus-cache state, and core-retrieval
+  reachability in one shot. `--format json` for machine output.
+- **`ats init [adapter]`** — selects an adapter and runs a health check.
+- **`ats help [command]`** and **`ats completion bash|zsh|fish`**.
+- **TypeScript types** — `.d.ts` shipped for all core entry points
+  (`index`, `retrieval`, `corpus-cache`, `usage-log`, `adapter-interface`,
+  `conformance`), with per-subpath `exports` so editors resolve them.
+
+### Changed
+
+- **Retrieval extracted into `@reneza/ats-core/retrieval`.** `find`, RRF
+  fusion (`rrf`/`fuse`), corpus loading, and `similar` are now generic and
+  storage-agnostic — the TickTick adapter injects its store-specific bits
+  (API prefetch, notes branch, embedder) as config rather than owning the
+  algorithm. Behavior is preserved; the adapter delegates to core.
+- CLI help reworded to the agent-context thesis; stale `ticktick`-prefixed
+  examples corrected to `ats`.
+
+### Notes
+
+- Behavior-compatible for existing `ats find` / `ats hybrid` / `ats similar`
+  users — this is an extraction + additive release, not a rewrite.
+
 ## 0.2.1 — npm metadata aligned to the thesis
 
 Docs/metadata only — no code changes.
@@ -49,7 +94,6 @@ Renamed from *Agentic Knowledge Base (AKB)* to **Agentic Task System (ATS)** to 
 
 ### Roadmap
 
-- **0.2** — `@reneza/ats-adapter-obsidian` (filesystem markdown vault)
-- **0.3** — `@reneza/ats-adapter-notion`
-- **0.4** — Lint pass + fact-propagation queue with approval gate
-- **0.5+** — Things, Apple Notes, Google Tasks adapters
+- **0.3** — Storage-agnostic core, MCP server, adapter toolkit (shipped)
+- **0.4** — `@reneza/ats-adapter-notion` + `@reneza/ats-adapter-obsidian`
+- **0.5+** — Things, Apple Notes, Google Tasks adapters; fact-propagation queue

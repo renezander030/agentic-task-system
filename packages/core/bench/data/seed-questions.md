@@ -37,16 +37,16 @@ Aim for variety. Suggested mix across 25 questions:
 ## Examples (seed your questions.jsonl)
 
 ```jsonl
-{"id":"q01","question":"Where do I document the deployment runbook speed levers I tested?","gold_task_id":"<find via: ticktick notes find 'deployment runbook speed'>","gold_project_id":"YOUR_NOTES_PROJECT_ID","tags":["keyword-rich","content","permanent-notes","unique"]}
-{"id":"q02","question":"How do I set up speech-to-text dictation on my mac?","gold_task_id":"<find via: ticktick notes find 'STT macOS'>","gold_project_id":"YOUR_NOTES_PROJECT_ID","tags":["paraphrase","coding","permanent-notes","unique"]}
-{"id":"q03","question":"Where's my note on running multiple coding agents in parallel?","gold_task_id":"<find via: ticktick notes find 'parallel agent'>","gold_project_id":"YOUR_NOTES_PROJECT_ID","tags":["paraphrase","coding","permanent-notes","unique"]}
+{"id":"q01","question":"Where do I document the build settings I tested?","gold_task_id":"<find via: ats find 'build settings'>","gold_project_id":"YOUR_NOTES_PROJECT_ID","tags":["keyword-rich","content","permanent-notes","unique"]}
+{"id":"q02","question":"How do I set up speech-to-text dictation on my mac?","gold_task_id":"<find via: ats find 'STT macOS'>","gold_project_id":"YOUR_NOTES_PROJECT_ID","tags":["paraphrase","coding","permanent-notes","unique"]}
+{"id":"q03","question":"Where's my note on running multiple coding agents in parallel?","gold_task_id":"<find via: ats find 'parallel agent'>","gold_project_id":"YOUR_NOTES_PROJECT_ID","tags":["paraphrase","coding","permanent-notes","unique"]}
 ```
 
 ## How to find gold IDs
 
 ```bash
-ticktick notes find "deployment runbook" --limit 3 --format json | jq '.[] | {fullId, title}'
-ticktick tasks search "STT" --format json | jq '.tasks[] | {fullId, title, projectId}'
+ats find "build settings" --limit 3 --format json | jq '.[] | {fullId, title}'
+ats find "STT" --format json | jq '.[] | {fullId, title, projectId}'
 ```
 
 Once you've copied the right `fullId` and `projectId`, paste into the JSONL.

@@ -34,7 +34,7 @@ One JSON object per line:
 ```json
 {
   "id": "q01",
-  "question": "Where did I document the deployment runbook speed levers?",
+  "question": "Where did I document the deployment runbook?",
   "gold_task_id": "<full task id>",
   "gold_project_id": "<full project id>",
   "tags": ["keyword-rich", "niche", "permanent-notes"]

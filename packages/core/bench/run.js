@@ -193,12 +193,14 @@ function runAll() {
   const date = todayStamp();
   const methodNames = onlyMethod ? [onlyMethod] : Object.keys(METHODS);
 
+  const resultsDir = path.join(__dirname, 'results');
+  fs.mkdirSync(resultsDir, { recursive: true });
   for (const m of methodNames) {
     if (!METHODS[m]) {
       console.error(`unknown method: ${m}`);
       continue;
     }
-    const outPath = path.join(__dirname, 'results', `${m}-${date}.jsonl`);
+    const outPath = path.join(resultsDir, `${m}-${date}.jsonl`);
     const out = fs.openSync(outPath, 'w');
     console.log(`[${m}] ${METHODS[m].description}`);
     let ok = 0;

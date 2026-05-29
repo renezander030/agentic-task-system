@@ -62,9 +62,10 @@ agentic-task-system/
 │   │   ├── bench/                  # harness
 │   │   └── adapter-interface.md
 │   ├── adapter-ticktick/           # reference adapter (today)
-│   ├── adapter-obsidian/           # filesystem (planned v0.2)
-│   ├── adapter-notion/             # planned v0.3
-│   └── cli/                        # `ats` command
+│   ├── adapter-obsidian/           # filesystem (planned v0.4)
+│   ├── adapter-notion/             # planned v0.4
+│   ├── cli/                        # `ats` command
+│   └── mcp/                        # `@reneza/ats-mcp` — MCP server
 ├── docs/
 │   ├── adapter-interface.md
 │   ├── wiki-conventions.md
@@ -105,21 +106,34 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 | Adapter         | Status            | Storage                         |
 | --------------- | ----------------- | ------------------------------- |
 | `ticktick`      | reference         | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
-| `obsidian`      | planned v0.2      | local markdown vault            |
-| `notion`        | planned v0.3      | Notion API                      |
+| `obsidian`      | planned v0.4      | local markdown vault            |
+| `notion`        | planned v0.4      | Notion API                      |
 | `things`        | wishlist          | Things URL scheme + AppleScript |
 | `apple-notes`   | wishlist          | AppleScript                     |
 | `google-tasks`  | wishlist          | Google Tasks API                |
 
-PRs welcome. The adapter SDK + interface doc make it a couple-hundred-line job for most well-behaved APIs.
+PRs welcome. Scaffold one in seconds and verify it against the contract:
+
+```bash
+ats adapter new obsidian            # writes ats-adapter-obsidian/ (six stubs + package.json)
+# …implement the six methods…
+ats adapter test ./ats-adapter-obsidian   # pass/fail/skip per contract check
+```
+
+The scaffold + conformance kit + interface doc make it a couple-hundred-line job for most well-behaved APIs.
 
 ## CLI surface (adapter-agnostic)
 
 ```bash
 # Lifecycle
+ats init <adapter>                 # select adapter + run a health check
 ats config use <adapter>           # switch active adapter
 ats auth login                     # delegates to adapter
-ats status                         # active adapter, cache age, retrieval health
+ats doctor                         # adapter, auth, capabilities, cache, retrieval
+
+# Adapters
+ats adapter new <name>             # scaffold a starter adapter package
+ats adapter test [target]          # run the conformance kit (pass/fail/skip)
 
 # Retrieval
 ats find <query>                   # parallel + RRF + provenance — DEFAULT
@@ -139,11 +153,27 @@ ats bench score                    # markdown report of hit@1 / recall@5 / MRR
 ats bench analyze-usage            # per-tool stats from ~/.config/ats/search-log.jsonl
 ```
 
+## Use it from an agent (MCP)
+
+[`@reneza/ats-mcp`](packages/mcp) exposes the active adapter to any MCP client
+(Claude Desktop, Cursor, …) as a small tool set — `find`, `get_task`,
+`list_projects`, `create_task`, `update_task`, `similar`, `url_for` — all backed
+by the same hybrid + RRF retrieval. Storage-agnostic over the adapter contract.
+
+```jsonc
+// Claude Desktop config
+{
+  "mcpServers": {
+    "ats": { "command": "ats-mcp", "env": { "ATS_ADAPTER": "@reneza/ats-adapter-ticktick" } }
+  }
+}
+```
+
 ## Quickstart with the TickTick adapter
 
-```bash
-npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
+Already installed from the snippet at the top? Pick up at the OAuth step:
 
+```bash
 # Interactive — sets up TickTick OAuth + creates ~/.config/ats/config.json
 ats config use ticktick
 ats auth login
@@ -167,7 +197,7 @@ ats find "ffmpeg commands"
 
 ## Versioning
 
-This is `v0.2` (renamed from *Agentic Knowledge Base*). See [`CHANGELOG.md`](CHANGELOG.md).
+This is `v0.3` — storage-agnostic core retrieval, an MCP server, and the adapter toolkit (conformance kit + scaffold + `doctor`). See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 

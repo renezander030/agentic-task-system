@@ -324,14 +324,21 @@ export async function getVersion() {
 export function getMainHelp() {
   return `ats — Agentic Task System CLI
 
+Your task manager is the best agent memory you're not using. ats puts hybrid
+retrieval (RRF) over your existing task app, through a pluggable adapter.
+
 Usage: ats <command> [options]
 
 Commands:
-  setup      Interactive setup wizard (start here!)
-  auth       Authentication management
-  projects   Project operations
-  tasks      Task operations
-  notes      Note operations (Permanent Notes wiki)
+  find <query>   Hybrid retrieval (dense + sparse + keyword, fused via RRF)
+  get <ref>      Fetch one item by id or title
+  doctor         Diagnose adapter, auth, capabilities, cache, retrieval
+  adapter        Conformance-test or scaffold a storage adapter
+  config         Select the active adapter (config use <name>)
+  auth           Authentication management
+  projects       Project operations
+  tasks          Task operations
+  notes          Note operations (Permanent Notes wiki)
 
 Global options:
   --help, -h        Show help
@@ -341,18 +348,51 @@ Global options:
 Run 'ats <command> --help' for command-specific help.
 
 Quick start:
-  ats config use ticktick                              # First-time setup
-  ticktick tasks create "Buy groceries"       # Create a task
-  ticktick tasks due                          # See tasks due soon`;
+  ats init ats                 # Select an adapter + health-check
+  ats find "deployment runbook"      # Hybrid retrieval over your store
+
+Write an adapter for any store:
+  ats adapter new obsidian           # Scaffold ats-adapter-obsidian
+  ats adapter test ./ats-adapter-obsidian   # Verify it against the contract`;
+}
+
+/**
+ * Generate adapter command help
+ */
+export function getAdapterHelp() {
+  return `ats adapter — work with storage adapters
+
+Usage: ats adapter <subcommand> [options]
+
+Subcommands:
+  test [target]   Run the conformance kit against an adapter and report
+                  pass/fail/skip per contract check. 'target' is a package
+                  name or a local path/dir; defaults to the active adapter.
+  new <name>      Scaffold a starter adapter package (six stubbed methods +
+                  package.json + README) ready for 'ats adapter test'.
+
+test options:
+  --write         Also exercise createTask/updateTask (leaves a probe item)
+  --format json   Emit the machine-readable report instead of the table
+
+new options:
+  --dir <path>    Output directory (default ./ats-adapter-<name>)
+  --force         Overwrite a non-empty target directory
+
+Examples:
+  ats adapter test                                  # test the active adapter
+  ats adapter test @you/ats-adapter-notion --write
+  ats adapter test ./my-adapter --format json
+  ats adapter new obsidian`;
 }
 
 /**
  * Generate auth command help
  */
 export function getAuthHelp() {
-  return `ticktick auth - Authentication management
+  return `ats auth - Authentication management
 
-Usage: ticktick auth <subcommand>
+Usage: ats auth <subcommand>
 
 Subcommands:
   status     Check authentication status
@@ -362,18 +402,18 @@ Subcommands:
   logout     Clear stored tokens
 
 Examples:
-  ticktick auth status
-  ticktick auth login
-  ticktick auth exchange AUTH_CODE`;
+  ats auth status
+  ats auth login
+  ats auth exchange AUTH_CODE`;
 }
 
 /**
  * Generate projects command help
  */
 export function getProjectsHelp() {
-  return `ticktick projects - Project operations
+  return `ats projects - Project operations
 
-Usage: ticktick projects <subcommand> [options]
+Usage: ats projects <subcommand> [options]
 
 Subcommands:
   list                   List all projects
@@ -386,16 +426,16 @@ Create options:
   --view <mode>          View mode: list, kanban, or timeline
 
 Examples:
-  ticktick projects list
-  ticktick projects get PROJECT_ID
-  ticktick projects create "My Project" --color "#ff6b6b"`;
+  ats projects list
+  ats projects get PROJECT_ID
+  ats projects create "My Project" --color "#ff6b6b"`;
 }
 
 /**
  * Generate notes command help
  */
 export function getNotesHelp() {
-  return `ticktick notes - Note operations (Permanent Notes wiki)
+  return `ats notes - Note operations (Permanent Notes wiki)
 
 Notes are tasks living in a designated project (default: "Permanent Notes").
 This wraps them as a wiki layer with two roles:
@@ -407,7 +447,7 @@ Cross-references use TickTick's native deep-link markdown form:
   [Display Title](https://ticktick.com/webapp/#p/<projectId>/tasks/<taskId>)
 'notes links' extracts these from any task body and resolves them.
 
-Usage: ticktick notes <subcommand> [options]
+Usage: ats notes <subcommand> [options]
 
 Subcommands:
   find <query>                          Search note titles (fuzzy match)
@@ -431,22 +471,22 @@ get options:
   --exact                  Require exact-title match (no fuzzy)
 
 Examples:
-  ticktick notes find "deployment runbook"
-  ticktick notes get "Trunk Catalog" --extract json | jq '.trunks[].name'
-  ticktick notes get abc123 --extract raw
-  ticktick notes url "Parallel Agent Work"          # paste-ready markdown link
-  ticktick notes url "ffmpeg" --display "see ffmpeg cheatsheet"
-  ticktick notes links INBOX EXAMPLE_TASK_ID
-  ticktick notes find "config" --project "Agent Data"`;
+  ats notes find "deployment runbook"
+  ats notes get "Trunk Catalog" --extract json | jq '.trunks[].name'
+  ats notes get abc123 --extract raw
+  ats notes url "Parallel Agent Work"          # paste-ready markdown link
+  ats notes url "ffmpeg" --display "see ffmpeg cheatsheet"
+  ats notes links INBOX <task-id>
+  ats notes find "config" --project "Agent Data"`;
 }
 
 /**
  * Generate tasks command help
  */
 export function getTasksHelp() {
-  return `ticktick tasks - Task operations
+  return `ats tasks - Task operations
 
-Usage: ticktick tasks <subcommand> [options]
+Usage: ats tasks <subcommand> [options]
 
 Subcommands:
   list <project_id>                List tasks in project
@@ -504,17 +544,17 @@ Vector sync options:
   --max <n>              Max embeddings per run (default: 200)
 
 Examples:
-  ticktick tasks create "Buy groceries" --due 2026-01-30 --priority high
-  ticktick tasks create "Call mom" --tags "personal,family"
-  ticktick tasks create PROJECT_ID "Task in specific project"
-  ticktick tasks list PROJECT_ID
-  ticktick tasks complete PROJECT_ID TASK_ID
-  ticktick tasks search "meeting"
-  ticktick tasks search --tags "work"
-  ticktick tasks semantic "tasks related to deployment"
-  ticktick tasks similar TASK_ID --limit 3
-  ticktick tasks vector-sync
-  ticktick tasks due 3
-  ticktick tasks completed --from 2026-03-06T00:00:00.000+0000 --to 2026-03-06T23:59:59.000+0000
-  ticktick tasks completed --projects PROJECT_ID1,PROJECT_ID2`;
+  ats tasks create "Buy groceries" --due 2026-01-30 --priority high
+  ats tasks create "Call mom" --tags "personal,family"
+  ats tasks create PROJECT_ID "Task in specific project"
+  ats tasks list PROJECT_ID
+  ats tasks complete PROJECT_ID TASK_ID
+  ats tasks search "meeting"
+  ats tasks search --tags "work"
+  ats tasks semantic "tasks related to deployment"
+  ats tasks similar TASK_ID --limit 3
+  ats tasks vector-sync
+  ats tasks due 3
+  ats tasks completed --from 2026-03-06T00:00:00.000+0000 --to 2026-03-06T23:59:59.000+0000
+  ats tasks completed --projects PROJECT_ID1,PROJECT_ID2`;
 }

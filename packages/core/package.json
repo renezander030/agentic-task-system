@@ -1,15 +1,21 @@
 {
   "name": "@reneza/ats-core",
-  "version": "0.2.1",
-  "description": "Adapter-agnostic core for Agentic Task System \u2014 retrieval (RRF parallel fan-out), corpus cache, bench harness, usage logging, adapter interface",
+  "version": "0.3.0",
+  "description": "Adapter-agnostic core for Agentic Task System \u2014 retrieval (RRF parallel fan-out), corpus cache, usage logging, conformance kit, adapter interface",
   "type": "module",
   "main": "index.js",
+  "types": "./index.d.ts",
+  "files": [
+    "*.js",
+    "*.d.ts"
+  ],
   "exports": {
-    ".": "./index.js",
-    "./retrieval": "./retrieval.js",
-    "./corpus-cache": "./corpus-cache.js",
-    "./usage-log": "./usage-log.js",
-    "./adapter-interface": "./adapter-interface.js"
+    ".": { "types": "./index.d.ts", "default": "./index.js" },
+    "./retrieval": { "types": "./retrieval.d.ts", "default": "./retrieval.js" },
+    "./corpus-cache": { "types": "./corpus-cache.d.ts", "default": "./corpus-cache.js" },
+    "./usage-log": { "types": "./usage-log.d.ts", "default": "./usage-log.js" },
+    "./conformance": { "types": "./conformance.d.ts", "default": "./conformance.js" },
+    "./adapter-interface": { "types": "./adapter-interface.d.ts", "default": "./adapter-interface.js" }
   },
   "license": "MIT",
   "dependencies": {},
