@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Adapter-agnostic core for Agentic Task System \u2014 retrieval (RRF parallel fan-out), corpus cache, bench harness, usage logging, adapter interface",
   "type": "module",
   "main": "index.js",
@@ -37,8 +37,9 @@
     "rag-evaluation",
     "embedding-fallback",
     "agentic",
-    "llm-wiki",
-    "knowledge-base",
+    "agent-memory",
+    "agent-context",
+    "context-engineering",
     "claude",
     "mcp"
   ]

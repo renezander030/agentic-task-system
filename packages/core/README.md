@@ -2,7 +2,7 @@
 
 > **Agent-side retrieval that fans out three retrievers in parallel and votes on the result.** Hybrid (dense + sparse via RRF), keyword, and notes-find run concurrently against a shared cached corpus. The merged top-K comes back with `sources: [...]` provenance — multi-source agreement = high confidence.
 
-The adapter-agnostic core of [Agentic Task System](https://github.com/renezander030/agentic-task-system) — a Karpathy-style LLM wiki framework with pluggable storage adapters.
+The adapter-agnostic core of [Agentic Task System](https://github.com/renezander030/agentic-task-system) — an agent-native context layer over the task app you already use, with pluggable storage adapters.
 
 ## Why this exists
 
@@ -56,11 +56,10 @@ interface KnowledgeAdapter {
 
 Full spec at [docs/adapter-interface.md](https://github.com/renezander030/agentic-task-system/blob/main/docs/adapter-interface.md).
 
-## Repo + write-up
+## Repo + docs
 
 - **Repo**: https://github.com/renezander030/agentic-task-system
-- **Article**: https://renezander.com/blog/agentic-task-system/
-- **Quick gist**: https://gist.github.com/renezander030/c7bd6d5c4088e24d3add043720284453
+- **Adapter interface**: https://github.com/renezander030/agentic-task-system/blob/main/docs/adapter-interface.md
 
 ## License
 

@@ -1,12 +1,12 @@
 # @reneza/ats-cli
 
-> **`ats` — one CLI for an agent-readable knowledge base across whatever task or note app you already use.** Find / get / link / update notes from TickTick today; Notion, Obsidian, Things, plain markdown adapters are roadmap. The retrieval, wiki conventions, and bench harness are storage-agnostic.
+> **`ats` — one CLI that turns the task app you already use into an agent-native context layer.** Find / get / link / update notes from TickTick today; Notion, Obsidian, Things, plain-markdown adapters are roadmap. The retrieval, conventions, and bench harness are storage-agnostic.
 
-The command-line surface for [Agentic Task System](https://github.com/renezander030/agentic-task-system) — a Karpathy-style LLM wiki framework with pluggable storage adapters.
+The command-line surface for [Agentic Task System](https://github.com/renezander030/agentic-task-system) — an agent-native context layer over the task app you already use, with pluggable storage adapters.
 
 ## Why this exists
 
-Karpathy's [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) idea (plain-markdown notes that an LLM reasons over) is right; the implementation that fits an existing system isn't a folder of markdown — it's the agent-side primitives that turn whatever you already have into something the model can reason over.
+Your task app already holds years of curated, deduplicated, prioritized context — you maintain it by hand every day. The fastest path to agent memory isn't standing up a new markdown vault (Karpathy's [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) idea — right about the destination); it's the agent-side primitives that make what you *already* have queryable.
 
 This CLI gives you those primitives: `ats find` runs three retrievers in parallel (hybrid + keyword + notes-find), fuses via Reciprocal Rank Fusion, returns top-K with `sources: [...]` provenance tags. Sub-100ms warm via a 5-min disk-backed corpus cache. 60% top-1 / 80% recall@5 on agent-issued queries vs 20% / 40% for dense alone.
 
@@ -46,8 +46,6 @@ ats bench analyze-usage            # per-tool stats from search-log.jsonl
 ## Repo + docs
 
 - **Repo**: https://github.com/renezander030/agentic-task-system
-- **Article**: https://renezander.com/blog/agentic-task-system/
-- **Quick gist**: https://gist.github.com/renezander030/c7bd6d5c4088e24d3add043720284453
 - **Adapter interface**: https://github.com/renezander030/agentic-task-system/blob/main/docs/adapter-interface.md
 - **Wiki conventions**: https://github.com/renezander030/agentic-task-system/blob/main/docs/wiki-conventions.md
 

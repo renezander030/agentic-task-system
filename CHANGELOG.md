@@ -1,6 +1,14 @@
 
 # Changelog
 
+## 0.2.1 — npm metadata aligned to the thesis
+
+Docs/metadata only — no code changes.
+
+- Per-package READMEs (shown on npm) reworded from the old "Karpathy-style LLM wiki / knowledge base" framing to the **agent context layer** thesis.
+- Removed a dead article link and a stale (pre-rename) gist link from package READMEs.
+- Refreshed npm keywords: dropped `knowledge-base` / `llm-wiki` / `tasks-as-knowledge-base`; added `agent-memory`, `agent-context`, `context-engineering`, `task-management`, `ticktick`.
+
 ## 0.2.0 — Renamed to Agentic Task System (ATS)
 
 Renamed from *Agentic Knowledge Base (AKB)* to **Agentic Task System (ATS)** to match the thesis: your task app *is* the agent's context layer, not a separate knowledge store.

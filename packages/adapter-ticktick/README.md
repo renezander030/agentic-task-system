@@ -1,10 +1,10 @@
 # @reneza/ats-adapter-ticktick
 
-> **Turn your TickTick into Karpathy's LLM wiki.** Reference adapter for [Agentic Task System](https://github.com/renezander030/agentic-task-system) — wraps TickTick's OpenAPI v1 (plus optional local qdrant + nomic-embed via Ollama) into the ATS adapter contract so agents can find / read / link / update tasks and notes via a single CLI surface.
+> **Turn your TickTick into your agent's context layer.** Reference adapter for [Agentic Task System](https://github.com/renezander030/agentic-task-system) — wraps TickTick's OpenAPI v1 (plus optional local qdrant + nomic-embed via Ollama) into the ATS adapter contract so agents can find / read / link / update tasks and notes via a single CLI surface.
 
 ## Why this exists
 
-TickTick has thousands of your durable notes plus an excellent mobile capture flow. What it's missing is an agent-readable wiki layer with retrieval tuned for how *agents* query (not how humans type). This adapter adds:
+TickTick has thousands of your durable notes plus an excellent mobile capture flow. What it's missing is an agent-native retrieval layer tuned for how *agents* query (not how humans type). This adapter adds:
 
 - **Wiki layer** — designate a project (default: "Permanent Notes") as your knowledge base. `find` / `get` / `url` / `links` operate on it.
 - **Hybrid retrieval** — pure TickTick semantic search misses short note titles; this adapter exposes the dense vector path so [@reneza/ats-core](https://npmjs.com/package/@reneza/ats-core)'s parallel fan-out can fuse it with keyword + title-fuzzy. Result on a 5-question agent bench: 60% top-1 / 80% recall@5, vs 20% / 40% for dense alone.
@@ -46,8 +46,6 @@ Adapter ships with the wiki helpers (`notes.find/get/url/links`), capture-time r
 ## Repo + docs
 
 - **Repo**: https://github.com/renezander030/agentic-task-system
-- **Article**: https://renezander.com/blog/agentic-task-system/
-- **Quick gist**: https://gist.github.com/renezander030/c7bd6d5c4088e24d3add043720284453
 - **Wiki conventions**: https://github.com/renezander030/agentic-task-system/blob/main/docs/wiki-conventions.md
 - **Adapter interface**: https://github.com/renezander030/agentic-task-system/blob/main/docs/adapter-interface.md
 
