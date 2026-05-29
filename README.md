@@ -1,7 +1,18 @@
 
-# Agentic Task System (ATS)
+<p align="center">
+  <img src="assets/logo.svg" alt="Agentic Task System" width="108" height="108" />
+</p>
 
-> **Your task manager is the best agent memory you're not using.**
+<h1 align="center">Agentic Task System</h1>
+
+<p align="center"><strong>Your task manager is the best agent memory you're not using.</strong></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@reneza/ats-cli"><img src="https://img.shields.io/npm/v/@reneza/ats-cli?logo=npm&label=%40reneza%2Fats-cli&color=A855F7" alt="npm version" /></a>
+  <a href="https://github.com/renezander030/agentic-task-system/actions/workflows/ci.yml"><img src="https://github.com/renezander030/agentic-task-system/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3b82f6" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
+</p>
 
 Most "agent memory" projects build a *new* store — a vector DB, a bespoke
 framework — that drifts from reality the moment you stop feeding it. But you
@@ -156,7 +167,7 @@ ats find "ffmpeg commands"
 
 ## Versioning
 
-This is `v0.1`. See `CHANGELOG.md`.
+This is `v0.2` (renamed from *Agentic Knowledge Base*). See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 

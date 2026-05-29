@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none" role="img" aria-label="Agentic Task System logo">
+  <defs>
+    <linearGradient id="ats-grad" gradientUnits="userSpaceOnUse" x1="40" y1="208" x2="216" y2="48">
+      <stop offset="0" stop-color="#4F8DFD"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <mask id="ats-notch">
+      <rect x="0" y="0" width="256" height="256" fill="white"/>
+      <circle cx="157" cy="109" r="23" fill="black"/>
+    </mask>
+  </defs>
+  <rect x="40" y="84" width="116" height="116" rx="30" stroke="url(#ats-grad)" stroke-width="16" mask="url(#ats-notch)"/>
+  <path d="M72 140 L104 172 L200 56" stroke="url(#ats-grad)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="200" cy="56" r="20" fill="url(#ats-grad)"/>
+</svg>

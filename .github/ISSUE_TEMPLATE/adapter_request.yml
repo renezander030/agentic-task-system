@@ -1,0 +1,24 @@
+name: Adapter request
+description: Request or propose a storage adapter for a task app / note tool
+labels: [adapter, enhancement]
+body:
+  - type: input
+    id: app
+    attributes:
+      label: Which app?
+      placeholder: "e.g. Things, Apple Notes, Todoist, Logseq"
+    validations:
+      required: true
+  - type: input
+    id: api
+    attributes:
+      label: Integration surface
+      placeholder: "Public API? URL scheme? AppleScript? Local markdown files?"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: >
+        Auth model, native search capability, embeddings support, and whether
+        you'd be up for contributing the PR (the interface is ~a couple hundred
+        lines — see docs/adapter-interface.md).

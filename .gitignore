@@ -4,7 +4,6 @@ node_modules
 .env
 .env.local
 
-# AKB-specific runtime caches (per-user, not for VCS)
-~/.config/akb/
+# ATS runtime caches (per-user, live under ~/.config/ats — not for VCS)
 corpus-cache.json
 search-log.jsonl

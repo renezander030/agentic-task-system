@@ -1,9 +1,9 @@
 {
   "name": "agentic-task-system",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Karpathy-style LLM wiki framework with pluggable storage adapters",
+  "description": "Your task manager is the best agent memory you're not using. Agent-native context layer over your existing task app, with hybrid retrieval (RRF) and pluggable storage adapters.",
   "workspaces": [
     "packages/*"
   ],
@@ -16,7 +16,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/<verify-before-publish: gh-handle>/agentic-task-system.git"
+    "url": "git+https://github.com/renezander030/agentic-task-system.git"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
