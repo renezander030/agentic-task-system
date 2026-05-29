@@ -1,7 +1,7 @@
 
 # Adapter Interface
 
-An AKB adapter wraps a storage backend (TickTick, Notion, Obsidian, plain markdown, Things, Google Tasks, …) so the AKB Core can list / read / write / link items without knowing the underlying system.
+An ATS adapter wraps a storage backend (TickTick, Notion, Obsidian, plain markdown, Things, Google Tasks, …) so the ATS Core can list / read / write / link items without knowing the underlying system.
 
 This document defines the contract.
 
@@ -62,7 +62,7 @@ type TaskPatch = Partial<TaskInput> & { title?: string }
 
 **`updateTask(projectId, taskId, patch)`** — patch-style partial update. Adapter is responsible for preserving omitted fields. Returns the updated Task.
 
-**`urlFor({ projectId, taskId })`** — returns a deep-link URL the user can click to open the task in the adapter's native UI. Used by `akb url` to generate cross-reference markdown. Format is adapter-specific:
+**`urlFor({ projectId, taskId })`** — returns a deep-link URL the user can click to open the task in the adapter's native UI. Used by `ats url` to generate cross-reference markdown. Format is adapter-specific:
 
 | Adapter        | URL pattern (illustrative)                                      |
 | -------------- | --------------------------------------------------------------- |
@@ -71,7 +71,7 @@ type TaskPatch = Partial<TaskInput> & { title?: string }
 | obsidian       | `obsidian://open?vault=<vault>&file=<path>`                     |
 | things         | `things:///show?id=<taskId>`                                    |
 
-If the adapter has no concept of a deep link (rare), return a stable identifier the adapter can resolve back via the CLI (e.g. `akb-ref://<adapter>/<id>`).
+If the adapter has no concept of a deep link (rare), return a stable identifier the adapter can resolve back via the CLI (e.g. `ats-ref://<adapter>/<id>`).
 
 ## Optional methods
 
@@ -85,7 +85,7 @@ interface KnowledgeAdapter {
 }
 ```
 
-**`searchByQuery(query)`** — if the adapter has a fast native search (e.g. Notion's full-text search, Obsidian's filesystem grep), Core uses it as one branch of `akb find`. Without it, Core falls back to substring scan on the cached corpus.
+**`searchByQuery(query)`** — if the adapter has a fast native search (e.g. Notion's full-text search, Obsidian's filesystem grep), Core uses it as one branch of `ats find`. Without it, Core falls back to substring scan on the cached corpus.
 
 **`bulkFetch()`** — single-call corpus refresh. Cheaper than per-project iteration when the adapter supports it (Notion's database queries, TickTick's v2 batch sync, filesystem walk). Without it, Core iterates `listProjects` → `listTasksInProject`.
 
@@ -103,14 +103,14 @@ interface KnowledgeAdapter {
 }
 ```
 
-`akb auth login` calls `authLogin()` and prints whatever the adapter returns (typically an OAuth URL + paste-the-code instructions).
+`ats auth login` calls `authLogin()` and prints whatever the adapter returns (typically an OAuth URL + paste-the-code instructions).
 
 ## Configuration
 
 Each adapter ships its own `<adapter>.config.json` schema. The CLI loads:
 
-- `~/.config/akb/config.json` — global: which adapter is active, retrieval defaults
-- `~/.config/akb/<adapter>.json` — adapter-specific: tokens, URLs, project IDs
+- `~/.config/ats/config.json` — global: which adapter is active, retrieval defaults
+- `~/.config/ats/<adapter>.json` — adapter-specific: tokens, URLs, project IDs
 
 The reference TickTick adapter stores OAuth tokens here. The Obsidian adapter stores the vault path. Notion stores the integration token + database IDs.
 
@@ -139,7 +139,7 @@ export default {
 };
 ```
 
-That's a working adapter. AKB's `find` / `get` / `url` already work against it.
+That's a working adapter. ATS's `find` / `get` / `url` already work against it.
 
 ## Stability promise
 

@@ -1,33 +1,48 @@
 
-# Agentic Knowledge Base (AKB)
+# Agentic Task System (ATS)
 
-Turn whatever task / note app you already use into a Karpathy-style LLM wiki an agent can actually query.
+> **Your task manager is the best agent memory you're not using.**
+
+Most "agent memory" projects build a *new* store — a vector DB, a bespoke
+framework — that drifts from reality the moment you stop feeding it. But you
+already maintain a knowledge base by hand, every day: your task app. Years of
+curated, prioritized, deduplicated context, pre-filtered by the most reliable
+ranker there is — you.
+
+ATS makes that context agent-native. **Adapter, not migration**: keep the app
+you already live in (TickTick today; Obsidian, Notion next) and give your agent
+a fast, structured, two-way channel into it.
 
 ```bash
-npm install -g @reneza/akb-cli @reneza/akb-adapter-ticktick
-akb config use ticktick
-akb auth login
-akb find "deployment runbook"
+npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
+ats config use ticktick
+ats auth login
+ats find "deployment runbook"
 ```
 
-## Why
+## Why this exists
 
-Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-wiki-knowledge-base-claude-code) suggests dumping your notes as plain markdown so an LLM can reason over them. The idea is right; the implementation assumes you don't already have years of notes in something else.
+Andrej Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-wiki-knowledge-base-claude-code) idea — keep notes as plain markdown an LLM can reason over — is right about the destination and wrong about the starting line. Almost nobody's knowledge lives in clean markdown; it lives in the task app they've used for years. ATS closes that gap with pluggable storage adapters, so you get an agent-queryable knowledge layer without re-homing a single note.
 
-AKB is the same idea built as a framework with **storage adapters**. You keep your TickTick / Notion / Obsidian / Things / whatever — AKB adds:
+## What changes when you wire it up
 
-- **Parallel hybrid retrieval** with provenance: hybrid (dense + sparse RRF) + keyword + notes-find run concurrently, RRF-fused, results tagged with which retrievers agreed
-- **5-min disk-backed corpus cache** — sub-100ms warm latency
-- **Agent-data notes pattern** — fenced ```json blocks in any note, extracted via `--extract json` for cron / agent consumption
-- **Capture-time relevance enrichment** — agents append `why: <trunk> — <reason>` lines to tasks they touch, making them more retrievable
-- **Bench harness** — Q/A pairs you author, scored by hit@1 / recall@5 / MRR per tag bucket, runs against any combination of retrievers
-- **Usage logging** — every retrieval call writes one JSONL line, analyzer reports per-tool stats and re-query pairs
-- **Adapter SDK** — write your own storage adapter in ~6 methods
+Three shifts, in the order they surprised me in real use:
+
+**1. The task app becomes a two-way bus between you and your agent.**
+It's not just somewhere the agent *reads* — it's where you and the agent hand work back and forth. Drop a task with a file attached and the agent picks it up with full context; the agent writes results back where you'll actually see them. Your existing capture habit becomes the I/O channel — attachments and all.
+
+**2. Semantic retrieval makes the *first* fetch the right one.**
+Parallel hybrid retrieval (dense + sparse + keyword, fused with RRF, with provenance) instead of keyword grep. In practice this collapsed the usual "search → refine → search again" loop into a single fetch that comes back both faster and richer. Better context on turn one means better answers on turn one.
+
+**3. Context gets curated at *write* time, not just read time.**
+The half everyone skips. Every item is hung on a "trunk" — a theme you already care about (`writing`, `client-work`, `side-project`) — the moment it's captured, so retrieval has structure to grab instead of a flat pile.
+
+_Plus the plumbing that makes it usable every turn: a disk-backed corpus cache with sub-100ms warm latency, and a benchmark harness so retrieval quality is measured, not asserted._
 
 ## Architecture
 
 ```
-agentic-knowledge-base/
+agentic-task-system/
 ├── packages/
 │   ├── core/                       # adapter-agnostic
 │   │   ├── retrieval.js            # find, hybrid, RRF
@@ -38,7 +53,7 @@ agentic-knowledge-base/
 │   ├── adapter-ticktick/           # reference adapter (today)
 │   ├── adapter-obsidian/           # filesystem (planned v0.2)
 │   ├── adapter-notion/             # planned v0.3
-│   └── cli/                        # `akb` command
+│   └── cli/                        # `ats` command
 ├── docs/
 │   ├── adapter-interface.md
 │   ├── wiki-conventions.md
@@ -91,52 +106,52 @@ PRs welcome. The adapter SDK + interface doc make it a couple-hundred-line job f
 
 ```bash
 # Lifecycle
-akb config use <adapter>           # switch active adapter
-akb auth login                     # delegates to adapter
-akb status                         # active adapter, cache age, retrieval health
+ats config use <adapter>           # switch active adapter
+ats auth login                     # delegates to adapter
+ats status                         # active adapter, cache age, retrieval health
 
 # Retrieval
-akb find <query>                   # parallel + RRF + provenance — DEFAULT
-akb get <id-or-title> [--extract raw|json|yaml]
-akb url <id-or-title>              # paste-ready cross-reference link
-akb links <project> <task>         # resolve all deep-links inside a task body
-akb hybrid <query>                 # RRF of dense + sparse only
-akb similar <id>                   # find docs semantically like this one
+ats find <query>                   # parallel + RRF + provenance — DEFAULT
+ats get <id-or-title> [--extract raw|json|yaml]
+ats url <id-or-title>              # paste-ready cross-reference link
+ats links <project> <task>         # resolve all deep-links inside a task body
+ats hybrid <query>                 # RRF of dense + sparse only
+ats similar <id>                   # find docs semantically like this one
 
 # Authoring
-akb create "<title>" [--content "..."] [--project <id>] [--relevance]
-akb update <project> <task> [--content "..."] [--title "..."]
+ats create "<title>" [--content "..."] [--project <id>] [--relevance]
+ats update <project> <task> [--content "..."] [--title "..."]
 
 # Ops
-akb bench run                      # run all retrievers against bench/data/questions.jsonl
-akb bench score                    # markdown report of hit@1 / recall@5 / MRR
-akb bench analyze-usage            # per-tool stats from ~/.config/akb/search-log.jsonl
+ats bench run                      # run all retrievers against bench/data/questions.jsonl
+ats bench score                    # markdown report of hit@1 / recall@5 / MRR
+ats bench analyze-usage            # per-tool stats from ~/.config/ats/search-log.jsonl
 ```
 
 ## Quickstart with the TickTick adapter
 
 ```bash
-npm install -g @reneza/akb-cli @reneza/akb-adapter-ticktick
+npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
 
-# Interactive — sets up TickTick OAuth + creates ~/.config/akb/config.json
-akb config use ticktick
-akb auth login
+# Interactive — sets up TickTick OAuth + creates ~/.config/ats/config.json
+ats config use ticktick
+ats auth login
 
 # (optional) For semantic / hybrid retrieval, run a local qdrant + ollama:
 docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
 docker run -d --name ollama -p 11434:11434 ollama/ollama
 docker exec ollama ollama pull nomic-embed-text
-akb sync vector
+ats sync vector
 
 # Try it
-akb find "ffmpeg commands"
+ats find "ffmpeg commands"
 ```
 
 ## Conventions
 
 - **Pick a wiki project.** A designated project (default: `Permanent Notes`) holds your durable knowledge. Other projects hold ephemeral tasks.
-- **Agent-data notes** = a regular note whose body has a fenced ```json or ```yaml block. Cron scripts and agents extract it via `akb get <title> --extract json`.
-- **Cross-references** = adapter-native deep-link markdown form. Generate with `akb url <title>` (don't hand-write).
+- **Agent-data notes** = a regular note whose body has a fenced ```json or ```yaml block. Cron scripts and agents extract it via `ats get <title> --extract json`.
+- **Cross-references** = adapter-native deep-link markdown form. Generate with `ats url <title>` (don't hand-write).
 - See [`docs/wiki-conventions.md`](docs/wiki-conventions.md) for the full pattern.
 
 ## Versioning

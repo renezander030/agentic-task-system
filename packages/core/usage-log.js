@@ -15,8 +15,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const LOG_PATH = process.env.AKB_USAGE_LOG ||
-  path.join(os.homedir(), '.config', 'akb', 'search-log.jsonl');
+const LOG_PATH = process.env.ATS_USAGE_LOG ||
+  path.join(os.homedir(), '.config', 'ats', 'search-log.jsonl');
 
 let dirEnsured = false;
 
@@ -40,7 +40,7 @@ function ensureDir() {
  *   meta        — optional small object for tool-specific extras
  */
 export function record(entry) {
-  if (process.env.AKB_USAGE_DISABLE === '1') return;
+  if (process.env.ATS_USAGE_DISABLE === '1') return;
   ensureDir();
   const line = JSON.stringify({
     ts: new Date().toISOString(),

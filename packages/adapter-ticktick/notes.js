@@ -16,7 +16,7 @@
  */
 
 import * as coreFunctions from './api.js';
-import * as usageLog from '@reneza/akb-core/usage-log';
+import * as usageLog from '@reneza/ats-core/usage-log';
 
 const DEFAULT_NOTES_PROJECT = 'Permanent Notes';
 const FULL_ID_RE = /^[a-f0-9]{20,32}$/i;

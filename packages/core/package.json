@@ -1,7 +1,7 @@
 {
-  "name": "@reneza/akb-core",
-  "version": "0.1.2",
-  "description": "Adapter-agnostic core for Agentic Knowledge Base \u2014 retrieval (RRF parallel fan-out), corpus cache, bench harness, usage logging, adapter interface",
+  "name": "@reneza/ats-core",
+  "version": "0.2.0",
+  "description": "Adapter-agnostic core for Agentic Task System \u2014 retrieval (RRF parallel fan-out), corpus cache, bench harness, usage logging, adapter interface",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -15,12 +15,12 @@
   "dependencies": {},
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/renezander030/agentic-knowledge-base.git",
+    "url": "git+https://github.com/renezander030/agentic-task-system.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/renezander030/agentic-knowledge-base#readme",
+  "homepage": "https://github.com/renezander030/agentic-task-system#readme",
   "bugs": {
-    "url": "https://github.com/renezander030/agentic-knowledge-base/issues"
+    "url": "https://github.com/renezander030/agentic-task-system/issues"
   },
   "author": "Ren\u00e9 Zander",
   "keywords": [

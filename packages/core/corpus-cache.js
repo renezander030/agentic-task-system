@@ -14,10 +14,10 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const CACHE_PATH = process.env.AKB_CORPUS_CACHE ||
-  path.join(os.homedir(), '.config', 'akb', 'corpus-cache.json');
+const CACHE_PATH = process.env.ATS_CORPUS_CACHE ||
+  path.join(os.homedir(), '.config', 'ats', 'corpus-cache.json');
 
-const TTL_MS = Number(process.env.AKB_CORPUS_TTL_MS) || 5 * 60 * 1000; // 5 min
+const TTL_MS = Number(process.env.ATS_CORPUS_TTL_MS) || 5 * 60 * 1000; // 5 min
 
 function ensureDir() {
   try {
@@ -31,7 +31,7 @@ function ensureDir() {
  * @returns {Array|null} list of task objects, or null if cache missing/stale
  */
 export function read() {
-  if (process.env.AKB_CORPUS_CACHE_DISABLE === '1') return null;
+  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
   try {
     if (!fs.existsSync(CACHE_PATH)) return null;
     const raw = fs.readFileSync(CACHE_PATH, 'utf8');
@@ -48,7 +48,7 @@ export function read() {
  * Persist corpus + timestamp.
  */
 export function write(tasks) {
-  if (process.env.AKB_CORPUS_CACHE_DISABLE === '1') return;
+  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return;
   ensureDir();
   try {
     fs.writeFileSync(

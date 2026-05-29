@@ -1,5 +1,5 @@
 {
-  "name": "agentic-knowledge-base",
+  "name": "agentic-task-system",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/<verify-before-publish: gh-handle>/agentic-knowledge-base.git"
+    "url": "git+ssh://git@github.com/<verify-before-publish: gh-handle>/agentic-task-system.git"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

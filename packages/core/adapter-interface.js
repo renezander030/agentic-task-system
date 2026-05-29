@@ -1,5 +1,5 @@
 /**
- * AKB Adapter Interface — the contract every storage adapter must implement.
+ * ATS Adapter Interface — the contract every storage adapter must implement.
  *
  * Six required methods + three optional + three auth lifecycle methods.
  * See ../../docs/adapter-interface.md for full spec, payload shapes, and
@@ -82,7 +82,7 @@
  */
 export function validateAdapter(adapter) {
   if (!adapter || typeof adapter !== 'object') {
-    throw new Error('AKB adapter: not an object');
+    throw new Error('ATS adapter: not an object');
   }
   const required = [
     'listProjects',
@@ -96,7 +96,7 @@ export function validateAdapter(adapter) {
   ];
   const missing = required.filter((m) => typeof adapter[m] !== 'function');
   if (missing.length > 0) {
-    throw new Error(`AKB adapter is missing required methods: ${missing.join(', ')}`);
+    throw new Error(`ATS adapter is missing required methods: ${missing.join(', ')}`);
   }
   return adapter;
 }

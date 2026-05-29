@@ -322,9 +322,9 @@ export async function getVersion() {
  * Generate main help text
  */
 export function getMainHelp() {
-  return `akb — Agentic Knowledge Base CLI
+  return `ats — Agentic Task System CLI
 
-Usage: akb <command> [options]
+Usage: ats <command> [options]
 
 Commands:
   setup      Interactive setup wizard (start here!)
@@ -338,10 +338,10 @@ Global options:
   --version, -v     Show version
   --format <type>   Output format: text (default) or json
 
-Run 'akb <command> --help' for command-specific help.
+Run 'ats <command> --help' for command-specific help.
 
 Quick start:
-  akb config use ticktick                              # First-time setup
+  ats config use ticktick                              # First-time setup
   ticktick tasks create "Buy groceries"       # Create a task
   ticktick tasks due                          # See tasks due soon`;
 }

@@ -9,8 +9,14 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { webcrypto as crypto } from 'node:crypto';
 
-// Config paths (XDG-compliant)
-export const CONFIG_DIR = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'akb');
+// Config paths (XDG-compliant).
+// Prefer ~/.config/ats; fall back to legacy ~/.config/akb if it exists (akb→ats rename migration).
+const CONFIG_BASE = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+const _ATS_CONFIG_DIR = join(CONFIG_BASE, 'ats');
+const _LEGACY_CONFIG_DIR = join(CONFIG_BASE, 'akb');
+export const CONFIG_DIR = (!existsSyncFs(_ATS_CONFIG_DIR) && existsSyncFs(_LEGACY_CONFIG_DIR))
+  ? _LEGACY_CONFIG_DIR
+  : _ATS_CONFIG_DIR;
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 export const TOKEN_PATH = join(CONFIG_DIR, 'tokens.json');
 

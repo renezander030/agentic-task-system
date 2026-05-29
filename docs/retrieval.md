@@ -1,14 +1,14 @@
 
 # Retrieval
 
-AKB's retrieval is **storage-agnostic** (lives in Core, not in any adapter) and **multi-signal** (fans out hybrid + keyword + notes-find concurrently and fuses).
+ATS's retrieval is **storage-agnostic** (lives in Core, not in any adapter) and **multi-signal** (fans out hybrid + keyword + notes-find concurrently and fuses).
 
-This document describes how `akb find` actually works.
+This document describes how `ats find` actually works.
 
 ## The pipeline
 
 ```
-                       akb find "<query>"
+                       ats find "<query>"
                               │
                               ▼
                   ┌───────────────────────┐
@@ -84,9 +84,9 @@ Tag each result with `sources: [<branch>, ...]` listing which branches surfaced 
 
 Corpus prefetch is the slow step (full project list + per-project tasks). Cached at:
 
-- `~/.config/akb/corpus-cache.json` — 5-min TTL by default
-- Override TTL: `AKB_CORPUS_TTL_MS=60000`
-- Disable: `AKB_CORPUS_CACHE_DISABLE=1`
+- `~/.config/ats/corpus-cache.json` — 5-min TTL by default
+- Override TTL: `ATS_CORPUS_TTL_MS=60000`
+- Disable: `ATS_CORPUS_CACHE_DISABLE=1`
 
 First call after expiration: full refresh (~10s typical, depends on adapter). Subsequent calls within TTL: <100ms total wall-clock.
 
@@ -94,7 +94,7 @@ If the active adapter implements `bulkFetch()`, the prefetch uses it (one call).
 
 ## Budget
 
-`akb find` accepts `--budget-ms <N>` (default 3000). Each branch races against the budget. Branches that don't complete in time contribute nothing — the merge is graceful.
+`ats find` accepts `--budget-ms <N>` (default 3000). Each branch races against the budget. Branches that don't complete in time contribute nothing — the merge is graceful.
 
 In practice, branches finish in 1–500ms once the corpus is cached. The budget protects against pathological cases (qdrant down, adapter unresponsive).
 
@@ -103,31 +103,31 @@ In practice, branches finish in 1–500ms once the corpus is cached. The budget 
 The `bench/` directory has a Q/A harness. Author questions paired with gold answers, run all retrievers, get a markdown report comparing hit@1 / recall@5 / MRR per tag bucket.
 
 ```bash
-akb bench run                  # all methods on all questions
-akb bench score                # markdown report
-akb bench analyze-usage --days=14   # real-usage signal from the log
+ats bench run                  # all methods on all questions
+ats bench score                # markdown report
+ats bench analyze-usage --days=14   # real-usage signal from the log
 ```
 
 See `bench/README.md` for the schema and authoring guide.
 
 ## Usage logging
 
-Every retrieval call writes one JSONL line to `~/.config/akb/search-log.jsonl`:
+Every retrieval call writes one JSONL line to `~/.config/ats/search-log.jsonl`:
 
 ```json
 {"ts":"2026-05-02T12:34:56Z","tool":"find","query":"...","queryLen":15,"queryTokens":3,"resultCount":5,"topId":"...","error":null,"meta":{"budgetMs":3000,"branches":[...]},"pid":12345}
 ```
 
-Disable: `AKB_USAGE_DISABLE=1`. Override path: `AKB_USAGE_LOG=/path/to/file.jsonl`.
+Disable: `ATS_USAGE_DISABLE=1`. Override path: `ATS_USAGE_LOG=/path/to/file.jsonl`.
 
-The analyzer (`akb bench analyze-usage`) reads this and reports per-tool call counts, empty-result rate, re-query-within-60s pairs (proxy for "first result was bad"), and top queries.
+The analyzer (`ats bench analyze-usage`) reads this and reports per-tool call counts, empty-result rate, re-query-within-60s pairs (proxy for "first result was bad"), and top queries.
 
 ## When to skip the parallel fan-out
 
 Use the lower-level commands when you know exactly what you want:
 
-- `akb hybrid` — RRF of dense + sparse only (no notes_find branch). Fewer dependencies than `find`, slightly faster cold.
-- `akb similar <id>` — pure dense find-like-this from a known seed.
+- `ats hybrid` — RRF of dense + sparse only (no notes_find branch). Fewer dependencies than `find`, slightly faster cold.
+- `ats similar <id>` — pure dense find-like-this from a known seed.
 - Adapter-native search (if exposed) via the adapter's own subcommand.
 
-For general agent retrieval where you don't know the query shape in advance, `akb find` is the right default.
+For general agent retrieval where you don't know the query shape in advance, `ats find` is the right default.

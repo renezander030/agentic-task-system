@@ -4,8 +4,8 @@
 
 import * as coreFunctions from './api.js';
 import * as vectorFunctions from './embedding.js';
-import * as usageLog from '@reneza/akb-core/usage-log';
-import * as corpusCache from '@reneza/akb-core/corpus-cache';
+import * as usageLog from '@reneza/ats-core/usage-log';
+import * as corpusCache from '@reneza/ats-core/corpus-cache';
 
 /**
  * List tasks in a project

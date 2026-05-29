@@ -1,31 +1,39 @@
 #!/usr/bin/env node
 /**
- * akb — Agentic Knowledge Base CLI.
+ * ats — Agentic Task System CLI.
  *
  * Routes subcommands to:
- *   - @reneza/akb-core for retrieval / cache / log / bench
+ *   - @reneza/ats-core for retrieval / cache / log / bench
  *   - the active adapter for storage / auth / urlFor
  *
- * Active adapter: AKB_ADAPTER env var, else ~/.config/akb/adapter (a single
- * line with the adapter package name). Defaults to @reneza/akb-adapter-ticktick.
+ * Active adapter: ATS_ADAPTER env var, else ~/.config/ats/adapter (a single
+ * line with the adapter package name). Defaults to @reneza/ats-adapter-ticktick.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { parseArgs, formatOutput, getMainHelp, getNotesHelp, getTasksHelp, getAuthHelp, getProjectsHelp } from '../parser.js';
-import { validateAdapter } from '@reneza/akb-core';
+import { validateAdapter } from '@reneza/ats-core';
 
 const args = parseArgs(process.argv.slice(2));
 
+// Resolve config dir: prefer ~/.config/ats; fall back to legacy ~/.config/akb if it exists (akb→ats rename migration).
+function atsConfigDir() {
+  const base = path.join(os.homedir(), '.config');
+  const cur = path.join(base, 'ats');
+  const legacy = path.join(base, 'akb');
+  return (!fs.existsSync(cur) && fs.existsSync(legacy)) ? legacy : cur;
+}
+
 async function loadAdapter() {
-  const fromEnv = process.env.AKB_ADAPTER;
-  const configPath = path.join(os.homedir(), '.config', 'akb', 'adapter');
+  const fromEnv = process.env.ATS_ADAPTER;
+  const configPath = path.join(atsConfigDir(), 'adapter');
   let pkg = fromEnv;
   if (!pkg && fs.existsSync(configPath)) {
     pkg = fs.readFileSync(configPath, 'utf8').trim();
   }
-  if (!pkg) pkg = '@reneza/akb-adapter-ticktick';
+  if (!pkg) pkg = '@reneza/ats-adapter-ticktick';
   const mod = await import(pkg);
   return validateAdapter(mod.default || mod);
 }
@@ -105,13 +113,13 @@ async function handleConfig() {
   if (args.subcommand === 'use' && args.positional[0]) {
     const adapterPkg = args.positional[0].startsWith('@') || args.positional[0].includes('/')
       ? args.positional[0]
-      : `@reneza/akb-adapter-${args.positional[0]}`;
-    const dir = path.join(os.homedir(), '.config', 'akb');
+      : `@reneza/ats-adapter-${args.positional[0]}`;
+    const dir = atsConfigDir();
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(dir, 'adapter'), adapterPkg + '\n');
     return { success: true, adapter: adapterPkg };
   }
-  console.error('Usage: akb config use <adapter-name|@scope/akb-adapter-name>');
+  console.error('Usage: ats config use <adapter-name|@scope/ats-adapter-name>');
   process.exit(1);
 }
 
@@ -121,7 +129,7 @@ async function handleAuth() {
     case 'status': return adapter.authStatus();
     case 'login':  return adapter.authLogin();
     case 'exchange':
-      if (!args.positional[0]) { console.error('Usage: akb auth exchange CODE'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats auth exchange CODE'); process.exit(1); }
       return adapter.authExchange(args.positional[0]);
     default:
       console.log(getAuthHelp());
@@ -133,7 +141,7 @@ async function handleProjects() {
   switch (args.subcommand) {
     case 'list': return adapter.listProjects();
     case 'get':
-      if (!args.positional[0]) { console.error('Usage: akb projects get PROJECT_ID'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats projects get PROJECT_ID'); process.exit(1); }
       return adapter.__ext.projects.get(args.positional[0]);
     default:
       console.log(getProjectsHelp());
@@ -145,10 +153,10 @@ async function handleTasks() {
   const t = adapter.__ext.tasks;
   switch (args.subcommand) {
     case 'list':
-      if (!args.positional[0]) { console.error('Usage: akb tasks list PROJECT_ID'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats tasks list PROJECT_ID'); process.exit(1); }
       return await t.list(args.positional[0]);
     case 'get':
-      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: akb tasks get PROJECT_ID TASK_ID'); process.exit(1); }
+      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks get PROJECT_ID TASK_ID'); process.exit(1); }
       return await t.get(args.positional[0], args.positional[1]);
     case 'create': {
       let projectId = args.options.project || '';
@@ -163,7 +171,7 @@ async function handleTasks() {
       return result;
     }
     case 'update':
-      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: akb tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
+      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
       return await t.update(args.positional[0], args.positional[1], {
         title: args.options.title,
         content: args.options.content,
@@ -172,22 +180,22 @@ async function handleTasks() {
         tags: args.options.tags,
       });
     case 'find':
-      if (!args.positional[0]) { console.error('Usage: akb tasks find QUERY'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats tasks find QUERY'); process.exit(1); }
       return await t.find(args.positional[0], {
         limit: parseInt(args.options.limit) || 5,
         budgetMs: parseInt(args.options['budget-ms']) || 3000,
       });
     case 'hybrid':
-      if (!args.positional[0]) { console.error('Usage: akb tasks hybrid QUERY'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats tasks hybrid QUERY'); process.exit(1); }
       return await t.hybridSearch(args.positional[0], { limit: parseInt(args.options.limit) || 5 });
     case 'semantic':
-      if (!args.positional[0]) { console.error('Usage: akb tasks semantic QUERY'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats tasks semantic QUERY'); process.exit(1); }
       return await t.semanticSearch(args.positional[0], { limit: parseInt(args.options.limit) || 5 });
     case 'search':
-      if (!args.positional[0]) { console.error('Usage: akb tasks search QUERY'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats tasks search QUERY'); process.exit(1); }
       return await t.search(args.positional[0]);
     case 'similar':
-      if (!args.positional[0]) { console.error('Usage: akb tasks similar TASK_ID'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats tasks similar TASK_ID'); process.exit(1); }
       return await t.findSimilar(args.positional[0], { limit: parseInt(args.options.limit) || 5 });
     case 'completed':
       return await t.listCompleted({
@@ -208,14 +216,14 @@ async function handleNotes() {
   const n = adapter.__ext.notes;
   switch (args.subcommand) {
     case 'find':
-      if (!args.positional[0]) { console.error('Usage: akb notes find QUERY'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats notes find QUERY'); process.exit(1); }
       return await n.find(args.positional[0], {
         project: args.options.project,
         limit: parseInt(args.options.limit) || 10,
       });
     case 'get': {
       const ref = args.positional[0];
-      if (!ref) { console.error('Usage: akb notes get ID_OR_TITLE [--extract raw|json|yaml]'); process.exit(1); }
+      if (!ref) { console.error('Usage: ats notes get ID_OR_TITLE [--extract raw|json|yaml]'); process.exit(1); }
       const extract = args.options.extract;
       const result = await n.get(ref, {
         project: args.options.project,
@@ -226,7 +234,7 @@ async function handleNotes() {
     }
     case 'url': {
       const ref = args.positional[0];
-      if (!ref) { console.error('Usage: akb notes url ID_OR_TITLE [--display "..."]'); process.exit(1); }
+      if (!ref) { console.error('Usage: ats notes url ID_OR_TITLE [--display "..."]'); process.exit(1); }
       const link = await n.url(ref, {
         project: args.options.project,
         display: args.options.display,
@@ -235,7 +243,7 @@ async function handleNotes() {
       return { __raw: link };
     }
     case 'links':
-      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: akb notes links SRC_PROJECT SRC_TASK'); process.exit(1); }
+      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats notes links SRC_PROJECT SRC_TASK'); process.exit(1); }
       return await n.links(args.positional[0], args.positional[1], { project: args.options.project });
     default:
       console.log(getNotesHelp());
@@ -243,8 +251,8 @@ async function handleNotes() {
 }
 
 async function handleShortcut(verb) {
-  // Top-level shortcuts: `akb find …` is sugar for `akb tasks find …`,
-  // except `akb get/url/links` map to notes.
+  // Top-level shortcuts: `ats find …` is sugar for `ats tasks find …`,
+  // except `ats get/url/links` map to notes.
   // The parser put the original 2nd-arg into args.subcommand — promote it
   // into positional so the *real* subcommand handlers can pick it up.
   if (args.subcommand) args.positional.unshift(args.subcommand);

@@ -1,6 +1,6 @@
 /**
- * Reference TickTick adapter for AKB.
- * Implements the AKB adapter contract on top of TickTick OpenAPI v1
+ * Reference TickTick adapter for ATS.
+ * Implements the ATS adapter contract on top of TickTick OpenAPI v1
  * (with optional qdrant + ollama-via-nomic-embed-text retrieval backend).
  */
 

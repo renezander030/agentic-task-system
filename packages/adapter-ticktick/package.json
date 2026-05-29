@@ -1,22 +1,22 @@
 {
-  "name": "@reneza/akb-adapter-ticktick",
-  "version": "0.1.2",
-  "description": "Reference TickTick adapter for Agentic Knowledge Base. Wraps TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) into the AKB adapter contract.",
+  "name": "@reneza/ats-adapter-ticktick",
+  "version": "0.2.0",
+  "description": "Reference TickTick adapter for Agentic Task System. Wraps TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) into the ATS adapter contract.",
   "type": "module",
   "main": "index.js",
   "license": "MIT",
   "peerDependencies": {
-    "@reneza/akb-core": "^0.1.0"
+    "@reneza/ats-core": "^0.2.0"
   },
   "dependencies": {},
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/renezander030/agentic-knowledge-base.git",
+    "url": "git+https://github.com/renezander030/agentic-task-system.git",
     "directory": "packages/adapter-ticktick"
   },
-  "homepage": "https://github.com/renezander030/agentic-knowledge-base#readme",
+  "homepage": "https://github.com/renezander030/agentic-task-system#readme",
   "bugs": {
-    "url": "https://github.com/renezander030/agentic-knowledge-base/issues"
+    "url": "https://github.com/renezander030/agentic-task-system/issues"
   },
   "author": "Ren\u00e9 Zander",
   "keywords": [

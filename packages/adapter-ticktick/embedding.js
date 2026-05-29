@@ -31,7 +31,11 @@ const EMBEDDING_TIMEOUT_MS = 60000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_MS = 500;
 
-const META_DIR = join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'akb');
+// Prefer ~/.local/share/ats; fall back to legacy ~/.local/share/akb if present (akb→ats rename migration).
+const DATA_BASE = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+const _ATS_META_DIR = join(DATA_BASE, 'ats');
+const _LEGACY_META_DIR = join(DATA_BASE, 'akb');
+const META_DIR = (!existsSync(_ATS_META_DIR) && existsSync(_LEGACY_META_DIR)) ? _LEGACY_META_DIR : _ATS_META_DIR;
 const META_PATH = join(META_DIR, 'vector-index-meta.json');
 
 // --- HTTP helpers ---
