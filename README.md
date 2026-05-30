@@ -204,9 +204,13 @@ ats find "ffmpeg commands"
 - **Cross-references** = adapter-native deep-link markdown form. Generate with `ats url <title>` (don't hand-write).
 - See [`docs/wiki-conventions.md`](docs/wiki-conventions.md) for the full pattern.
 
+## State integrity (the design rule)
+
+Agent systems fail when the harness silently re-renders state between turns. ATS is a memory layer, so it holds the line: **writes round-trip without lossy re-encoding, the store → `Task` mapping is contract-tested (not a black box), and every retrieval result carries its provenance** (`sources`, `find --explain`). The same rule guards the outbound boundary — a publish-safety gate ([`scripts/check-no-pii.mjs`](scripts/check-no-pii.mjs)) fails the build if personal data could leak into a package. Full note: [`docs/state-integrity.md`](docs/state-integrity.md).
+
 ## Versioning
 
-This is `v0.3` — storage-agnostic core retrieval, an MCP server, and the adapter toolkit (conformance kit + scaffold + `doctor`). See [`CHANGELOG.md`](CHANGELOG.md).
+This is `v0.4` — the Obsidian adapter (the contract over plain markdown), a storage-agnostic CLI, and a publish-safety gate, on top of v0.3's storage-agnostic core retrieval + MCP server + adapter toolkit (conformance kit + scaffold + `doctor`). See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
