@@ -21,8 +21,8 @@ curated, prioritized, deduplicated context, pre-filtered by the most reliable
 ranker there is — you.
 
 ATS makes that context agent-native. **Adapter, not migration**: keep the app
-you already live in (TickTick today; Obsidian, Notion next) and give your agent
-a fast, structured, two-way channel into it.
+you already live in (TickTick or an Obsidian vault today; Notion next) and give
+your agent a fast, structured, two-way channel into it.
 
 ```bash
 npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
@@ -62,8 +62,8 @@ agentic-task-system/
 │   │   ├── bench/                  # harness
 │   │   └── adapter-interface.md
 │   ├── adapter-ticktick/           # reference adapter (today)
-│   ├── adapter-obsidian/           # filesystem (planned v0.4)
-│   ├── adapter-notion/             # planned v0.4
+│   ├── adapter-obsidian/           # local markdown vault (shipped v0.4)
+│   ├── adapter-notion/             # planned
 │   ├── cli/                        # `ats` command
 │   └── mcp/                        # `@reneza/ats-mcp` — MCP server
 ├── docs/
@@ -106,8 +106,8 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 | Adapter         | Status            | Storage                         |
 | --------------- | ----------------- | ------------------------------- |
 | `ticktick`      | reference         | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
-| `obsidian`      | planned v0.4      | local markdown vault            |
-| `notion`        | planned v0.4      | Notion API                      |
+| `obsidian`      | shipped v0.4      | local markdown vault (files on disk) |
+| `notion`        | planned           | Notion API                      |
 | `things`        | wishlist          | Things URL scheme + AppleScript |
 | `apple-notes`   | wishlist          | AppleScript                     |
 | `google-tasks`  | wishlist          | Google Tasks API                |
@@ -115,10 +115,14 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 PRs welcome. Scaffold one in seconds and verify it against the contract:
 
 ```bash
-ats adapter new obsidian            # writes ats-adapter-obsidian/ (six stubs + package.json)
+ats adapter new notion              # writes ats-adapter-notion/ (six stubs + package.json)
 # …implement the six methods…
-ats adapter test ./ats-adapter-obsidian   # pass/fail/skip per contract check
+ats adapter test ./ats-adapter-notion   # pass/fail/skip per contract check
 ```
+
+Already shipped: the [Obsidian adapter](packages/adapter-obsidian/README.md) is
+a worked example of the contract over plain markdown — point ATS at a vault with
+`ATS_OBSIDIAN_VAULT` and `ats find` / `ats open` / `ats links` just work.
 
 The scaffold + conformance kit + interface doc make it a couple-hundred-line job for most well-behaved APIs.
 
@@ -137,11 +141,16 @@ ats adapter test [target]          # run the conformance kit (pass/fail/skip)
 
 # Retrieval
 ats find <query>                   # parallel + RRF + provenance — DEFAULT
+ats find <query> --explain         # ...and show each result's per-branch rank + RRF math
+ats open <id-or-title>             # jump straight to it in your task app (deep link)
 ats get <id-or-title> [--extract raw|json|yaml]
 ats url <id-or-title>              # paste-ready cross-reference link
 ats links <project> <task>         # resolve all deep-links inside a task body
 ats hybrid <query>                 # RRF of dense + sparse only
 ats similar <id>                   # find docs semantically like this one
+
+# Any read command takes --json (alias for --format json) for piping to jq / agents:
+ats find "deploy" --json | jq '.tasks[].title'
 
 # Authoring
 ats create "<title>" [--content "..."] [--project <id>] [--relevance]

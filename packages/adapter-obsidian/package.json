@@ -1,41 +1,38 @@
 {
-  "name": "@reneza/ats-cli",
+  "name": "@reneza/ats-adapter-obsidian",
   "version": "0.4.0",
-  "description": "Command-line interface for Agentic Task System. Routes to the configured storage adapter and exposes find / get / url / links / hybrid / similar / create / update / bench.",
+  "description": "Obsidian vault adapter for Agentic Task System. Hybrid + RRF retrieval, the wiki layer, and the MCP server over the folder of markdown you already keep in Obsidian — adapter, not migration.",
   "type": "module",
-  "bin": {
-    "ats": "bin/ats.js"
-  },
+  "main": "index.js",
   "files": [
-    "bin/",
     "*.js"
   ],
   "license": "MIT",
   "scripts": {
     "prepublishOnly": "node ../../scripts/check-no-pii.mjs --self"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@reneza/ats-core": "^0.4.0"
   },
+  "dependencies": {},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/renezander030/agentic-task-system.git",
-    "directory": "packages/cli"
+    "directory": "packages/adapter-obsidian"
   },
   "homepage": "https://github.com/renezander030/agentic-task-system#readme",
   "bugs": {
     "url": "https://github.com/renezander030/agentic-task-system/issues"
   },
-  "author": "Ren\u00e9 Zander",
+  "author": "René Zander",
   "keywords": [
-    "ats",
-    "cli",
-    "agentic-cli",
-    "note-cli",
-    "agent-retrieval",
-    "task-search",
-    "task-management",
-    "ticktick",
+    "obsidian",
+    "obsidian-md",
+    "markdown",
+    "markdown-vault",
+    "note-taking",
+    "second-brain",
+    "zettelkasten",
     "agent-memory",
     "agent-context",
     "context-engineering",

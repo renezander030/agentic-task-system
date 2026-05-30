@@ -101,6 +101,27 @@ test('find works over a generic adapter via core retrieval (the thesis)', async 
   assert.ok(payload.tasks[0].sources.includes('keyword'));
 });
 
+test('find passes explain through to the per-result RRF breakdown', async () => {
+  const { client } = await connect(fakeAdapter());
+
+  // Without explain: provenance only, no breakdown.
+  const plain = JSON.parse(
+    textOf(await client.callTool({ name: 'find', arguments: { query: 'TLS certificate' } }))
+  );
+  assert.equal(plain.tasks[0].explain, undefined);
+  assert.equal(plain.k, undefined);
+
+  // With explain: each result carries a [{source, rank, contribution}] breakdown
+  // and the result echoes the RRF constant k.
+  const res = JSON.parse(
+    textOf(await client.callTool({ name: 'find', arguments: { query: 'TLS certificate', explain: true } }))
+  );
+  assert.equal(res.k, 60);
+  const top = res.tasks[0];
+  assert.ok(Array.isArray(top.explain) && top.explain.length >= 1);
+  assert.ok('source' in top.explain[0] && 'rank' in top.explain[0] && 'contribution' in top.explain[0]);
+});
+
 test('get_task returns the full item', async () => {
   const { client } = await connect(fakeAdapter());
   const res = await client.callTool({ name: 'get_task', arguments: { projectId: 'p1', taskId: 't1' } });

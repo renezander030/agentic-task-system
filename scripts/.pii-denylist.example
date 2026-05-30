@@ -1,0 +1,27 @@
+# scripts/.pii-denylist  —  copy this file to scripts/.pii-denylist (gitignored)
+#
+# The publish-safety gate (scripts/check-no-pii.mjs) loads scripts/.pii-denylist
+# and FAILS the build if any term below appears in a public surface (git-tracked
+# files or the npm publish tarball). Use it for the names the structural checks
+# can't know about on their own: your real project, client, employer, and
+# income-channel names — the kind of thing your task app is full of.
+#
+# Rules:
+#   - one literal term per line, matched case-insensitively as a substring
+#   - blank lines and #-comments are ignored
+#   - this .example file ships; the real .pii-denylist never does (see .gitignore)
+#
+# The entries below are GENERIC PLACEHOLDERS to show the format. Replace them
+# with your own real terms — and never commit the result.
+
+# --- real project / codename examples (replace) ---
+acme-rebrand
+project-northstar
+
+# --- real client / employer examples (replace) ---
+globex-corp
+initech
+
+# --- income-channel / internal-label examples (replace) ---
+consulting-retainer
+course-revenue

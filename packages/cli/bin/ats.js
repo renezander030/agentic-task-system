@@ -14,10 +14,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, formatOutput, getMainHelp, getNotesHelp, getTasksHelp, getAuthHelp, getProjectsHelp, getAdapterHelp } from '../parser.js';
-import { validateAdapter, runConformance, formatConformance } from '@reneza/ats-core';
+import { parseArgs, formatOutput, getMainHelp, getNotesHelp, getTasksHelp, getAuthHelp, getProjectsHelp, getAdapterHelp, getOpenHelp } from '../parser.js';
+import { validateAdapter, runConformance, formatConformance, find as coreFind, similar as coreSimilar, logUsage } from '@reneza/ats-core';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
+import { resolveOpen, formatOpenResult, launchUrl, shouldLaunch } from '../open.js';
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -115,6 +116,9 @@ async function main() {
       case 'notes':
         result = await handleNotes();
         break;
+      case 'open':
+        result = await handleOpen();
+        break;
       case 'find':
       case 'get':
       case 'url':
@@ -179,12 +183,13 @@ function helpFor(command) {
     case 'tasks': return getTasksHelp();
     case 'notes': return getNotesHelp();
     case 'adapter': return getAdapterHelp();
+    case 'open': return getOpenHelp();
     default: return getMainHelp();
   }
 }
 
 const COMPLETION_COMMANDS = [
-  'find', 'get', 'doctor', 'adapter', 'init', 'config', 'auth',
+  'find', 'open', 'get', 'doctor', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
 
@@ -328,72 +333,95 @@ async function handleProjects() {
   const adapter = await loadAdapter();
   switch (args.subcommand) {
     case 'list': return adapter.listProjects();
-    case 'get':
+    case 'get': {
       if (!args.positional[0]) { console.error('Usage: ats projects get PROJECT_ID'); process.exit(1); }
-      return adapter.__ext.projects.get(args.positional[0]);
+      const get = adapter.__ext?.projects?.get;
+      if (!get) {
+        throw new Error(
+          `'ats projects get' needs the adapter's project-detail capability, which the active adapter doesn't provide. ` +
+          `Use 'ats projects list' to enumerate projects.`
+        );
+      }
+      return get(args.positional[0]);
+    }
     default:
       console.log(getProjectsHelp());
   }
 }
 
+// A task subcommand that needs an adapter-specific capability the active
+// adapter doesn't expose. Generic adapters (Obsidian, plain markdown) get
+// list/get/create/update/find/similar via core + the contract instead.
+function needsTaskExt(method, sub) {
+  throw new Error(
+    `'ats tasks ${sub}' needs the '${method}' capability, which the active adapter doesn't provide. ` +
+    `Try 'ats find' — it works over any adapter.`
+  );
+}
+
+function tagsToArray(tags) {
+  if (Array.isArray(tags)) return tags;
+  if (typeof tags === 'string') return tags.split(',').map((s) => s.trim()).filter(Boolean);
+  return undefined;
+}
+
 async function handleTasks() {
   const adapter = await loadAdapter();
-  const t = adapter.__ext.tasks;
+  const t = adapter.__ext?.tasks; // optional: rich adapters (TickTick) provide it
+  const limit = parseInt(args.options.limit) || 5;
   switch (args.subcommand) {
     case 'list':
       if (!args.positional[0]) { console.error('Usage: ats tasks list PROJECT_ID'); process.exit(1); }
-      return await t.list(args.positional[0]);
+      return t?.list ? await t.list(args.positional[0]) : await adapter.listTasksInProject(args.positional[0]);
     case 'get':
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks get PROJECT_ID TASK_ID'); process.exit(1); }
-      return await t.get(args.positional[0], args.positional[1]);
+      return t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
     case 'create': {
       let projectId = args.options.project || '';
       let title = args.positional[0];
       if (args.positional.length >= 2) { projectId = args.positional[0]; title = args.positional[1]; }
-      const result = await t.create(projectId, title, {
-        content: args.options.content,
-        dueDate: args.options.due,
-        priority: args.options.priority,
-        tags: args.options.tags,
+      if (!title) { console.error('Usage: ats tasks create [PROJECT_ID] TITLE'); process.exit(1); }
+      const opts = { content: args.options.content, dueDate: args.options.due, priority: args.options.priority, tags: args.options.tags };
+      if (t?.create) return await t.create(projectId, title, opts);
+      return await adapter.createTask({
+        title,
+        projectId: projectId || undefined,
+        content: opts.content,
+        dueDate: opts.dueDate,
+        tags: tagsToArray(opts.tags),
       });
-      return result;
     }
-    case 'update':
+    case 'update': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
-      return await t.update(args.positional[0], args.positional[1], {
-        title: args.options.title,
-        content: args.options.content,
-        dueDate: args.options.due,
-        priority: args.options.priority,
-        tags: args.options.tags,
-      });
-    case 'find':
+      const patch = { title: args.options.title, content: args.options.content, dueDate: args.options.due, priority: args.options.priority, tags: args.options.tags };
+      if (t?.update) return await t.update(args.positional[0], args.positional[1], patch);
+      return await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
+    }
+    case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats tasks find QUERY'); process.exit(1); }
-      return await t.find(args.positional[0], {
-        limit: parseInt(args.options.limit) || 5,
-        budgetMs: parseInt(args.options['budget-ms']) || 3000,
-      });
-    case 'hybrid':
-      if (!args.positional[0]) { console.error('Usage: ats tasks hybrid QUERY'); process.exit(1); }
-      return await t.hybridSearch(args.positional[0], { limit: parseInt(args.options.limit) || 5 });
-    case 'semantic':
-      if (!args.positional[0]) { console.error('Usage: ats tasks semantic QUERY'); process.exit(1); }
-      return await t.semanticSearch(args.positional[0], { limit: parseInt(args.options.limit) || 5 });
-    case 'search':
-      if (!args.positional[0]) { console.error('Usage: ats tasks search QUERY'); process.exit(1); }
-      return await t.search(args.positional[0]);
+      const opts = { limit, budgetMs: parseInt(args.options['budget-ms']) || 3000, explain: !!args.options.explain };
+      // Rich adapters bring their own embedder-backed find; generic adapters get
+      // core's storage-agnostic keyword + native + RRF fan-out over the contract.
+      return t?.find ? await t.find(args.positional[0], opts) : await coreFind(args.positional[0], { adapter, ...opts, log: logUsage });
+    }
     case 'similar':
       if (!args.positional[0]) { console.error('Usage: ats tasks similar TASK_ID'); process.exit(1); }
-      return await t.findSimilar(args.positional[0], { limit: parseInt(args.options.limit) || 5 });
+      return t?.findSimilar ? await t.findSimilar(args.positional[0], { limit }) : await coreSimilar(args.positional[0], { limit });
+    case 'hybrid':
+      if (!args.positional[0]) { console.error('Usage: ats tasks hybrid QUERY'); process.exit(1); }
+      return t?.hybridSearch ? await t.hybridSearch(args.positional[0], { limit }) : needsTaskExt('hybridSearch', 'hybrid');
+    case 'semantic':
+      if (!args.positional[0]) { console.error('Usage: ats tasks semantic QUERY'); process.exit(1); }
+      return t?.semanticSearch ? await t.semanticSearch(args.positional[0], { limit }) : needsTaskExt('semanticSearch', 'semantic');
+    case 'search':
+      if (!args.positional[0]) { console.error('Usage: ats tasks search QUERY'); process.exit(1); }
+      return t?.search ? await t.search(args.positional[0]) : needsTaskExt('search', 'search');
     case 'completed':
-      return await t.listCompleted({
-        startDate: args.options.from,
-        endDate: args.options.to,
-      });
+      return t?.listCompleted ? await t.listCompleted({ startDate: args.options.from, endDate: args.options.to }) : needsTaskExt('listCompleted', 'completed');
     case 'vector-sync':
-      return await t.vectorSync({ forceFull: !!args.options.full, maxEmbeddings: parseInt(args.options.max) || 200 });
+      return t?.vectorSync ? await t.vectorSync({ forceFull: !!args.options.full, maxEmbeddings: parseInt(args.options.max) || 200 }) : needsTaskExt('vectorSync', 'vector-sync');
     case 'vector-status':
-      return await t.vectorStatus();
+      return t?.vectorStatus ? await t.vectorStatus() : needsTaskExt('vectorStatus', 'vector-status');
     default:
       console.log(getTasksHelp());
   }
@@ -401,7 +429,13 @@ async function handleTasks() {
 
 async function handleNotes() {
   const adapter = await loadAdapter();
-  const n = adapter.__ext.notes;
+  const n = adapter.__ext?.notes;
+  if (!n) {
+    throw new Error(
+      `'ats notes' needs the adapter's wiki/notes layer, which the active adapter doesn't provide. ` +
+      `The Obsidian adapter and TickTick adapter expose it; generic adapters can still use 'ats find'.`
+    );
+  }
   switch (args.subcommand) {
     case 'find':
       if (!args.positional[0]) { console.error('Usage: ats notes find QUERY'); process.exit(1); }
@@ -436,6 +470,22 @@ async function handleNotes() {
     default:
       console.log(getNotesHelp());
   }
+}
+
+// `ats open <id-or-title>` — resolve a note/task and open it in the storage
+// app/web, via the adapter's urlFor() deep link.
+//   ats open "deployment runbook"   → fuzzy-resolve a note by title, then open
+//   ats open <full-note-id>          → resolve within the notes project, open
+//   ats open PROJECT_ID TASK_ID      → open an arbitrary task directly
+//   --print  → print the URL only (don't launch)   --json → { url, ... }
+// Resolution + launcher + output shaping live in ../open.js (unit-tested).
+async function handleOpen() {
+  const adapter = await loadAdapter();
+  // parseArgs put the 1st token in subcommand; fold it back into the arg list.
+  const argv = [args.subcommand, ...args.positional];
+  const resolved = await resolveOpen({ adapter, argv, options: args.options });
+  const launchResult = shouldLaunch(args.options) ? await launchUrl(resolved.url) : null;
+  return formatOpenResult(resolved, args.options, launchResult);
 }
 
 async function handleShortcut(verb) {

@@ -103,7 +103,7 @@ const pkgTemplate = (slug) =>
       type: 'module',
       main: 'index.js',
       license: 'MIT',
-      peerDependencies: { '@reneza/ats-core': '^0.3.0' },
+      peerDependencies: { '@reneza/ats-core': '^0.4.0' },
       keywords: ['ats', 'ats-adapter', 'agent-memory', slug],
     },
     null,

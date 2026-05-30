@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-adapter-ticktick",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Reference TickTick adapter for Agentic Task System. Wraps TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) into the ATS adapter contract.",
   "type": "module",
   "main": "index.js",
@@ -8,8 +8,11 @@
     "*.js"
   ],
   "license": "MIT",
+  "scripts": {
+    "prepublishOnly": "node ../../scripts/check-no-pii.mjs --self"
+  },
   "peerDependencies": {
-    "@reneza/ats-core": "^0.3.0"
+    "@reneza/ats-core": "^0.4.0"
   },
   "dependencies": {},
   "repository": {

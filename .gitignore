@@ -13,3 +13,11 @@ search-log.jsonl
 packages/core/bench/data/questions.jsonl
 packages/core/bench/results/*.jsonl
 packages/core/bench/results/*.md
+
+# Publish-safety gate (scripts/check-no-pii.mjs): your real project / client /
+# trunk names go here so the gate fails if any leak into a public surface. Never
+# commit it — only the tracked .pii-denylist.example template ships.
+scripts/.pii-denylist
+
+# npm pack artifacts
+*.tgz

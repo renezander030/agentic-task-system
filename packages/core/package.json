@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Adapter-agnostic core for Agentic Task System \u2014 retrieval (RRF parallel fan-out), corpus cache, usage logging, conformance kit, adapter interface",
   "type": "module",
   "main": "index.js",
@@ -18,6 +18,9 @@
     "./adapter-interface": { "types": "./adapter-interface.d.ts", "default": "./adapter-interface.js" }
   },
   "license": "MIT",
+  "scripts": {
+    "prepublishOnly": "node ../../scripts/check-no-pii.mjs --self"
+  },
   "dependencies": {},
   "repository": {
     "type": "git",

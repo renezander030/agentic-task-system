@@ -13,10 +13,22 @@ export interface RankedDoc {
   [key: string]: unknown;
 }
 
+/** One branch's contribution to a fused doc's RRF score. */
+export interface ExplainEntry {
+  /** Branch name that surfaced the doc (e.g. 'keyword', 'hybrid'). */
+  source: string;
+  /** 1-based rank of the doc within that branch. */
+  rank: number;
+  /** This branch's RRF contribution: 1/(k+rank). */
+  contribution: number;
+}
+
 /** A fused doc: the original doc plus its fused score + provenance. */
 export interface FusedDoc extends RankedDoc {
   rrf: number;
   sources: string[];
+  /** Per-branch rank/contribution breakdown; present only when explain=true. */
+  explain?: ExplainEntry[];
 }
 
 export interface Branch {
@@ -30,7 +42,10 @@ export interface Branch {
 export function rrf(rankedLists: string[][], k?: number): string[];
 
 /** Provenance-aware fusion over branch results. */
-export function fuse(branches: Branch[], opts?: { k?: number; limit?: number }): FusedDoc[];
+export function fuse(
+  branches: Branch[],
+  opts?: { k?: number; limit?: number; explain?: boolean }
+): FusedDoc[];
 
 export interface CorpusResult {
   corpus: Task[];
@@ -66,6 +81,8 @@ export interface FindOptions {
   cache?: boolean;
   k?: number;
   candidatesPerSource?: number;
+  /** Attach a per-result rank/contribution breakdown to each fused doc. */
+  explain?: boolean;
   /** Override the corpus loader (store-specific prefetch). */
   loadCorpus?: () => Promise<CorpusResult>;
   /** Usage-log record callback. */
@@ -88,6 +105,8 @@ export interface FindResult {
   corpus?: { fromCache: boolean; ageMs: number | null; size: number };
   error?: string;
   branches: BranchSummary[];
+  /** RRF constant; present only when explain=true (contribution = 1/(k+rank)). */
+  k?: number;
   tasks: FusedDoc[];
 }
 

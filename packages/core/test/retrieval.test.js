@@ -39,6 +39,39 @@ test('fuse annotates rrf score + provenance and ranks agreement first', () => {
   assert.equal(typeof byId['2'].rrf, 'number');
 });
 
+test('fuse omits explain by default and attaches a breakdown when asked', () => {
+  const branches = [
+    { name: 'keyword', docs: [{ id: '1', title: 'A' }, { id: '2', title: 'B' }] },
+    { name: 'native', docs: [{ id: '2', title: 'B' }, { id: '3', title: 'C' }] },
+  ];
+  // Default: no explain field.
+  assert.equal(fuse(branches, { limit: 10 })[0].explain, undefined);
+
+  // explain:true → per-branch {source, rank, contribution} that sums to rrf.
+  const out = fuse(branches, { limit: 10, explain: true });
+  const top = out.find((d) => d.id === '2'); // surfaced by both branches
+  assert.equal(top.explain.length, 2);
+  assert.deepEqual(top.explain.map((e) => e.source).sort(), ['keyword', 'native']);
+  // contributions are rounded to 4 decimals; they sum to ~rrf (also rounded).
+  const summed = top.explain.reduce((s, e) => s + e.contribution, 0);
+  assert.ok(Math.abs(summed - top.rrf) < 1e-4, `${summed} ≈ ${top.rrf}`);
+  // rank is 1-based; contribution is 1/(k+rank) with default k=60, 4-dp rounded.
+  const kw = top.explain.find((e) => e.source === 'keyword');
+  assert.equal(kw.rank, 2);
+  assert.equal(kw.contribution, Math.round((1 / (60 + 2)) * 10000) / 10000);
+});
+
+test('find threads explain through to per-result breakdown + echoes k', async () => {
+  const plain = await find('ffmpeg', { adapter: fakeAdapter, cache: false });
+  assert.equal(plain.k, undefined);
+  assert.equal(plain.tasks[0].explain, undefined);
+
+  const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false, explain: true });
+  assert.equal(res.k, 60);
+  assert.ok(Array.isArray(res.tasks[0].explain));
+  assert.equal(res.tasks[0].explain[0].source, 'keyword');
+});
+
 test('find works on a fake adapter with zero retrieval code (keyword branch)', async () => {
   const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false });
   assert.equal(res.mode, 'find');

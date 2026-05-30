@@ -19,6 +19,9 @@ import * as corpusCache from './corpus-cache.js';
 /** Canonical RRF constant from the original paper. */
 export const RRF_K = 60;
 
+/** Round to 4 decimals — keeps RRF scores readable + stable across platforms. */
+const round4 = (n) => Math.round(n * 10000) / 10000;
+
 /**
  * Reciprocal Rank Fusion over N ranked lists of doc IDs.
  *
@@ -47,36 +50,48 @@ export function rrf(rankedLists, k = RRF_K) {
  * each doc. Returns docs annotated with `rrf` (the fused score) and `sources`
  * (the branch names that surfaced it).
  *
+ * Pass `explain: true` to also attach a per-doc `explain` array — one entry per
+ * branch that surfaced the doc, recording `{ source, rank, contribution }` so a
+ * caller can show exactly why a result landed where it did (rank is 1-based;
+ * contribution is 1/(k+rank), and the contributions sum to `rrf`).
+ *
  * @param {{name:string, docs:Array<{id:string}>}[]} branches
- * @param {{k?:number, limit?:number}} [opts]
- * @returns {Array<object & {rrf:number, sources:string[]}>}
+ * @param {{k?:number, limit?:number, explain?:boolean}} [opts]
+ * @returns {Array<object & {rrf:number, sources:string[], explain?:Array}>}
  */
-export function fuse(branches, { k = RRF_K, limit = Infinity } = {}) {
-  const fused = new Map(); // id -> { score, doc, sources }
+export function fuse(branches, { k = RRF_K, limit = Infinity, explain = false } = {}) {
+  const fused = new Map(); // id -> { score, doc, sources, contributions }
   for (const branch of branches) {
     branch.docs.forEach((doc, i) => {
       const id = doc.id;
       if (!id) return;
-      const contribution = 1 / (k + i + 1);
+      const rank = i + 1;
+      const contribution = 1 / (k + rank);
+      const note = { source: branch.name, rank, contribution: round4(contribution) };
       const cur = fused.get(id);
       if (cur) {
         cur.score += contribution;
         cur.sources.push(branch.name);
+        cur.contributions.push(note);
         // Prefer the doc with more populated fields.
         if (!cur.doc.title && doc.title) cur.doc = { ...cur.doc, ...doc };
       } else {
-        fused.set(id, { score: contribution, doc, sources: [branch.name] });
+        fused.set(id, { score: contribution, doc, sources: [branch.name], contributions: [note] });
       }
     });
   }
   return [...fused.values()]
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
-    .map((entry) => ({
-      ...entry.doc,
-      rrf: Math.round(entry.score * 10000) / 10000,
-      sources: entry.sources,
-    }));
+    .map((entry) => {
+      const out = {
+        ...entry.doc,
+        rrf: round4(entry.score),
+        sources: entry.sources,
+      };
+      if (explain) out.explain = entry.contributions;
+      return out;
+    });
 }
 
 /**
@@ -176,6 +191,7 @@ function withDeadline(run, ms) {
  * @param {boolean} [cfg.cache=true]
  * @param {number} [cfg.k=RRF_K]
  * @param {number} [cfg.candidatesPerSource=20]
+ * @param {boolean} [cfg.explain=false] - attach per-result rank/contribution breakdown
  * @param {Function} [cfg.loadCorpus] - override the corpus loader (store-specific)
  * @param {Function} [cfg.log] - usage-log record callback
  * @returns {Promise<object>} { query, mode, count, elapsedMs, corpus, branches, tasks }
@@ -190,6 +206,7 @@ export async function find(query, cfg = {}) {
     cache = true,
     k = RRF_K,
     candidatesPerSource = 20,
+    explain = false,
     loadCorpus: loadCorpusOverride,
     log,
   } = cfg;
@@ -273,7 +290,7 @@ export async function find(query, cfg = {}) {
   );
 
   const branches = settled.filter((b) => b.ok).map((b) => ({ name: b.name, docs: b.value }));
-  const tasks = fuse(branches, { k, limit });
+  const tasks = fuse(branches, { k, limit, explain });
 
   const branchSummary = settled.map((b) => ({
     name: b.name,
@@ -300,6 +317,7 @@ export async function find(query, cfg = {}) {
     elapsedMs: Date.now() - t0,
     corpus: { fromCache, ageMs, size: corpus.length },
     branches: branchSummary,
+    ...(explain ? { k } : {}),
     tasks,
   };
 }

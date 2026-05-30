@@ -35,6 +35,10 @@ export function parseArgs(args) {
       result.options.version = true;
     } else if (arg === '--format' && args[i + 1]) {
       result.options.format = args[++i];
+    } else if (arg === '--json') {
+      // Ergonomic shorthand for `--format json`. Makes every read command emit
+      // machine-readable output for piping into jq / agents.
+      result.options.format = 'json';
     } else if (arg.startsWith('--') && args[i + 1] && !args[i + 1].startsWith('-')) {
       // Generic option with value
       const key = arg.slice(2);
@@ -155,6 +159,11 @@ function formatObject(obj) {
       lines.push(formatArray(obj.tasks));
     }
     return lines.join('\n');
+  }
+
+  // Handle parallel fan-out `find` results (RRF fusion w/ provenance + --explain)
+  if (obj.mode === 'find' && Array.isArray(obj.tasks)) {
+    return formatFindResults(obj);
   }
 
   // Handle semantic search results
@@ -282,6 +291,54 @@ function formatScoredResults(results) {
 }
 
 /**
+ * Format parallel fan-out `find` results: a header with corpus + per-branch
+ * timing, then each fused result with its RRF score and provenance. When the
+ * result carries an `explain` breakdown (--explain), show the per-branch rank
+ * and contribution (1/(k+rank)) that summed to the RRF score.
+ */
+function formatFindResults(obj) {
+  const lines = [];
+  const plural = obj.count === 1 ? '' : 's';
+  lines.push(`find "${obj.query}" — ${obj.count} result${plural} in ${obj.elapsedMs}ms`);
+
+  if (obj.corpus) {
+    let c = `corpus: ${obj.corpus.size} items`;
+    if (obj.corpus.fromCache) {
+      const age = obj.corpus.ageMs != null ? `, ${Math.round(obj.corpus.ageMs / 1000)}s old` : '';
+      c += ` (cached${age})`;
+    }
+    lines.push(c);
+  }
+
+  const branchInfo = (obj.branches || [])
+    .map((b) => `${b.name} ${b.ok ? `${b.count}` : '✗'}/${b.elapsedMs}ms${b.error ? ` (${b.error})` : ''}`)
+    .join(', ');
+  if (branchInfo) lines.push(`branches: ${branchInfo}`);
+  if (obj.k !== undefined) lines.push(`RRF k=${obj.k} (contribution = 1/(k+rank))`);
+  lines.push('');
+
+  if (obj.tasks.length === 0) {
+    lines.push('(no matches)');
+    return lines.join('\n');
+  }
+
+  obj.tasks.forEach((t, i) => {
+    lines.push(`${i + 1}. ${t.title || '(untitled)'}`);
+    const meta = [];
+    if (t.projectName) meta.push(t.projectName);
+    if (t.rrf != null) meta.push(`rrf ${t.rrf}`);
+    if (Array.isArray(t.sources) && t.sources.length) meta.push(`via ${t.sources.join('+')}`);
+    if (meta.length) lines.push(`   ${meta.join(' · ')}`);
+    if (Array.isArray(t.explain)) {
+      for (const c of t.explain) {
+        lines.push(`     ${c.source} #${c.rank} → +${c.contribution}`);
+      }
+    }
+  });
+  return lines.join('\n');
+}
+
+/**
  * Truncate string to max length
  */
 function truncate(str, maxLen) {
@@ -331,6 +388,7 @@ Usage: ats <command> [options]
 
 Commands:
   find <query>   Hybrid retrieval (dense + sparse + keyword, fused via RRF)
+  open <ref>     Open an item in your task app (deep link via the adapter)
   get <ref>      Fetch one item by id or title
   doctor         Diagnose adapter, auth, capabilities, cache, retrieval
   adapter        Conformance-test or scaffold a storage adapter
@@ -344,12 +402,15 @@ Global options:
   --help, -h        Show help
   --version, -v     Show version
   --format <type>   Output format: text (default) or json
+  --json            Shorthand for --format json (machine-readable, pipe to jq)
 
 Run 'ats <command> --help' for command-specific help.
 
 Quick start:
-  ats init ats                 # Select an adapter + health-check
+  ats init ats                       # Select an adapter + health-check
   ats find "deployment runbook"      # Hybrid retrieval over your store
+  ats find "deployment runbook" --explain   # ...and show why each result ranked
+  ats open "deployment runbook"      # Jump straight to it in your task app
 
 Write an adapter for any store:
   ats adapter new obsidian           # Scaffold ats-adapter-obsidian
@@ -384,6 +445,36 @@ Examples:
   ats adapter test @you/ats-adapter-notion --write
   ats adapter test ./my-adapter --format json
   ats adapter new obsidian`;
+}
+
+/**
+ * Generate open command help
+ */
+export function getOpenHelp() {
+  return `ats open - Open an item in your task app
+
+Resolves a note or task and opens it in the storage app/web via the active
+adapter's deep link (urlFor). Resolution mirrors 'ats get': full id, short id,
+exact title, or fuzzy title — within the notes project (default
+"Permanent Notes"). Pass an explicit PROJECT_ID TASK_ID pair to open any task.
+
+Usage: ats open <id-or-title> [options]
+       ats open PROJECT_ID TASK_ID
+
+Options:
+  --project <name-or-id>   Override notes project for title resolution
+  --exact                  Require exact-title match (no fuzzy)
+  --print                  Print the URL only; don't launch a browser
+  --json                   Emit { url, projectId, taskId, title }
+
+Environment:
+  ATS_OPEN_CMD             Override the OS open command (e.g. "wslview" on WSL)
+
+Examples:
+  ats open "deployment runbook"
+  ats open "ffmpeg cheatsheet" --print
+  ats open 6890b500ebcdba0000000414 687c7b0febcdba0000001d29
+  ats open "Trunk Catalog" --json | jq -r .url`;
 }
 
 /**
@@ -503,6 +594,9 @@ Subcommands:
                                    hybrid + keyword + notes_find concurrently,
                                    merges via RRF. Best for "max accurate info
                                    per unit time" agent flows.
+                                   --explain shows per-branch rank + RRF
+                                   contribution for each result. --limit,
+                                   --budget-ms tune breadth/deadline.
   similar <task_id>                Find semantically similar tasks
   due [days]                       Tasks due within N days (default: 7)
   priority                         High priority tasks

@@ -465,7 +465,7 @@ export async function priority(deps = {}) {
  * @returns {Promise<{ query, mode, count, elapsedMs, branches, tasks }>}
  */
 export async function find(query, options = {}, deps = {}) {
-  const { limit = 5, budgetMs = 3000 } = options;
+  const { limit = 5, budgetMs = 3000, explain = false } = options;
   const {
     apiRequest = coreFunctions.apiRequest,
     formatPriority = coreFunctions.formatPriority,
@@ -552,6 +552,7 @@ export async function find(query, options = {}, deps = {}) {
   return retrieval.find(query, {
     limit,
     budgetMs,
+    explain,
     embedder: { hybrid: vectorHybrid },
     retrievers: [notesFind],
     loadCorpus,

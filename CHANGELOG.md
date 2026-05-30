@@ -1,6 +1,60 @@
 
 # Changelog
 
+## 0.4.0 — Obsidian adapter, a storage-agnostic CLI, and a publish-safety gate
+
+The release that proves "adapter, not migration" over *plain files on disk*: an
+Obsidian-vault adapter with zero retrieval code, a CLI that no longer assumes the
+TickTick feature set, and a deterministic gate that makes leaking personal data
+into a public package a build failure.
+
+### Added
+
+- **`@reneza/ats-adapter-obsidian`** — an Obsidian-vault storage adapter: point
+  ATS at a folder of markdown and the whole machinery works over it — `ats find`
+  (keyword + native + RRF fusion), the wiki layer (`ats get / url / links /
+  open`), the conformance kit, and the MCP server — with *zero* retrieval code in
+  the adapter. Folders map to projects (vault root = `.`), `.md` files to notes,
+  tags come from frontmatter `tags:` + inline `#tags`, and deep links are
+  `obsidian://open?vault=…&file=…`. Configure with `ATS_OBSIDIAN_VAULT` (and
+  optional `ATS_OBSIDIAN_VAULT_NAME`). Proves the "adapter, not migration" thesis
+  over plain files on disk — no server, no OAuth, no sync.
+- **`ats open <id-or-title>`** — resolve a note/task (full id, short id, exact
+  or fuzzy title) and open it in your task app via the adapter's `urlFor()` deep
+  link. Pass an explicit `PROJECT_ID TASK_ID` pair to open any task; `--print`
+  emits just the URL, `--json` emits `{ url, projectId, taskId, title }`. The OS
+  opener is overridable with `ATS_OPEN_CMD` (e.g. `wslview` on WSL) and degrades
+  to printing the link when no browser is available (headless/CI).
+- **`ats find --explain`** — annotate each result with a per-branch breakdown
+  (`{ source, rank, contribution }`) showing exactly why it ranked where it did:
+  the RRF contribution `1/(k+rank)` from every retriever that surfaced it, which
+  sum to the fused score. In core, `fuse()`/`find()` take `explain: true` and
+  the result echoes the RRF constant `k`.
+- **`--json` global shorthand** — alias for `--format json` on every read
+  command, for piping into `jq` or agent pipelines.
+- **MCP `find` gains an `explain` param** — MCP clients (Claude Desktop, Cursor,
+  …) get the same per-branch rank + RRF-contribution breakdown the CLI shows.
+- **Publish-safety gate (`scripts/check-no-pii.mjs`)** — a strict, deterministic
+  guard against leaking personal data into a public surface. Scans the git-tracked
+  files (`npm test`) and the exact `npm publish` tarball of every package (each
+  package's `prepublishOnly`) for secrets, personal absolute paths, real e-mail
+  addresses, and any term in an optional gitignored `scripts/.pii-denylist`
+  (your real project / client / channel names). A hit fails the build — so a
+  leak can't reach GitHub or npm by accident.
+
+### Changed
+
+- `ats find` text output now leads with corpus + per-branch timings and shows
+  each result's RRF score and provenance (`via keyword+native`) by default —
+  not only the bare task table.
+- **CLI is now storage-agnostic.** `ats find / similar / tasks list|get|create|
+  update` fall back to core's retrieval + the bare adapter contract when an
+  adapter doesn't ship the rich `__ext.tasks` layer (TickTick still uses its
+  embedder-backed path). `ats projects get` and `ats notes` now report a clear,
+  actionable error instead of crashing on adapters that don't expose those
+  capabilities. This is what lets a plain-markdown adapter (Obsidian) drive the
+  full CLI.
+
 ## 0.3.0 — Storage-agnostic core, MCP server, and the adapter toolkit
 
 The release that makes "adapter, not migration" *true* and *verifiable*.
@@ -95,5 +149,5 @@ Renamed from *Agentic Knowledge Base (AKB)* to **Agentic Task System (ATS)** to 
 ### Roadmap
 
 - **0.3** — Storage-agnostic core, MCP server, adapter toolkit (shipped)
-- **0.4** — `@reneza/ats-adapter-notion` + `@reneza/ats-adapter-obsidian`
+- **0.4** — `@reneza/ats-adapter-obsidian` (shipped); `@reneza/ats-adapter-notion`
 - **0.5+** — Things, Apple Notes, Google Tasks adapters; fact-propagation queue

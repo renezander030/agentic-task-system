@@ -72,14 +72,21 @@ export function createServer(adapter) {
     {
       query: z.string().describe('What to search for'),
       limit: z.number().int().positive().max(50).optional().describe('Max results (default 5)'),
+      explain: z
+        .boolean()
+        .optional()
+        .describe(
+          'Attach a per-result ranking breakdown: for each retriever that surfaced a result, its rank and RRF contribution (1/(k+rank)), which sum to the fused score. Use to justify why a result ranked where it did.'
+        ),
     },
-    async ({ query, limit }) => {
+    async ({ query, limit, explain }) => {
       try {
         // Prefer the adapter's enriched find (embedder + store-specific
         // branches); fall back to core's generic fan-out over the contract.
+        const opts = { limit: limit ?? 5, explain: !!explain };
         const result = ext.tasks?.find
-          ? await ext.tasks.find(query, { limit: limit ?? 5 })
-          : await coreFind(query, { adapter, limit: limit ?? 5 });
+          ? await ext.tasks.find(query, opts)
+          : await coreFind(query, { adapter, ...opts });
         return ok(result);
       } catch (e) {
         return fail(e);
