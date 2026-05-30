@@ -14,6 +14,8 @@
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
 </p>
 
+`ats` is an **MCP server and CLI that gives your AI agent memory from the task manager you already use** — TickTick or an Obsidian vault — with hybrid (dense + sparse + keyword, RRF) retrieval and no vector database to build or maintain.
+
 Most "agent memory" projects build a *new* store — a vector DB, a bespoke
 framework — that drifts from reality the moment you stop feeding it. But you
 already maintain a knowledge base by hand, every day: your task app. Years of
