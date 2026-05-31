@@ -1,9 +1,7 @@
 
 <p align="center">
-  <img src="assets/logo.svg" alt="Agentic Task System" width="108" height="108" />
+  <img src="assets/logo.png" alt="Agentic Task System" width="420" />
 </p>
-
-<h1 align="center">Agentic Task System</h1>
 
 <p align="center"><strong>Your task manager is the best agent memory you're not using.</strong></p>
 
