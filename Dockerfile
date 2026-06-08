@@ -17,4 +17,7 @@ RUN npm ci --ignore-scripts
 # only contacted when a tool is actually invoked.
 ENV ATS_ADAPTER=@reneza/ats-adapter-ticktick
 
-ENTRYPOINT ["node", "packages/mcp/server.js"]
+# Split exe/arg so the runner's "CMD arguments" maps to a real argument.
+# ENTRYPOINT is the interpreter; CMD is the server entry passed as argv.
+ENTRYPOINT ["node"]
+CMD ["packages/mcp/server.js"]
