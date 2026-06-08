@@ -1,0 +1,32 @@
+# Glama.ai deployment spec for the Agentic Task System MCP server.
+# Declares the build + runtime so the server can be hosted and security-scanned.
+apiVersion: v1
+kind: MCPServer
+metadata:
+  name: agentic-task-system
+  description: "Turns the task manager you already use into agent memory: hybrid (dense + sparse + keyword, RRF) retrieval over TickTick or an Obsidian vault via a small adapter contract."
+  version: "0.4.1"
+  tags:
+    - agent-memory
+    - retrieval
+    - rrf
+    - hybrid-search
+    - task-management
+    - ticktick
+    - obsidian
+
+spec:
+  docker:
+    dockerfile: Dockerfile
+    context: .
+
+  runtime:
+    command: ["node", "packages/mcp/server.js"]
+    workingDir: /app
+
+  environment:
+    - name: ATS_ADAPTER
+      description: "npm package name of the ATS storage adapter to load. Defaults to the TickTick adapter. tools/list works without credentials; an adapter is only contacted when a tool is invoked."
+      required: false
+      type: string
+      default: "@reneza/ats-adapter-ticktick"
