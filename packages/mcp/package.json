@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-mcp",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Model Context Protocol server for Agentic Task System — exposes the task app you already use to any MCP client, backed by hybrid + RRF retrieval. Storage-agnostic over the ATS adapter contract.",
   "type": "module",
   "main": "server.js",

@@ -68,10 +68,10 @@ export function createServer(adapter) {
 
   server.tool(
     'find',
-    'Search the task store with hybrid retrieval (dense + sparse + keyword) fused via Reciprocal Rank Fusion. Returns best-matching items with provenance (which retrievers found each). This is the right tool for "what do I have about X".',
+    'Read-only. Search the task store by free-text QUERY using hybrid retrieval (dense + sparse + keyword) fused via Reciprocal Rank Fusion. Returns an array of best-matching items (id, projectId, title, snippet, score) with provenance — which retrievers surfaced each. Use this for "what do I have about X". To find items like a KNOWN item instead, use `similar`. Read-only: never writes.',
     {
-      query: z.string().describe('What to search for'),
-      limit: z.number().int().positive().max(50).optional().describe('Max results (default 5)'),
+      query: z.string().describe('Free-text search string, e.g. "auth retry logic" or "Q3 roadmap". Matched against titles and bodies.'),
+      limit: z.number().int().positive().max(50).optional().describe('Maximum number of results to return. Default 5, hard cap 50.'),
       explain: z
         .boolean()
         .optional()
@@ -96,10 +96,10 @@ export function createServer(adapter) {
 
   server.tool(
     'get_task',
-    'Fetch one item (task/note) by project id + task id, including its full body.',
+    'Read-only. Fetch one item (task/note) by its project id + task id, including the full markdown body, tags, and due date. Use after `find`/`list_projects` give you the ids. Returns the single item object, or an error if not found.',
     {
-      projectId: z.string().describe('Project id'),
-      taskId: z.string().describe('Task id'),
+      projectId: z.string().describe('Id of the project/folder the item lives in (from `find` results or `list_projects`).'),
+      taskId: z.string().describe('Id of the item to fetch (from `find` results).'),
     },
     async ({ projectId, taskId }) => {
       try {
@@ -112,7 +112,7 @@ export function createServer(adapter) {
 
   server.tool(
     'list_projects',
-    'List the projects / folders in the store.',
+    'Read-only. List the projects / folders in the store, each with its id and name. Call this first to discover the projectId you need for `get_task`, `create_task`, or `update_task`. Returns an array of { id, name }.',
     {},
     async () => {
       try {
@@ -125,13 +125,13 @@ export function createServer(adapter) {
 
   server.tool(
     'create_task',
-    'Create a new item in the store. This is the agent→human write side of the two-way bus.',
+    'WRITE. Creates a new item (task/note) in the store — the agent→human write side of the two-way bus. Use to hand the human a note, action, or reminder. Side effect: a new item appears in their task app immediately. Returns the created item including its new id. To change an existing item instead, use `update_task`.',
     {
-      title: z.string(),
-      content: z.string().optional().describe('Markdown body'),
-      projectId: z.string().optional().describe('Target project; omit for inbox/default'),
-      tags: z.array(z.string()).optional(),
-      dueDate: z.string().optional().describe('ISO 8601'),
+      title: z.string().describe('Short title / headline for the new item. Required.'),
+      content: z.string().optional().describe('Markdown body of the item. Optional.'),
+      projectId: z.string().optional().describe('Id of the target project (from `list_projects`). Omit to drop into the inbox/default project.'),
+      tags: z.array(z.string()).optional().describe('Tags/labels to attach, without a leading "#", e.g. ["agent", "review"].'),
+      dueDate: z.string().optional().describe('Due date as an ISO 8601 string, e.g. "2026-06-15" or "2026-06-15T09:00:00Z".'),
     },
     async (input) => {
       try {
@@ -144,14 +144,14 @@ export function createServer(adapter) {
 
   server.tool(
     'update_task',
-    'Patch an existing item (partial update). Only the provided fields change.',
+    'WRITE. Patches an existing item (partial update) — only the fields you provide change; omitted fields are left untouched. Side effect: the item is modified in the human\'s task app. Requires the item\'s projectId + taskId (get them from `find` or `list_projects`). Returns the updated item. To create a new item instead, use `create_task`.',
     {
-      projectId: z.string(),
-      taskId: z.string(),
-      title: z.string().optional(),
-      content: z.string().optional(),
-      tags: z.array(z.string()).optional(),
-      dueDate: z.string().optional(),
+      projectId: z.string().describe('Id of the project the item lives in (from `find`/`list_projects`).'),
+      taskId: z.string().describe('Id of the item to update (from `find`).'),
+      title: z.string().optional().describe('New title. Omit to leave the title unchanged.'),
+      content: z.string().optional().describe('New markdown body. Omit to leave the body unchanged. Note: replaces the body, does not append.'),
+      tags: z.array(z.string()).optional().describe('Replacement tag set (without leading "#"). Omit to leave tags unchanged.'),
+      dueDate: z.string().optional().describe('New due date as an ISO 8601 string. Omit to leave the due date unchanged.'),
     },
     async ({ projectId, taskId, ...patch }) => {
       try {
@@ -164,10 +164,10 @@ export function createServer(adapter) {
 
   server.tool(
     'similar',
-    'Find items semantically similar to a given one. Requires an embedder-backed adapter; returns a clear error otherwise.',
+    'Read-only. Find items semantically similar to a KNOWN item, given its id (not a text query — for text search use `find`). Useful for "show me related notes to this one" or dedupe. Requires an embedder-backed adapter (e.g. TickTick); returns a clear error on adapters without embeddings. Returns an array of items ranked by similarity.',
     {
-      taskId: z.string(),
-      limit: z.number().int().positive().max(50).optional(),
+      taskId: z.string().describe('Id of the reference item to find neighbours for (from `find` results).'),
+      limit: z.number().int().positive().max(50).optional().describe('Maximum number of similar items to return. Default 5, hard cap 50.'),
     },
     async ({ taskId, limit }) => {
       try {
@@ -183,8 +183,11 @@ export function createServer(adapter) {
 
   server.tool(
     'url_for',
-    'Return a paste-ready deep link to an item in its native app, so you can hand the human a clickable reference.',
-    { projectId: z.string(), taskId: z.string() },
+    'Read-only. Build a paste-ready deep link (a URL string) to an item in its native app, so you can hand the human a clickable reference. Does not open anything or write — pure id→URL construction. Returns the URL as a string.',
+    {
+      projectId: z.string().describe('Id of the project the item lives in (from `find`/`list_projects`).'),
+      taskId: z.string().describe('Id of the item to link to (from `find`).'),
+    },
     async ({ projectId, taskId }) => {
       try {
         return ok(adapter.urlFor({ projectId, taskId }));

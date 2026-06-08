@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+.git
+assets
+docs
+examples
+scripts
+*.md
+REFACTOR-PLAN.md
+.husky
