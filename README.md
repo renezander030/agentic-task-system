@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
 </p>
 
-`ats` is an **MCP server and CLI that gives your AI agent memory from the task manager you already use** — TickTick or an Obsidian vault — with hybrid (dense + sparse + keyword, RRF) retrieval and no vector database to build or maintain.
+`ats` is an **MCP server and CLI that gives your AI agent memory from the task manager you already use** — TickTick or an Obsidian vault — with hybrid (dense + sparse + keyword, RRF) retrieval and no vector database to build or maintain. Works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
 Most "agent memory" projects build a *new* store — a vector DB, a bespoke
 framework — that drifts from reality the moment you stop feeding it. But you
@@ -31,9 +31,22 @@ ats auth login
 ats find "deployment runbook"
 ```
 
+<p align="center">
+  <img src="assets/demo.svg" alt="ats find — hybrid retrieval with RRF provenance over your task manager" width="760" />
+</p>
+
 ## Why this exists
 
 Andrej Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-wiki-knowledge-base-claude-code) idea — keep notes as plain markdown an LLM can reason over — is right about the destination and wrong about the starting line. Almost nobody's knowledge lives in clean markdown; it lives in the task app they've used for years. ATS closes that gap with pluggable storage adapters, so you get an agent-queryable knowledge layer without re-homing a single note.
+
+## How it compares
+
+| Approach | Where memory lives | Upkeep | Retrieval |
+| --- | --- | --- | --- |
+| `CLAUDE.md` / memory files | markdown you re-edit by hand | manual, drifts | none — whole file injected every session |
+| Vector-DB agent memory (mem0-style) | a new store only the agent sees | rots unless you keep feeding it | dense-only |
+| Plain TickTick / Obsidian MCP servers | your task app | none | keyword or the app's native search |
+| **ATS** | your task app | none — you already curate it daily | hybrid dense + sparse + keyword, RRF, provenance |
 
 ## What changes when you wire it up
 
@@ -162,15 +175,25 @@ ats bench score                    # markdown report of hit@1 / recall@5 / MRR
 ats bench analyze-usage            # per-tool stats from ~/.config/ats/search-log.jsonl
 ```
 
-## Use it from an agent (MCP)
+## Use it from Claude Code, Claude Desktop, Cursor (MCP)
 
 [`@reneza/ats-mcp`](packages/mcp) exposes the active adapter to any MCP client
-(Claude Desktop, Cursor, …) as a small tool set — `find`, `get_task`,
-`list_projects`, `create_task`, `update_task`, `similar`, `url_for` — all backed
-by the same hybrid + RRF retrieval. Storage-agnostic over the adapter contract.
+as a small tool set — `find`, `get_task`, `list_projects`, `create_task`,
+`update_task`, `similar`, `url_for` — all backed by the same hybrid + RRF
+retrieval. Storage-agnostic over the adapter contract.
+
+For Claude Code this works as persistent memory between sessions without
+introducing a new database: the agent recalls runbooks, decisions, and project
+state from the task app you already keep current, instead of starting from zero
+after every session or compaction.
+
+```bash
+# Claude Code
+claude mcp add ats -e ATS_ADAPTER=@reneza/ats-adapter-ticktick -- ats-mcp
+```
 
 ```jsonc
-// Claude Desktop config
+// Claude Desktop / Cursor config
 {
   "mcpServers": {
     "ats": { "command": "ats-mcp", "env": { "ATS_ADAPTER": "@reneza/ats-adapter-ticktick" } }
@@ -211,6 +234,12 @@ Agent systems fail when the harness silently re-renders state between turns. ATS
 ## Versioning
 
 This is `v0.4` — the Obsidian adapter (the contract over plain markdown), a storage-agnostic CLI, and a publish-safety gate, on top of v0.3's storage-agnostic core retrieval + MCP server + adapter toolkit (conformance kit + scaffold + `doctor`). See [`CHANGELOG.md`](CHANGELOG.md).
+
+## Star history
+
+If ATS is useful to you, consider giving it a star — it helps others find it.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=renezander030/agentic-task-system&type=Date)](https://star-history.com/#renezander030/agentic-task-system&Date)
 
 ## License
 
