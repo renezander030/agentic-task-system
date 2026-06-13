@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-adapter-ticktick-cache",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Local-first ATS adapter over the TickTick MCP JSON cache, with OpenAPI-backed writes.",
   "type": "module",
@@ -10,6 +10,6 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@reneza/ats-core": "^0.4.0"
+    "@reneza/ats-core": "^0.5.0"
   }
 }

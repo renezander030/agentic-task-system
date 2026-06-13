@@ -1,7 +1,9 @@
 
 # Changelog
 
-## Unreleased - capability and claim alignment
+## 0.5.0 - TickTick parity, local cache, and secure trunk sync
+
+Released 2026-06-13.
 
 - Generic adapter `embeddings()` now powers Core hybrid retrieval and similarity in CLI and MCP fallbacks.
 - Added working `bench`, `sync vector`, wiki-project configuration, complete command help, and local-path adapter initialization.

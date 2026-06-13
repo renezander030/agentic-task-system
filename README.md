@@ -235,7 +235,7 @@ Agent systems fail when the harness silently re-renders state between turns. ATS
 
 ## Versioning
 
-This is `v0.4` — the Obsidian adapter (the contract over plain markdown), a storage-agnostic CLI, and a publish-safety gate, on top of v0.3's storage-agnostic core retrieval + MCP server + adapter toolkit (conformance kit + scaffold + `doctor`). See [`CHANGELOG.md`](CHANGELOG.md).
+This is `v0.5` — TickTick CLI parity through ATS, a local-first centralized-cache adapter, secure agent-trunk synchronization, and claim-checked public documentation, on top of v0.4's Obsidian adapter and publish-safety gate. See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Star history
 
