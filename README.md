@@ -14,6 +14,21 @@
 
 `ats` is an **MCP server and CLI that gives your AI agent memory from the task manager you already use** — TickTick or an Obsidian vault — with adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF). TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
+```mermaid
+quadrantChart
+    title Agent Memory Effectiveness Matrix
+    x-axis Low retrieval power --> High retrieval power
+    y-axis High upkeep --> Low upkeep
+    quadrant-1 Durable and powerful
+    quadrant-2 Durable but limited
+    quadrant-3 Manual and limited
+    quadrant-4 Powerful but separate
+    CLAUDE.md: [0.18, 0.22]
+    Vector DB memory: [0.75, 0.28]
+    Plain task-app MCP: [0.38, 0.78]
+    ATS: [0.88, 0.90]
+```
+
 Most "agent memory" projects build a *new* store — a vector DB, a bespoke
 framework — that drifts from reality the moment you stop feeding it. But you
 already maintain a knowledge base by hand, every day: your task app. Years of
