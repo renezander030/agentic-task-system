@@ -25,6 +25,8 @@ You'll typically pair it with a storage adapter — see [`@reneza/ats-adapter-ti
 - **Usage logger** — instrumented retrieval calls write JSONL for later analysis
 - **Bench harness** — Q/A pairs you author, scored by hit@1 / recall@5 / MRR per tag bucket
 - **Adapter interface + validator** — JSDoc types for the contract every storage adapter implements
+- **Portable execution context** — intent, lifecycle validity, typed relationships, graph traversal, and context assembly in task bodies
+- **Action ledger** — append-only JSONL records of agent actions, sources, approvals, output, and advancement
 
 ## Quick example
 
@@ -35,6 +37,8 @@ import adapter from '@reneza/ats-adapter-ticktick';
 validateAdapter(adapter);
 // adapter is now ready to plug into core.find / core.get / core.url
 ```
+
+See the [agent execution layer](https://github.com/renezander030/agentic-task-system/blob/main/docs/agent-layer.md) and run `npm run prove:intent` in the repository for a synthetic end-to-end proof.
 
 ## Adapter contract (six methods, three optional)
 

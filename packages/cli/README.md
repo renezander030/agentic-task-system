@@ -50,6 +50,14 @@ ats similar <id>                   # find related docs when embeddings are avail
 ats create "<title>" [--content "..."] [--project <id>] [--relevance]
 ats update <project> <task> [--content "..."] [--title "..."]
 
+ats intent set <project> <task> --outcome "..." --done-when "a,b"
+ats lifecycle set <project> <task> --status active --valid-until 2026-12-31
+ats link add <src-project> <src-task> <dst-project> <dst-task> --type decision
+ats link remove <src-project> <src-task> <dst-project> <dst-task> --type decision
+ats graph <project> <task> --depth 2
+ats context <project> <task> --limit 8
+ats ledger record <project> <task> --action release.verified --advanced true
+
 # --json (alias for --format json) on any read command → machine-readable output
 
 ats bench run                      # run methods against your questions.jsonl
@@ -62,6 +70,7 @@ ats bench analyze-usage            # per-tool stats from search-log.jsonl
 - **Repo**: https://github.com/renezander030/agentic-task-system
 - **Adapter interface**: https://github.com/renezander030/agentic-task-system/blob/main/docs/adapter-interface.md
 - **Wiki conventions**: https://github.com/renezander030/agentic-task-system/blob/main/docs/wiki-conventions.md
+- **Agent execution layer**: https://github.com/renezander030/agentic-task-system/blob/main/docs/agent-layer.md
 
 ## License
 

@@ -14,6 +14,8 @@
     "./retrieval": { "types": "./retrieval.d.ts", "default": "./retrieval.js" },
     "./corpus-cache": { "types": "./corpus-cache.d.ts", "default": "./corpus-cache.js" },
     "./usage-log": { "types": "./usage-log.d.ts", "default": "./usage-log.js" },
+    "./task-context": { "types": "./task-context.d.ts", "default": "./task-context.js" },
+    "./action-ledger": { "types": "./action-ledger.d.ts", "default": "./action-ledger.js" },
     "./conformance": { "types": "./conformance.d.ts", "default": "./conformance.js" },
     "./adapter-interface": { "types": "./adapter-interface.d.ts", "default": "./adapter-interface.js" }
   },

@@ -8,3 +8,20 @@ export {
 } from './corpus-cache.js';
 export { record as logUsage } from './usage-log.js';
 export { runConformance, formatConformance } from './conformance.js';
+export {
+  TASK_CONTEXT_VERSION,
+  LINK_TYPES,
+  LIFECYCLE_STATUSES,
+  normalizeTaskMetadata,
+  parseTaskMetadata,
+  writeTaskMetadata,
+  evaluateLifecycle,
+  setTaskIntent,
+  setTaskLifecycle,
+  addTaskLink,
+  removeTaskLink,
+  listTaskLinks,
+  buildTaskGraph,
+  contextForTask,
+} from './task-context.js';
+export { actionLogPath, recordAction, listActions } from './action-ledger.js';

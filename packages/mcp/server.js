@@ -20,7 +20,20 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { validateAdapter, find as coreFind, similar as coreSimilar, logUsage } from '@reneza/ats-core';
+import {
+  validateAdapter,
+  find as coreFind,
+  similar as coreSimilar,
+  logUsage,
+  setTaskIntent,
+  setTaskLifecycle,
+  addTaskLink,
+  removeTaskLink,
+  buildTaskGraph,
+  contextForTask,
+  recordAction,
+  listActions,
+} from '@reneza/ats-core';
 
 const VERSION = (() => {
   try {
@@ -53,6 +66,24 @@ const fail = (err) => ({
   content: [{ type: 'text', text: `Error: ${err?.message || String(err)}` }],
   isError: true,
 });
+
+function taskRefFromResult(result, fallback = {}) {
+  const task = result?.task || result || {};
+  return {
+    projectId: task.fullProjectId || task.projectId || fallback.projectId,
+    taskId: task.fullId || task.id || fallback.taskId,
+  };
+}
+
+function auditWrite(action, result, fallback, agent, metadata, advanced = false) {
+  const task = taskRefFromResult(result, fallback);
+  if (!task.projectId || !task.taskId) return;
+  try {
+    recordAction({ agent: agent || process.env.ATS_AGENT_ID || 'ats-mcp', action, task, advanced, metadata });
+  } catch (err) {
+    console.error(`[ats-mcp] action ledger warning: ${err.message}`);
+  }
+}
 
 /**
  * Register the ATS tool set on a fresh McpServer for the given adapter.
@@ -132,10 +163,13 @@ export function createServer(adapter) {
       projectId: z.string().optional().describe('Id of the target project (from `list_projects`). Omit to drop into the inbox/default project.'),
       tags: z.array(z.string()).optional().describe('Tags/labels to attach, without a leading "#", e.g. ["agent", "review"].'),
       dueDate: z.string().optional().describe('Due date as an ISO 8601 string, e.g. "2026-06-15" or "2026-06-15T09:00:00Z".'),
+      agent: z.string().optional().describe('Agent identity for the append-only ATS action ledger.'),
     },
-    async (input) => {
+    async ({ agent, ...input }) => {
       try {
-        return ok(await adapter.createTask(input));
+        const result = await adapter.createTask(input);
+        auditWrite('task.created', result, { projectId: input.projectId }, agent, { title: input.title });
+        return ok(result);
       } catch (e) {
         return fail(e);
       }
@@ -152,10 +186,197 @@ export function createServer(adapter) {
       content: z.string().optional().describe('New markdown body. Omit to leave the body unchanged. Note: replaces the body, does not append.'),
       tags: z.array(z.string()).optional().describe('Replacement tag set (without leading "#"). Omit to leave tags unchanged.'),
       dueDate: z.string().optional().describe('New due date as an ISO 8601 string. Omit to leave the due date unchanged.'),
+      agent: z.string().optional().describe('Agent identity for the append-only ATS action ledger.'),
     },
-    async ({ projectId, taskId, ...patch }) => {
+    async ({ projectId, taskId, agent, ...patch }) => {
       try {
-        return ok(await adapter.updateTask(projectId, taskId, patch));
+        const result = await adapter.updateTask(projectId, taskId, patch);
+        auditWrite('task.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'set_task_intent',
+    'WRITE. Adds or updates portable execution intent inside the task body: desired outcome, why it matters, completion conditions, authority, constraints, and approval requirement. Preserves the human-authored body and works through every ATS adapter.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      outcome: z.string().optional(),
+      why: z.string().optional(),
+      doneWhen: z.array(z.string()).optional(),
+      authority: z.array(z.string()).optional(),
+      constraints: z.array(z.string()).optional(),
+      approvalRequired: z.boolean().optional(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, agent, ...patch }) => {
+      try {
+        const result = await setTaskIntent(adapter, projectId, taskId, patch);
+        auditWrite('task.intent.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'set_task_lifecycle',
+    'WRITE. Sets portable lifecycle state and validity windows. Archived, expired, future, and superseded tasks are excluded by context assembly.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      status: z.enum(['active', 'archived', 'superseded']).optional(),
+      validFrom: z.string().optional(),
+      validUntil: z.string().optional(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, agent, ...patch }) => {
+      try {
+        const result = await setTaskLifecycle(adapter, projectId, taskId, patch);
+        auditWrite('task.lifecycle.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'add_task_link',
+    'WRITE. Adds a typed relationship from one task to another. Types express dependencies, evidence, decisions, outputs, supersession, support, or a general relation.',
+    {
+      sourceProjectId: z.string(),
+      sourceTaskId: z.string(),
+      targetProjectId: z.string(),
+      targetTaskId: z.string(),
+      type: z.enum(['blocks', 'depends-on', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']),
+      agent: z.string().optional(),
+    },
+    async ({ sourceProjectId, sourceTaskId, targetProjectId, targetTaskId, type, agent }) => {
+      try {
+        const result = await addTaskLink(
+          adapter,
+          { projectId: sourceProjectId, taskId: sourceTaskId },
+          { projectId: targetProjectId, taskId: targetTaskId },
+          type
+        );
+        auditWrite('task.link.added', result, { projectId: sourceProjectId, taskId: sourceTaskId }, agent, {
+          type,
+          target: { projectId: targetProjectId, taskId: targetTaskId },
+        });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'remove_task_link',
+    'WRITE. Removes one exact typed relationship from a source task. Returns removed=false when the relationship was already absent.',
+    {
+      sourceProjectId: z.string(),
+      sourceTaskId: z.string(),
+      targetProjectId: z.string(),
+      targetTaskId: z.string(),
+      type: z.enum(['blocks', 'depends-on', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']),
+      agent: z.string().optional(),
+    },
+    async ({ sourceProjectId, sourceTaskId, targetProjectId, targetTaskId, type, agent }) => {
+      try {
+        const result = await removeTaskLink(
+          adapter,
+          { projectId: sourceProjectId, taskId: sourceTaskId },
+          { projectId: targetProjectId, taskId: targetTaskId },
+          type
+        );
+        auditWrite('task.link.removed', result, { projectId: sourceProjectId, taskId: sourceTaskId }, agent, {
+          type,
+          target: { projectId: targetProjectId, taskId: targetTaskId },
+          removed: result.removed,
+        });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'task_graph',
+    'Read-only. Traverses typed incoming and outgoing task relationships around one task. Returns nodes, edges, lifecycle validity, and unresolved references.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      depth: z.number().int().min(0).max(10).optional(),
+    },
+    async ({ projectId, taskId, depth }) => {
+      try {
+        return ok(await buildTaskGraph(adapter, { projectId, taskId }, { depth: depth ?? 2 }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'context_for_task',
+    'Read-only. Builds execution context for a task. Typed relationships come first, retrieval adds candidates, invalid lifecycle items are excluded, and every included item carries provenance.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      limit: z.number().int().positive().max(50).optional(),
+    },
+    async ({ projectId, taskId, limit }) => {
+      try {
+        return ok(await contextForTask(adapter, { projectId, taskId }, { limit: limit ?? 8 }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'record_action',
+    'WRITE. Appends an auditable agent action or outcome to the local ATS JSONL ledger, including sources, approvals, output, and whether the task advanced.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      action: z.string(),
+      agent: z.string().optional(),
+      sources: z.array(z.string()).optional(),
+      approvals: z.array(z.string()).optional(),
+      output: z.string().optional(),
+      advanced: z.boolean().optional(),
+    },
+    async ({ projectId, taskId, ...entry }) => {
+      try {
+        return ok(recordAction({ ...entry, task: { projectId, taskId } }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'list_actions',
+    'Read-only. Lists action-ledger records, optionally filtered by task, agent, action, or advancement.',
+    {
+      projectId: z.string().optional(),
+      taskId: z.string().optional(),
+      agent: z.string().optional(),
+      action: z.string().optional(),
+      advanced: z.boolean().optional(),
+      limit: z.number().int().positive().max(500).optional(),
+    },
+    async (filters) => {
+      try {
+        return ok(listActions(filters));
       } catch (e) {
         return fail(e);
       }

@@ -1,0 +1,47 @@
+{
+  "projects": [
+    { "id": "demo", "name": "Synthetic Release Demo" }
+  ],
+  "tasks": [
+    {
+      "id": "release-plan",
+      "projectId": "demo",
+      "title": "Prepare sample release",
+      "content": "Human-authored plan: verify the package before publishing.",
+      "tags": ["demo"],
+      "modifiedTime": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "decision-17",
+      "projectId": "demo",
+      "title": "Decision record 17",
+      "content": "Use a staged rollout and preserve a rollback point.",
+      "tags": ["demo"],
+      "modifiedTime": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "retired-checklist",
+      "projectId": "demo",
+      "title": "Retired checklist",
+      "content": "This obsolete checklist must not guide current work.",
+      "tags": ["demo"],
+      "modifiedTime": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "announcement",
+      "projectId": "demo",
+      "title": "Sample release announcement",
+      "content": "Draft public announcement copy.",
+      "tags": ["demo"],
+      "modifiedTime": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "supplies",
+      "projectId": "demo",
+      "title": "Sample release meeting supplies",
+      "content": "Prepare the demo-room materials.",
+      "tags": ["demo"],
+      "modifiedTime": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}

@@ -7,7 +7,7 @@
  * retrieval fallback (the storage-agnostic thesis), CRUD passthrough, and
  * structured error handling.
  */
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -19,6 +19,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 process.env.ATS_CORPUS_CACHE_DISABLE = '1';
+const actionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-mcp-actions-'));
+process.env.ATS_ACTION_LOG = path.join(actionDir, 'action-log.jsonl');
+after(() => fs.rmSync(actionDir, { recursive: true, force: true }));
 
 /** A minimal contract-satisfying adapter with NO retrieval code of its own. */
 function fakeAdapter() {
@@ -59,8 +62,16 @@ function fakeAdapter() {
       if (!t) throw new Error(`no such task ${projectId}/${taskId}`);
       return t;
     },
-    createTask: async (input) => ({ id: 'new1', projectId: input.projectId || 'p1', tags: [], ...input }),
-    updateTask: async (projectId, taskId, patch) => ({ id: taskId, projectId, ...patch }),
+    createTask: async (input) => {
+      const task = { id: `new${tasks.length}`, projectId: input.projectId || 'p1', tags: [], content: '', modifiedTime: new Date().toISOString(), ...input };
+      tasks.push(task);
+      return task;
+    },
+    updateTask: async (projectId, taskId, patch) => {
+      const index = tasks.findIndex((task) => task.id === taskId && task.projectId === projectId);
+      tasks[index] = { ...tasks[index], ...patch, modifiedTime: new Date().toISOString() };
+      return tasks[index];
+    },
     urlFor: ({ projectId, taskId }) => `fake://open/${projectId}/${taskId}`,
     authStatus: async () => ({ authenticated: true }),
     authLogin: async () => ({ instructions: 'no-op' }),
@@ -83,11 +94,19 @@ test('registers the full ATS tool set', async () => {
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
+    'add_task_link',
+    'context_for_task',
     'create_task',
     'find',
     'get_task',
+    'list_actions',
     'list_projects',
+    'record_action',
+    'remove_task_link',
+    'set_task_intent',
+    'set_task_lifecycle',
     'similar',
+    'task_graph',
     'update_task',
     'url_for',
   ]);
@@ -157,6 +176,72 @@ test('create_task and update_task pass through to the adapter', async () => {
   );
   assert.equal(updated.title, 'Renamed');
   assert.equal(updated.taskId, undefined); // projectId/taskId are positional, not in patch
+});
+
+test('intent, lifecycle, links, graph, context, and ledger work through MCP', async () => {
+  const adapter = fakeAdapter();
+  const { client } = await connect(adapter);
+  const intent = JSON.parse(textOf(await client.callTool({
+    name: 'set_task_intent',
+    arguments: {
+      projectId: 'p1',
+      taskId: 't1',
+      outcome: 'Complete the synthetic certificate rotation',
+      doneWhen: ['Verification passes'],
+      approvalRequired: true,
+      agent: 'demo-mcp-agent',
+    },
+  })));
+  assert.equal(intent.metadata.intent.approvalRequired, true);
+
+  const lifecycle = JSON.parse(textOf(await client.callTool({
+    name: 'set_task_lifecycle',
+    arguments: { projectId: 'p2', taskId: 't3', status: 'archived' },
+  })));
+  assert.equal(lifecycle.metadata.lifecycle.status, 'archived');
+
+  const link = await client.callTool({
+    name: 'add_task_link',
+    arguments: {
+      sourceProjectId: 'p1',
+      sourceTaskId: 't1',
+      targetProjectId: 'p2',
+      targetTaskId: 't3',
+      type: 'evidence',
+    },
+  });
+  assert.equal(link.isError, undefined);
+
+  const graph = JSON.parse(textOf(await client.callTool({
+    name: 'task_graph',
+    arguments: { projectId: 'p1', taskId: 't1', depth: 1 },
+  })));
+  assert.equal(graph.edges[0].type, 'evidence');
+
+  const context = JSON.parse(textOf(await client.callTool({
+    name: 'context_for_task',
+    arguments: { projectId: 'p1', taskId: 't1' },
+  })));
+  assert.ok(context.excluded.some((item) => item.taskId === 't3'));
+
+  const removed = JSON.parse(textOf(await client.callTool({
+    name: 'remove_task_link',
+    arguments: {
+      sourceProjectId: 'p1', sourceTaskId: 't1', targetProjectId: 'p2', targetTaskId: 't3', type: 'evidence',
+    },
+  })));
+  assert.equal(removed.removed, true);
+
+  const action = JSON.parse(textOf(await client.callTool({
+    name: 'record_action',
+    arguments: { projectId: 'p1', taskId: 't1', action: 'demo.verified', advanced: true, agent: 'demo-mcp-agent' },
+  })));
+  assert.equal(action.advanced, true);
+  const actions = JSON.parse(textOf(await client.callTool({
+    name: 'list_actions',
+    arguments: { agent: 'demo-mcp-agent', action: 'demo.verified' },
+  })));
+  assert.equal(actions.length, 1);
 });
 
 test('url_for returns a deep link', async () => {

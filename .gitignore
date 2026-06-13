@@ -7,6 +7,7 @@ node_modules
 # ATS runtime caches (per-user, live under ~/.config/ats — not for VCS)
 corpus-cache.json
 search-log.jsonl
+action-log.jsonl
 
 # Bench is per-user: questions reference real task/project IDs and run output
 # echoes real titles. Author your own from bench/data/seed-questions.md.

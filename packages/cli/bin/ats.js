@@ -29,8 +29,27 @@ import {
   getCacheHelp,
   getBenchHelp,
   getCompletionHelp,
+  getAgentLayerHelp,
 } from '../parser.js';
-import { validateAdapter, runConformance, formatConformance, find as coreFind, similar as coreSimilar, logUsage } from '@reneza/ats-core';
+import {
+  validateAdapter,
+  runConformance,
+  formatConformance,
+  find as coreFind,
+  similar as coreSimilar,
+  logUsage,
+  parseTaskMetadata,
+  evaluateLifecycle,
+  setTaskIntent,
+  setTaskLifecycle,
+  addTaskLink,
+  removeTaskLink,
+  listTaskLinks,
+  buildTaskGraph,
+  contextForTask,
+  recordAction,
+  listActions,
+} from '@reneza/ats-core';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
 import { resolveOpen, formatOpenResult, launchUrl, shouldLaunch } from '../open.js';
@@ -188,6 +207,24 @@ async function main() {
       case 'open':
         result = await handleOpen();
         break;
+      case 'intent':
+        result = await handleIntent();
+        break;
+      case 'lifecycle':
+        result = await handleLifecycle();
+        break;
+      case 'link':
+        result = await handleLink();
+        break;
+      case 'graph':
+        result = await handleGraph();
+        break;
+      case 'context':
+        result = await handleContext();
+        break;
+      case 'ledger':
+        result = await handleLedger();
+        break;
       case 'find':
       case 'get':
       case 'url':
@@ -272,12 +309,19 @@ function helpFor(command) {
     case 'cache': return getCacheHelp();
     case 'bench': return getBenchHelp();
     case 'completion': return getCompletionHelp();
+    case 'intent':
+    case 'lifecycle':
+    case 'link':
+    case 'graph':
+    case 'context':
+    case 'ledger': return getAgentLayerHelp(command);
     default: return getMainHelp();
   }
 }
 
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
+  'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger',
   'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
@@ -527,6 +571,37 @@ function tagsToArray(tags) {
   return undefined;
 }
 
+function booleanOption(value, name) {
+  if (value === undefined) return undefined;
+  if (value === true || value === 'true' || value === '1' || value === 'yes') return true;
+  if (value === false || value === 'false' || value === '0' || value === 'no') return false;
+  throw new Error(`--${name} must be true or false.`);
+}
+
+function taskRefFromResult(result, fallback = {}) {
+  const task = result?.task || result || {};
+  return {
+    projectId: task.fullProjectId || task.projectId || fallback.projectId,
+    taskId: task.fullId || task.id || fallback.taskId,
+  };
+}
+
+function auditCliWrite(action, result, fallback, metadata, advanced = false) {
+  const task = taskRefFromResult(result, fallback);
+  if (!task.projectId || !task.taskId) return;
+  try {
+    recordAction({
+      agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      action,
+      task,
+      advanced,
+      metadata,
+    });
+  } catch (err) {
+    console.error(`Warning: action ledger write failed: ${err.message}`);
+  }
+}
+
 async function handleTasks() {
   const adapter = await loadAdapter();
   const t = adapter.__ext?.tasks; // optional: rich adapters (TickTick) provide it
@@ -575,6 +650,7 @@ async function handleTasks() {
           dueDate: opts.dueDate,
           tags: tagsToArray(opts.tags),
         });
+      auditCliWrite('task.created', result, { projectId }, { title });
       const relevance = adapter.__ext?.relevance;
       if (relevance?.isEnabled?.({
         relevance: !!args.options.relevance,
@@ -605,15 +681,24 @@ async function handleTasks() {
         tags: args.options.tags,
         reminder: args.options.reminder,
       };
-      if (t?.update) return await t.update(args.positional[0], args.positional[1], patch);
-      return await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
+      const result = t?.update
+        ? await t.update(args.positional[0], args.positional[1], patch)
+        : await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
+      auditCliWrite('task.updated', result, { projectId: args.positional[0], taskId: args.positional[1] }, { fields: Object.keys(patch).filter((key) => patch[key] !== undefined) });
+      return result;
     }
-    case 'complete':
+    case 'complete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
-      return t?.complete ? await t.complete(args.positional[0], args.positional[1]) : needsTaskExt('complete', 'complete');
-    case 'delete':
+      const result = t?.complete ? await t.complete(args.positional[0], args.positional[1]) : needsTaskExt('complete', 'complete');
+      auditCliWrite('task.completed', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, true);
+      return result;
+    }
+    case 'delete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks delete PROJECT_ID TASK_ID'); process.exit(1); }
-      return t?.remove ? await t.remove(args.positional[0], args.positional[1]) : needsTaskExt('remove', 'delete');
+      const result = t?.remove ? await t.remove(args.positional[0], args.positional[1]) : needsTaskExt('remove', 'delete');
+      auditCliWrite('task.deleted', result, { projectId: args.positional[0], taskId: args.positional[1] });
+      return result;
+    }
     case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats tasks find QUERY'); process.exit(1); }
       const opts = { limit, budgetMs: parseInt(args.options['budget-ms']) || 3000, explain: !!args.options.explain };
@@ -676,6 +761,148 @@ async function handleTasks() {
     default:
       console.log(getTasksHelp());
   }
+}
+
+async function handleIntent() {
+  const adapter = await loadAdapter();
+  const [projectId, taskId] = args.positional;
+  if (!projectId || !taskId || !['get', 'set'].includes(args.subcommand)) {
+    console.log(getAgentLayerHelp('intent'));
+    return;
+  }
+  if (args.subcommand === 'get') {
+    const task = await adapter.getTask(projectId, taskId);
+    return { task: { projectId: task.projectId, taskId: task.id, title: task.title }, intent: parseTaskMetadata(task.content).intent };
+  }
+  const patch = {};
+  if (args.options.outcome !== undefined) patch.outcome = args.options.outcome;
+  if (args.options.why !== undefined) patch.why = args.options.why;
+  if (args.options['done-when'] !== undefined) patch.doneWhen = tagsToArray(args.options['done-when']) || [];
+  if (args.options.authority !== undefined) patch.authority = tagsToArray(args.options.authority) || [];
+  if (args.options.constraints !== undefined) patch.constraints = tagsToArray(args.options.constraints) || [];
+  if (args.options['approval-required'] !== undefined) patch.approvalRequired = booleanOption(args.options['approval-required'], 'approval-required');
+  const result = await setTaskIntent(adapter, projectId, taskId, patch);
+  auditCliWrite('task.intent.updated', result, { projectId, taskId }, { fields: Object.keys(patch) });
+  return result;
+}
+
+async function handleLifecycle() {
+  const adapter = await loadAdapter();
+  const [projectId, taskId] = args.positional;
+  if (!projectId || !taskId || !['get', 'set'].includes(args.subcommand)) {
+    console.log(getAgentLayerHelp('lifecycle'));
+    return;
+  }
+  if (args.subcommand === 'get') {
+    const task = await adapter.getTask(projectId, taskId);
+    const graph = await buildTaskGraph(adapter, { projectId, taskId }, { depth: 0 });
+    return {
+      task: { projectId: task.projectId, taskId: task.id, title: task.title },
+      lifecycle: graph.nodes.find((node) => node.key === `${projectId}/${taskId}`)?.lifecycle || evaluateLifecycle(parseTaskMetadata(task.content)),
+    };
+  }
+  const patch = {};
+  if (args.options.status !== undefined) patch.status = args.options.status;
+  if (args.options['valid-from'] !== undefined) patch.validFrom = args.options['valid-from'];
+  if (args.options['valid-until'] !== undefined) patch.validUntil = args.options['valid-until'];
+  const result = await setTaskLifecycle(adapter, projectId, taskId, patch);
+  auditCliWrite('task.lifecycle.updated', result, { projectId, taskId }, { fields: Object.keys(patch) });
+  return { ...result, evaluation: evaluateLifecycle(result.metadata) };
+}
+
+async function handleLink() {
+  const adapter = await loadAdapter();
+  if (args.subcommand === 'add') {
+    const [sourceProjectId, sourceTaskId, targetProjectId, targetTaskId] = args.positional;
+    if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId || !args.options.type) {
+      console.error('Usage: ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
+      process.exit(1);
+    }
+    const result = await addTaskLink(
+      adapter,
+      { projectId: sourceProjectId, taskId: sourceTaskId },
+      { projectId: targetProjectId, taskId: targetTaskId },
+      args.options.type
+    );
+    auditCliWrite('task.link.added', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
+      type: args.options.type,
+      target: { projectId: targetProjectId, taskId: targetTaskId },
+    });
+    return result;
+  }
+  if (args.subcommand === 'remove') {
+    const [sourceProjectId, sourceTaskId, targetProjectId, targetTaskId] = args.positional;
+    if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId || !args.options.type) {
+      console.error('Usage: ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
+      process.exit(1);
+    }
+    const result = await removeTaskLink(
+      adapter,
+      { projectId: sourceProjectId, taskId: sourceTaskId },
+      { projectId: targetProjectId, taskId: targetTaskId },
+      args.options.type
+    );
+    auditCliWrite('task.link.removed', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
+      type: args.options.type,
+      target: { projectId: targetProjectId, taskId: targetTaskId },
+      removed: result.removed,
+    });
+    return result;
+  }
+  if (args.subcommand === 'list') {
+    const [projectId, taskId] = args.positional;
+    if (!projectId || !taskId) { console.error('Usage: ats link list PROJECT_ID TASK_ID'); process.exit(1); }
+    const outgoing = await listTaskLinks(adapter, projectId, taskId);
+    const graph = await buildTaskGraph(adapter, { projectId, taskId }, { depth: 1 });
+    return { ...outgoing, edges: graph.edges };
+  }
+  console.log(getAgentLayerHelp('link'));
+}
+
+async function handleGraph() {
+  const projectId = args.subcommand;
+  const taskId = args.positional[0];
+  if (!projectId || !taskId) { console.error('Usage: ats graph PROJECT_ID TASK_ID [--depth N]'); process.exit(1); }
+  const adapter = await loadAdapter();
+  return buildTaskGraph(adapter, { projectId, taskId }, { depth: parseInt(args.options.depth) || 2 });
+}
+
+async function handleContext() {
+  const projectId = args.subcommand;
+  const taskId = args.positional[0];
+  if (!projectId || !taskId) { console.error('Usage: ats context PROJECT_ID TASK_ID [--limit N]'); process.exit(1); }
+  const adapter = await loadAdapter();
+  return contextForTask(adapter, { projectId, taskId }, { limit: parseInt(args.options.limit) || 8 });
+}
+
+async function handleLedger() {
+  if (args.subcommand === 'record') {
+    const [projectId, taskId] = args.positional;
+    if (!projectId || !taskId || !args.options.action) {
+      console.error('Usage: ats ledger record PROJECT_ID TASK_ID --action NAME [options]');
+      process.exit(1);
+    }
+    return recordAction({
+      agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      action: args.options.action,
+      task: { projectId, taskId },
+      sources: tagsToArray(args.options.sources) || [],
+      approvals: tagsToArray(args.options.approvals) || [],
+      output: args.options.output,
+      advanced: booleanOption(args.options.advanced, 'advanced') ?? false,
+    });
+  }
+  if (args.subcommand === 'list') {
+    return listActions({
+      projectId: args.options.project,
+      taskId: args.options.task,
+      agent: args.options.agent,
+      action: args.options.action,
+      advanced: booleanOption(args.options.advanced, 'advanced'),
+      limit: parseInt(args.options.limit) || undefined,
+    });
+  }
+  console.log(getAgentLayerHelp('ledger'));
 }
 
 async function handleNotes() {

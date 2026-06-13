@@ -15,6 +15,13 @@ It exposes **the task app you already use** to any MCP client (Claude Desktop, C
 | `update_task` | Partial update of an existing item. |
 | `similar` | Semantically similar items (embedder-backed adapters). |
 | `url_for` | Paste-ready deep link back to the item in its native app. |
+| `set_task_intent` | Store outcome, completion conditions, authority, constraints, and approval requirement. |
+| `set_task_lifecycle` | Set active/archived/superseded state and validity windows. |
+| `add_task_link` | Add a typed relationship between two tasks. |
+| `remove_task_link` | Remove one exact typed relationship. |
+| `task_graph` | Traverse incoming and outgoing typed relationships. |
+| `context_for_task` | Return valid deliberate context first, then retrieval discoveries, with provenance. |
+| `record_action` / `list_actions` | Write and inspect the append-only agent action ledger. |
 
 ## Install & run
 

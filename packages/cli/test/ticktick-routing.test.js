@@ -262,6 +262,43 @@ test('generic adapter embeddings power the documented hybrid and similar command
   assert.equal(JSON.parse(similar.stdout).source.id, 't1');
 });
 
+test('portable agent-layer commands work over a generic adapter', () => {
+  const env = {
+    ...process.env,
+    ATS_ADAPTER: genericAdapterUrl,
+    ATS_CORPUS_CACHE_DISABLE: '1',
+    ATS_USAGE_DISABLE: '1',
+    XDG_CONFIG_HOME: path.join(tempDir, 'agent-layer-xdg'),
+  };
+  const invoke = (...argv) => {
+    const proc = spawnSync(process.execPath, [cli, ...argv, '--json'], { encoding: 'utf8', env });
+    assert.equal(proc.status, 0, proc.stderr);
+    return JSON.parse(proc.stdout);
+  };
+
+  const intent = invoke('intent', 'set', 'p1', 't1', '--outcome', 'Verify the synthetic release', '--done-when', 'tests pass,artifact exists', '--approval-required', 'true');
+  assert.equal(intent.metadata.intent.outcome, 'Verify the synthetic release');
+  assert.equal(intent.metadata.intent.approvalRequired, true);
+
+  const lifecycle = invoke('lifecycle', 'set', 'p1', 't1', '--status', 'active', '--valid-until', '2099-01-01');
+  assert.equal(lifecycle.evaluation.valid, true);
+
+  const link = invoke('link', 'add', 'p1', 't1', 'p1', 't2', '--type', 'evidence');
+  assert.equal(link.metadata.links[0].type, 'evidence');
+  const removed = invoke('link', 'remove', 'p1', 't1', 'p1', 't2', '--type', 'evidence');
+  assert.equal(removed.removed, false);
+
+  const graph = invoke('graph', 'p1', 't1', '--depth', '1');
+  assert.equal(graph.root, 'p1/t1');
+  const context = invoke('context', 'p1', 't1', '--limit', '3');
+  assert.equal(context.task.id, 't1');
+
+  const recorded = invoke('ledger', 'record', 'p1', 't1', '--action', 'demo.verified', '--advanced', 'true', '--agent', 'demo-cli-agent');
+  assert.equal(recorded.advanced, true);
+  const listed = invoke('ledger', 'list', '--action', 'demo.verified', '--agent', 'demo-cli-agent');
+  assert.equal(listed.length, 1);
+});
+
 test('documented benchmark run, score, and usage analysis execute end to end', () => {
   const benchDir = path.join(tempDir, 'bench-e2e');
   const resultsDir = path.join(benchDir, 'results');
@@ -304,14 +341,14 @@ test('completion generators expose the full top-level command surface', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const proc = runProcess('completion', shell);
     assert.equal(proc.status, 0, proc.stderr);
-    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes']) {
+    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes', 'intent', 'context', 'ledger']) {
       assert.match(proc.stdout, new RegExp(`\\b${command}\\b`));
     }
   }
 });
 
 test('documents help for every top-level operational group', () => {
-  for (const command of ['config', 'cache', 'bench', 'completion']) {
+  for (const command of ['config', 'cache', 'bench', 'completion', 'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger']) {
     const proc = runProcess(command, '--help');
     assert.equal(proc.status, 0, proc.stderr);
     assert.match(proc.stdout, new RegExp(`ats ${command}`));

@@ -398,6 +398,12 @@ Commands:
   update <p> <t> Update a task (shortcut for tasks update)
   hybrid <query> Dense+sparse retrieval (embedder-backed adapters)
   similar <id>   Find related items (embedder-backed adapters)
+  intent         Read or set an item's outcome, constraints, and authority
+  lifecycle      Manage validity windows and active/archived/superseded state
+  link           Add or list typed relationships between tasks
+  graph          Traverse the typed task graph around an item
+  context        Assemble valid linked + retrieved context with provenance
+  ledger         Record or inspect agent actions and work advancement
   doctor         Diagnose adapter, auth, capabilities, cache, retrieval
   status         Alias for doctor
   cache          Inspect or refresh the adapter's centralized cache
@@ -429,6 +435,78 @@ Quick start:
 Write an adapter for any store:
   ats adapter new obsidian           # Scaffold ats-adapter-obsidian
   ats adapter test ./ats-adapter-obsidian   # Verify it against the contract`;
+}
+
+export function getAgentLayerHelp(command) {
+  const common = `Portable metadata is stored in a managed JSON block inside the task body,
+so these commands work through every conforming ATS adapter.`;
+  const help = {
+    intent: `ats intent - Read or set task intent
+
+Usage:
+  ats intent get PROJECT_ID TASK_ID
+  ats intent set PROJECT_ID TASK_ID [options]
+
+Options:
+  --outcome <text>              Desired result
+  --why <text>                  Why the work matters
+  --done-when <a,b>             Completion conditions
+  --authority <a,b>             Authoritative sources or decisions
+  --constraints <a,b>           Boundaries the agent must respect
+  --approval-required <bool>    Whether execution needs human approval
+
+${common}`,
+    lifecycle: `ats lifecycle - Read or set task validity
+
+Usage:
+  ats lifecycle get PROJECT_ID TASK_ID
+  ats lifecycle set PROJECT_ID TASK_ID [options]
+
+Options:
+  --status <active|archived|superseded>
+  --valid-from <ISO-8601>
+  --valid-until <ISO-8601>
+
+${common}`,
+    link: `ats link - Typed task relationships
+
+Usage:
+  ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE
+  ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE
+  ats link list PROJECT_ID TASK_ID
+
+Types: blocks, depends-on, supports, evidence, decision, output, supersedes, related
+
+${common}`,
+    graph: `ats graph - Traverse typed task relationships
+
+Usage:
+  ats graph PROJECT_ID TASK_ID [--depth N]
+
+Returns nodes, typed edges, lifecycle validity, and unresolved references.`,
+    context: `ats context - Assemble execution context for a task
+
+Usage:
+  ats context PROJECT_ID TASK_ID [--limit N]
+
+Typed links are returned first. Retrieval then discovers additional candidates.
+Archived, expired, future, and superseded items are excluded with reasons.`,
+    ledger: `ats ledger - Append-only agent action log
+
+Usage:
+  ats ledger record PROJECT_ID TASK_ID --action NAME [options]
+  ats ledger list [options]
+
+Record options:
+  --agent <id>          Agent identity (default ATS_AGENT_ID or ats-cli)
+  --sources <a,b>       Task/source references used
+  --approvals <a,b>     Approval references
+  --output <text>       Concise result or artifact reference
+  --advanced <bool>     Whether the action advanced the task
+
+List filters: --project, --task, --agent, --action, --advanced, --limit`,
+  };
+  return help[command] || getMainHelp();
 }
 
 export function getConfigHelp() {

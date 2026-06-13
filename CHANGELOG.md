@@ -1,6 +1,14 @@
 
 # Changelog
 
+## Unreleased - portable agent execution context
+
+- Added portable task intent: outcome, rationale, completion conditions, authority, constraints, and approval gates stored in a managed task-body JSON block.
+- Added typed task relationship add/remove, incoming/outgoing graph traversal, lifecycle validity, supersession handling, and provenance-preserving context assembly.
+- Added an append-only action ledger with automatic CLI/MCP write auditing and explicit outcome records.
+- Added CLI commands `intent`, `lifecycle`, `link`, `graph`, `context`, and `ledger`, plus matching MCP tools.
+- Added a deterministic synthetic proof (`npm run prove:intent`) and documented the recommended corpus-diff event-stream design.
+
 ## 0.5.0 - TickTick parity, local cache, and secure trunk sync
 
 Released 2026-06-13.
