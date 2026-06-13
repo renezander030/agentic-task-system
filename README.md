@@ -66,7 +66,7 @@ Andrej Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-
 
 ## What changes when you wire it up
 
-Three shifts, in the order they surprised me in real use:
+Four shifts, in the order they surprised me in real use:
 
 **1. The task app becomes a two-way bus between you and your agent.**
 It's not just somewhere the agent *reads* — it's where you and the agent hand work back and forth. Drop a task and the agent can read its title, body, tags, dates, checklist data, and any attachment metadata exposed by the adapter; the agent writes results back where you'll actually see them. ATS does not claim to download attachment file contents automatically.
@@ -74,7 +74,31 @@ It's not just somewhere the agent *reads* — it's where you and the agent hand 
 **2. Semantic retrieval makes the *first* fetch the right one.**
 Parallel hybrid retrieval (dense + sparse + keyword, fused with RRF, with provenance) instead of keyword grep. In practice this collapsed the usual "search → refine → search again" loop into a single fetch that comes back both faster and richer. Better context on turn one means better answers on turn one.
 
-**3. Context gets curated at *write* time, not just read time.**
+**3. Independent agents can follow durable task relationships.**
+Semantic search answers *"what looks relevant to this query?"* Task links answer a different question: *"what was explicitly connected, and what context must the next agent follow?"* One agent can discover a note with `ats find`, generate a native deep link with `ats url`, and write that reference into another task. A later agent, in a separate context window, can use `ats links` to resolve the relationship and read the linked task's full content. The handoff survives because it lives in the shared task app, not in either agent's chat history.
+
+```mermaid
+sequenceDiagram
+    participant A as Agent A (one context window)
+    participant ATS
+    participant T as Shared task app
+    participant B as Agent B (later context window)
+    A->>ATS: ats find "deployment"
+    ATS->>T: hybrid semantic retrieval
+    T-->>ATS: likely relevant research note
+    ATS-->>A: ranked result with provenance
+    A->>ATS: ats url + ats update
+    ATS->>T: store explicit link in implementation task
+    Note over T: Durable relationship survives both agent sessions
+    B->>ATS: ats links project task
+    ATS->>T: resolve links from implementation task
+    T-->>ATS: linked task and full content
+    ATS-->>B: deliberate context handoff
+```
+
+This adds structure *after* semantic search: retrieval proposes candidates; links preserve deliberate relationships, dependencies, and handoffs so another agent can reproduce the context later. ATS provides the shared read/write/link layer; agents remain independent and do not need direct agent-to-agent coordination.
+
+**4. Context gets curated at *write* time, not just read time.**
 The half everyone skips. Every item is hung on a "trunk" — a theme you already care about (`writing`, `client-work`, `side-project`) — the moment it's captured, so retrieval has structure to grab instead of a flat pile.
 
 _Plus the plumbing that makes it usable every turn: a disk-backed corpus cache that avoids repeated store fetches, and a benchmark harness so retrieval quality is measured, not asserted. End-to-end latency depends on corpus size and enabled retrievers._
