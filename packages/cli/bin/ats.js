@@ -13,8 +13,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, formatOutput, getMainHelp, getNotesHelp, getTasksHelp, getAuthHelp, getProjectsHelp, getAdapterHelp, getOpenHelp } from '../parser.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import {
+  parseArgs,
+  formatOutput,
+  getMainHelp,
+  getNotesHelp,
+  getTasksHelp,
+  getAuthHelp,
+  getProjectsHelp,
+  getAdapterHelp,
+  getOpenHelp,
+  getConfigHelp,
+  getCacheHelp,
+  getBenchHelp,
+  getCompletionHelp,
+} from '../parser.js';
 import { validateAdapter, runConformance, formatConformance, find as coreFind, similar as coreSimilar, logUsage } from '@reneza/ats-core';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
@@ -24,10 +39,49 @@ const args = parseArgs(process.argv.slice(2));
 
 // Resolve config dir: prefer ~/.config/ats; fall back to legacy ~/.config/akb if it exists (akb→ats rename migration).
 function atsConfigDir() {
-  const base = path.join(os.homedir(), '.config');
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   const cur = path.join(base, 'ats');
   const legacy = path.join(base, 'akb');
   return (!fs.existsSync(cur) && fs.existsSync(legacy)) ? legacy : cur;
+}
+
+function globalConfigPath() {
+  return path.join(atsConfigDir(), 'config.json');
+}
+
+function readGlobalConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(globalConfigPath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeGlobalConfig(config) {
+  const dir = atsConfigDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(globalConfigPath(), JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+}
+
+function wikiProject() {
+  return process.env.ATS_WIKI_PROJECT || readGlobalConfig().wikiProject;
+}
+
+function adapterSpecifier(requested) {
+  const looksLikePath = requested.startsWith('.') || requested.startsWith('/') || fs.existsSync(requested);
+  if (looksLikePath) {
+    let abs = path.resolve(requested);
+    if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+      const pkgJson = path.join(abs, 'package.json');
+      const main = fs.existsSync(pkgJson)
+        ? JSON.parse(fs.readFileSync(pkgJson, 'utf8')).main || 'index.js'
+        : 'index.js';
+      abs = path.join(abs, main);
+    }
+    return pathToFileURL(abs).href;
+  }
+  if (requested.startsWith('@') || requested.includes('/')) return requested;
+  return `@reneza/ats-adapter-${requested}`;
 }
 
 // Resolve which adapter package is active and where that choice came from.
@@ -98,9 +152,24 @@ async function main() {
       case 'config':
         result = await handleConfig();
         break;
+      case 'setup':
+        result = await handleSetup();
+        break;
       case 'doctor':
         await handleDoctor();
         return;
+      case 'status':
+        await handleDoctor();
+        return;
+      case 'cache':
+        result = await handleCache();
+        break;
+      case 'bench':
+        handleBench();
+        return;
+      case 'sync':
+        result = await handleSync();
+        break;
       case 'adapter':
         await handleAdapter();
         return;
@@ -163,16 +232,31 @@ async function main() {
 
 async function handleConfig() {
   if (args.subcommand === 'use' && args.positional[0]) {
-    const adapterPkg = args.positional[0].startsWith('@') || args.positional[0].includes('/')
-      ? args.positional[0]
-      : `@reneza/ats-adapter-${args.positional[0]}`;
+    const adapterPkg = adapterSpecifier(args.positional[0]);
     const dir = atsConfigDir();
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(dir, 'adapter'), adapterPkg + '\n');
     return { success: true, adapter: adapterPkg };
   }
-  console.error('Usage: ats config use <adapter-name|@scope/ats-adapter-name>');
-  process.exit(1);
+  if (args.subcommand === 'set' && args.positional[0] === 'wiki-project' && args.positional[1]) {
+    const config = readGlobalConfig();
+    config.wikiProject = args.positional[1];
+    writeGlobalConfig(config);
+    return { success: true, key: 'wiki-project', value: config.wikiProject };
+  }
+  if (args.subcommand === 'get' && args.positional[0] === 'wiki-project') {
+    return { key: 'wiki-project', value: wikiProject() || 'Permanent Notes', source: process.env.ATS_WIKI_PROJECT ? 'ATS_WIKI_PROJECT' : 'config/default' };
+  }
+  if (args.subcommand === 'show') {
+    const source = resolveAdapterPkg();
+    return {
+      adapter: source.pkg,
+      adapterSource: source.origin,
+      wikiProject: wikiProject() || 'Permanent Notes',
+      configPath: globalConfigPath(),
+    };
+  }
+  console.log(getConfigHelp());
 }
 
 // Map a command name to its help text.
@@ -184,12 +268,17 @@ function helpFor(command) {
     case 'notes': return getNotesHelp();
     case 'adapter': return getAdapterHelp();
     case 'open': return getOpenHelp();
+    case 'config': return getConfigHelp();
+    case 'cache': return getCacheHelp();
+    case 'bench': return getBenchHelp();
+    case 'completion': return getCompletionHelp();
     default: return getMainHelp();
   }
 }
 
 const COMPLETION_COMMANDS = [
-  'find', 'open', 'get', 'doctor', 'adapter', 'init', 'config', 'auth',
+  'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
+  'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
 
@@ -236,11 +325,9 @@ function printCompletion(shell) {
 
 // `ats init [adapter]` — select an adapter (if given) and run a health check.
 async function handleInit() {
-  const requested = args.positional[0];
+  const requested = args.subcommand || args.positional[0];
   if (requested) {
-    const adapterPkg = requested.startsWith('@') || requested.includes('/')
-      ? requested
-      : `@reneza/ats-adapter-${requested}`;
+    const adapterPkg = adapterSpecifier(requested);
     const dir = atsConfigDir();
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(dir, 'adapter'), adapterPkg + '\n');
@@ -316,14 +403,77 @@ async function handleAdapter() {
   }
 }
 
+async function handleCache() {
+  const adapter = await loadAdapter();
+  const cache = adapter.__ext?.cache;
+  if (!cache) throw new Error("'ats cache' is not supported by the active adapter.");
+  switch (args.subcommand) {
+    case 'status': return cache.status();
+    case 'sync': return cache.sync();
+    default:
+      console.log('Usage: ats cache <status|sync>');
+  }
+}
+
+function benchArgs() {
+  const forwarded = [];
+  for (const [key, value] of Object.entries(args.options)) {
+    if (['format', 'help', 'version'].includes(key) || value === false || value == null) continue;
+    forwarded.push(value === true ? `--${key}` : `--${key}=${value}`);
+  }
+  return forwarded;
+}
+
+function handleBench() {
+  const scripts = {
+    run: new URL('../../core/bench/run.js', import.meta.url),
+    score: new URL('../../core/bench/score.js', import.meta.url),
+    'analyze-usage': new URL('../../core/bench/analyze-usage.js', import.meta.url),
+  };
+  const script = scripts[args.subcommand];
+  if (!script) {
+    console.log(getBenchHelp());
+    return;
+  }
+  const result = spawnSync(process.execPath, [fileURLToPath(script), ...benchArgs()], {
+    stdio: 'inherit',
+    env: { ...process.env, ATS_BENCH_CLI: process.argv[1] },
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status || 1);
+}
+
+async function handleSync() {
+  if (args.subcommand !== 'vector') {
+    console.log('Usage: ats sync vector [--full] [--max N]');
+    return;
+  }
+  args.subcommand = 'vector-sync';
+  return handleTasks();
+}
+
+async function handleSetup() {
+  const adapter = await loadAdapter();
+  const setup = adapter.__ext?.setup;
+  if (!setup?.runSetup) throw new Error("'ats setup' is not supported by the active adapter.");
+  return setup.runSetup();
+}
+
 async function handleAuth() {
   const adapter = await loadAdapter();
+  const auth = adapter.__ext?.auth;
   switch (args.subcommand) {
     case 'status': return adapter.authStatus();
     case 'login':  return adapter.authLogin();
     case 'exchange':
       if (!args.positional[0]) { console.error('Usage: ats auth exchange CODE'); process.exit(1); }
       return adapter.authExchange(args.positional[0]);
+    case 'refresh':
+      if (!auth?.refresh) throw new Error("'ats auth refresh' is not supported by the active adapter.");
+      return auth.refresh();
+    case 'logout':
+      if (!auth?.logout) throw new Error("'ats auth logout' is not supported by the active adapter.");
+      return auth.logout();
     default:
       console.log(getAuthHelp());
   }
@@ -331,6 +481,7 @@ async function handleAuth() {
 
 async function handleProjects() {
   const adapter = await loadAdapter();
+  const projects = adapter.__ext?.projects;
   switch (args.subcommand) {
     case 'list': return adapter.listProjects();
     case 'get': {
@@ -344,6 +495,17 @@ async function handleProjects() {
       }
       return get(args.positional[0]);
     }
+    case 'create':
+      if (!args.positional[0]) { console.error('Usage: ats projects create NAME [--color HEX] [--view MODE]'); process.exit(1); }
+      if (!projects?.create) throw new Error("'ats projects create' is not supported by the active adapter.");
+      return projects.create(args.positional[0], {
+        color: args.options.color,
+        viewMode: args.options.view,
+      });
+    case 'delete':
+      if (!args.positional[0]) { console.error('Usage: ats projects delete PROJECT_ID'); process.exit(1); }
+      if (!projects?.remove) throw new Error("'ats projects delete' is not supported by the active adapter.");
+      return projects.remove(args.positional[0]);
     default:
       console.log(getProjectsHelp());
   }
@@ -380,23 +542,78 @@ async function handleTasks() {
       let projectId = args.options.project || '';
       let title = args.positional[0];
       if (args.positional.length >= 2) { projectId = args.positional[0]; title = args.positional[1]; }
-      if (!title) { console.error('Usage: ats tasks create [PROJECT_ID] TITLE'); process.exit(1); }
-      const opts = { content: args.options.content, dueDate: args.options.due, priority: args.options.priority, tags: args.options.tags };
-      if (t?.create) return await t.create(projectId, title, opts);
-      return await adapter.createTask({
-        title,
-        projectId: projectId || undefined,
-        content: opts.content,
-        dueDate: opts.dueDate,
-        tags: tagsToArray(opts.tags),
-      });
+      let opts = {
+        content: args.options.content,
+        dueDate: args.options.due,
+        priority: args.options.priority,
+        tags: args.options.tags,
+        reminder: args.options.reminder,
+      };
+      if (!title && process.stdin.isTTY && adapter.__ext?.interactive?.promptTaskCreate) {
+        const input = await adapter.__ext.interactive.promptTaskCreate({ projectId, title, ...opts });
+        projectId = input.projectId || '';
+        title = input.title;
+        opts = {
+          content: input.content,
+          dueDate: input.dueDate,
+          priority: input.priority,
+          tags: input.tags,
+          reminder: input.reminder,
+        };
+      } else if (!title) {
+        console.error('Usage: ats tasks create TITLE [options]');
+        console.error('       ats tasks create PROJECT_ID TITLE [options]');
+        console.error('Run without arguments for interactive mode.');
+        process.exit(1);
+      }
+      const result = t?.create
+        ? await t.create(projectId, title, opts)
+        : await adapter.createTask({
+          title,
+          projectId: projectId || undefined,
+          content: opts.content,
+          dueDate: opts.dueDate,
+          tags: tagsToArray(opts.tags),
+        });
+      const relevance = adapter.__ext?.relevance;
+      if (relevance?.isEnabled?.({
+        relevance: !!args.options.relevance,
+        noRelevance: args.options['no-relevance'] === true,
+      })) {
+        try {
+          const block = await relevance.buildEnrichInstruction({
+            taskId: result.task?.fullId || result.task?.id,
+            projectId: result.task?.fullProjectId || result.task?.projectId || projectId,
+            title: result.task?.title || title,
+            content: opts.content || '',
+            wikiProject: wikiProject(),
+          });
+          if (block) result._relevanceInstruction = block;
+        } catch (err) {
+          console.error(`Warning: relevance enrichment failed: ${err.message}`);
+        }
+      }
+      return result;
     }
     case 'update': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
-      const patch = { title: args.options.title, content: args.options.content, dueDate: args.options.due, priority: args.options.priority, tags: args.options.tags };
+      const patch = {
+        title: args.options.title,
+        content: args.options.content,
+        dueDate: args.options.due,
+        priority: args.options.priority,
+        tags: args.options.tags,
+        reminder: args.options.reminder,
+      };
       if (t?.update) return await t.update(args.positional[0], args.positional[1], patch);
       return await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
     }
+    case 'complete':
+      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
+      return t?.complete ? await t.complete(args.positional[0], args.positional[1]) : needsTaskExt('complete', 'complete');
+    case 'delete':
+      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks delete PROJECT_ID TASK_ID'); process.exit(1); }
+      return t?.remove ? await t.remove(args.positional[0], args.positional[1]) : needsTaskExt('remove', 'delete');
     case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats tasks find QUERY'); process.exit(1); }
       const opts = { limit, budgetMs: parseInt(args.options['budget-ms']) || 3000, explain: !!args.options.explain };
@@ -406,18 +623,52 @@ async function handleTasks() {
     }
     case 'similar':
       if (!args.positional[0]) { console.error('Usage: ats tasks similar TASK_ID'); process.exit(1); }
-      return t?.findSimilar ? await t.findSimilar(args.positional[0], { limit }) : await coreSimilar(args.positional[0], { limit });
+      return t?.findSimilar
+        ? await t.findSimilar(args.positional[0], { limit })
+        : await coreSimilar(args.positional[0], { adapter, limit, log: logUsage });
     case 'hybrid':
       if (!args.positional[0]) { console.error('Usage: ats tasks hybrid QUERY'); process.exit(1); }
-      return t?.hybridSearch ? await t.hybridSearch(args.positional[0], { limit }) : needsTaskExt('hybridSearch', 'hybrid');
+      if (t?.hybridSearch) {
+        return await t.hybridSearch(args.positional[0], { limit, priority: args.options.priority });
+      }
+      if (typeof adapter.embeddings !== 'function') {
+        return needsTaskExt('hybridSearch or embeddings', 'hybrid');
+      }
+      return {
+        ...(await coreFind(args.positional[0], {
+          adapter,
+          limit,
+          includeKeyword: false,
+          includeNative: false,
+          log: logUsage,
+        })),
+        mode: 'hybrid',
+      };
     case 'semantic':
       if (!args.positional[0]) { console.error('Usage: ats tasks semantic QUERY'); process.exit(1); }
-      return t?.semanticSearch ? await t.semanticSearch(args.positional[0], { limit }) : needsTaskExt('semanticSearch', 'semantic');
-    case 'search':
-      if (!args.positional[0]) { console.error('Usage: ats tasks search QUERY'); process.exit(1); }
-      return t?.search ? await t.search(args.positional[0]) : needsTaskExt('search', 'search');
-    case 'completed':
-      return t?.listCompleted ? await t.listCompleted({ startDate: args.options.from, endDate: args.options.to }) : needsTaskExt('listCompleted', 'completed');
+      return t?.semanticSearch ? await t.semanticSearch(args.positional[0], { limit, priority: args.options.priority }) : needsTaskExt('semanticSearch', 'semantic');
+    case 'search': {
+      const query = args.positional[0] || '';
+      const tags = tagsToArray(args.options.tags);
+      if (!query && !tags && !args.options.priority) {
+        console.error('Usage: ats tasks search [QUERY] [--tags TAGS] [--priority LEVEL]');
+        process.exit(1);
+      }
+      return t?.search ? await t.search(query, { tags, priority: args.options.priority }) : needsTaskExt('search', 'search');
+    }
+    case 'due':
+      return t?.due ? await t.due(parseInt(args.positional[0]) || 7, { folder: args.options.folder }) : needsTaskExt('due', 'due');
+    case 'priority':
+      return t?.priority ? await t.priority() : needsTaskExt('priority', 'priority');
+    case 'completed': {
+      const projectIds = tagsToArray(args.options.projects);
+      return t?.listCompleted ? await t.listCompleted({
+        projectIds,
+        folder: args.options.folder,
+        startDate: args.options.from,
+        endDate: args.options.to,
+      }) : needsTaskExt('listCompleted', 'completed');
+    }
     case 'vector-sync':
       return t?.vectorSync ? await t.vectorSync({ forceFull: !!args.options.full, maxEmbeddings: parseInt(args.options.max) || 200 }) : needsTaskExt('vectorSync', 'vector-sync');
     case 'vector-status':
@@ -440,15 +691,19 @@ async function handleNotes() {
     case 'find':
       if (!args.positional[0]) { console.error('Usage: ats notes find QUERY'); process.exit(1); }
       return await n.find(args.positional[0], {
-        project: args.options.project,
+        project: args.options.project || wikiProject(),
         limit: parseInt(args.options.limit) || 10,
       });
     case 'get': {
       const ref = args.positional[0];
       if (!ref) { console.error('Usage: ats notes get ID_OR_TITLE [--extract raw|json|yaml]'); process.exit(1); }
       const extract = args.options.extract;
+      if (extract && !['raw', 'json', 'yaml'].includes(extract)) {
+        console.error('--extract must be one of: raw, json, yaml');
+        process.exit(1);
+      }
       const result = await n.get(ref, {
-        project: args.options.project,
+        project: args.options.project || wikiProject(),
         extract,
         exact: !!args.options.exact,
       });
@@ -458,7 +713,7 @@ async function handleNotes() {
       const ref = args.positional[0];
       if (!ref) { console.error('Usage: ats notes url ID_OR_TITLE [--display "..."]'); process.exit(1); }
       const link = await n.url(ref, {
-        project: args.options.project,
+        project: args.options.project || wikiProject(),
         display: args.options.display,
         exact: !!args.options.exact,
       });
@@ -466,7 +721,7 @@ async function handleNotes() {
     }
     case 'links':
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats notes links SRC_PROJECT SRC_TASK'); process.exit(1); }
-      return await n.links(args.positional[0], args.positional[1], { project: args.options.project });
+      return await n.links(args.positional[0], args.positional[1], { project: args.options.project || wikiProject() });
     default:
       console.log(getNotesHelp());
   }
@@ -483,7 +738,7 @@ async function handleOpen() {
   const adapter = await loadAdapter();
   // parseArgs put the 1st token in subcommand; fold it back into the arg list.
   const argv = [args.subcommand, ...args.positional];
-  const resolved = await resolveOpen({ adapter, argv, options: args.options });
+  const resolved = await resolveOpen({ adapter, argv, options: { ...args.options, project: args.options.project || wikiProject() } });
   const launchResult = shouldLaunch(args.options) ? await launchUrl(resolved.url) : null;
   return formatOpenResult(resolved, args.options, launchResult);
 }

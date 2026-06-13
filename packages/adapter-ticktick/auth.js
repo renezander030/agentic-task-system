@@ -19,7 +19,7 @@ export async function status(deps = {}) {
   if (!tokens || !tokens.accessToken) {
     return {
       authenticated: false,
-      message: 'Not authenticated. Run: ticktick auth login',
+      message: 'Not authenticated. Run: ats auth login',
     };
   }
 
@@ -51,7 +51,7 @@ export async function login(deps = {}) {
     message: 'Open the authorization URL in your browser',
     url,
     state,
-    nextStep: 'After authorizing, run: ticktick auth exchange YOUR_CODE',
+    nextStep: 'After authorizing, run: ats auth exchange YOUR_CODE',
   };
 }
 
@@ -94,7 +94,7 @@ export async function refresh(deps = {}) {
   const tokens = await loadTokens(deps);
 
   if (!tokens || !tokens.refreshToken) {
-    throw new Error('No refresh token available. Run: ticktick auth login');
+    throw new Error('No refresh token available. Run: ats auth login');
   }
 
   const newTokens = await refreshAccessToken(config, tokens.refreshToken, deps);

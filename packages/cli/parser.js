@@ -387,16 +387,30 @@ retrieval (RRF) over your existing task app, through a pluggable adapter.
 Usage: ats <command> [options]
 
 Commands:
-  find <query>   Hybrid retrieval (dense + sparse + keyword, fused via RRF)
+  init [adapter] Select an adapter and run a health check
+  setup          Run the active adapter's setup wizard, when available
+  find <query>   Parallel retrieval fused with RRF and provenance
   open <ref>     Open an item in your task app (deep link via the adapter)
   get <ref>      Fetch one item by id or title
+  url <ref>      Emit a paste-ready cross-reference link
+  links <p> <t>  Resolve cross-references inside a task or note
+  create <title> Create a task (shortcut for tasks create)
+  update <p> <t> Update a task (shortcut for tasks update)
+  hybrid <query> Dense+sparse retrieval (embedder-backed adapters)
+  similar <id>   Find related items (embedder-backed adapters)
   doctor         Diagnose adapter, auth, capabilities, cache, retrieval
+  status         Alias for doctor
+  cache          Inspect or refresh the adapter's centralized cache
+  sync vector    Synchronize the vector index
+  bench          Run and score retrieval benchmarks or analyze usage
   adapter        Conformance-test or scaffold a storage adapter
-  config         Select the active adapter (config use <name>)
+  config         Select the adapter and configure the wiki project
   auth           Authentication management
   projects       Project operations
   tasks          Task operations
-  notes          Note operations (Permanent Notes wiki)
+  notes          Wiki/note operations through the active adapter
+  completion     Generate bash, zsh, or fish completion
+  help           Show command help
 
 Global options:
   --help, -h        Show help
@@ -407,14 +421,59 @@ Global options:
 Run 'ats <command> --help' for command-specific help.
 
 Quick start:
-  ats init ats                       # Select an adapter + health-check
-  ats find "deployment runbook"      # Hybrid retrieval over your store
+  ats init ticktick                  # Select an adapter + health-check
+  ats find "deployment runbook"      # Parallel retrieval over your store
   ats find "deployment runbook" --explain   # ...and show why each result ranked
   ats open "deployment runbook"      # Jump straight to it in your task app
 
 Write an adapter for any store:
   ats adapter new obsidian           # Scaffold ats-adapter-obsidian
   ats adapter test ./ats-adapter-obsidian   # Verify it against the contract`;
+}
+
+export function getConfigHelp() {
+  return `ats config — configure ATS
+
+Usage:
+  ats config use <adapter-name|package-or-path>
+  ats config set wiki-project <name-or-id>
+  ats config get wiki-project
+  ats config show
+
+Environment:
+  ATS_ADAPTER       Override the configured adapter
+  ATS_WIKI_PROJECT  Override the configured wiki project`;
+}
+
+export function getCacheHelp() {
+  return `ats cache — inspect or refresh the active adapter cache
+
+Usage:
+  ats cache status
+  ats cache sync
+
+This command is available when the active adapter exposes centralized-cache
+operations. Generic filesystem adapters may not need it.`;
+}
+
+export function getBenchHelp() {
+  return `ats bench — retrieval quality and usage analysis
+
+Usage:
+  ats bench run [--questions FILE] [--method NAME] [--top N] [--results DIR]
+  ats bench score [--date YYYY-MM-DD] [--topK N] [--results DIR]
+  ats bench analyze-usage [--days N | --since YYYY-MM-DD]
+
+The runner invokes ATS retrieval commands only. It never calls a legacy task CLI.`;
+}
+
+export function getCompletionHelp() {
+  return `ats completion — generate shell completion
+
+Usage:
+  ats completion bash
+  ats completion zsh
+  ats completion fish`;
 }
 
 /**
@@ -473,7 +532,7 @@ Environment:
 Examples:
   ats open "deployment runbook"
   ats open "ffmpeg cheatsheet" --print
-  ats open 6890b500ebcdba0000000414 687c7b0febcdba0000001d29
+  ats open cccccccccccccccccccccccc dddddddddddddddddddddddd
   ats open "Trunk Catalog" --json | jq -r .url`;
 }
 
@@ -526,7 +585,7 @@ Examples:
  * Generate notes command help
  */
 export function getNotesHelp() {
-  return `ats notes - Note operations (Permanent Notes wiki)
+  return `ats notes - Wiki/note operations
 
 Notes are tasks living in a designated project (default: "Permanent Notes").
 This wraps them as a wiki layer with two roles:
@@ -534,9 +593,8 @@ This wraps them as a wiki layer with two roles:
   - Agent-data notes: a fenced \`\`\`json or \`\`\`yaml block embedded in the
     note body. Extracted via --extract for piping to scripts/agents.
 
-Cross-references use TickTick's native deep-link markdown form:
-  [Display Title](https://ticktick.com/webapp/#p/<projectId>/tasks/<taskId>)
-'notes links' extracts these from any task body and resolves them.
+Cross-references use the active adapter's native deep-link markdown form.
+'notes links' extracts supported references from a task body and resolves them.
 
 Usage: ats notes <subcommand> [options]
 
@@ -545,10 +603,10 @@ Subcommands:
   get <id-or-title>                     Get note (default: structured object)
   url <id-or-title>                     Emit a markdown link to the note,
                                         ready to paste into a task body
-  links <src_project_id> <src_task_id>  Resolve TT deep-link refs in a task body
+  links <src_project_id> <src_task_id>  Resolve adapter-native refs in a task body
 
 Common options:
-  --project <name-or-id>   Override notes project (default "Permanent Notes")
+  --project <name-or-id>   Override the configured wiki project
 
 find options:
   --limit <n>              Max results (default 10)
@@ -565,7 +623,7 @@ Examples:
   ats notes find "deployment runbook"
   ats notes get "Trunk Catalog" --extract json | jq '.trunks[].name'
   ats notes get abc123 --extract raw
-  ats notes url "Parallel Agent Work"          # paste-ready markdown link
+  ats notes url "Demo Reference Note"          # paste-ready markdown link
   ats notes url "ffmpeg" --display "see ffmpeg cheatsheet"
   ats notes links INBOX <task-id>
   ats notes find "config" --project "Agent Data"`;
@@ -590,10 +648,9 @@ Subcommands:
   search <keyword>                 Search all tasks (keyword match)
   semantic <query>                 Semantic search (vector similarity)
   hybrid <query>                   Hybrid retrieval — semantic + keyword fusion (RRF)
-  find <query>                     Time-bounded parallel retrieval — fans out
-                                   hybrid + keyword + notes_find concurrently,
-                                   merges via RRF. Best for "max accurate info
-                                   per unit time" agent flows.
+  find <query>                     Time-bounded parallel retrieval over every
+                                   branch available from the active adapter,
+                                   merged via RRF with provenance.
                                    --explain shows per-branch rank + RRF
                                    contribution for each result. --limit,
                                    --budget-ms tune breadth/deadline.
@@ -613,9 +670,9 @@ Create/Update options:
   --reminder <time>      Reminder: 15m, 1h, 1d (before due)
   --title <text>         New title (update only)
   --relevance            (create) Append a Relevance Rule instruction block
-                         after the result so the active Claude session can
+                         after the result so the active agent can
                          decide a trunk and follow up with 'tasks update'.
-                         Same effect as TICKTICK_RELEVANCE=on env var.
+                         Same effect as ATS_RELEVANCE=on env var.
 
 Search options:
   --tags <tags>          Filter by tags (comma-separated)

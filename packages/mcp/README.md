@@ -8,7 +8,7 @@ It exposes **the task app you already use** to any MCP client (Claude Desktop, C
 
 | Tool | What it does |
 | --- | --- |
-| `find` | Hybrid retrieval (dense + sparse + keyword) fused via Reciprocal Rank Fusion, with per-hit provenance. Pass `explain: true` for a per-result rank + RRF-contribution breakdown. |
+| `find` | Available adapter signals plus Core keyword retrieval fused via RRF. Adapters with embeddings add dense+sparse hybrid. Pass `explain: true` for a per-result breakdown. |
 | `get_task` | Fetch one item (full body) by project id + task id. |
 | `list_projects` | List projects / folders. |
 | `create_task` | Create an item — the agent→human write side of the two-way bus. |

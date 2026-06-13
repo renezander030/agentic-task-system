@@ -1,11 +1,11 @@
 # Search Accuracy Benchmark
 
-Reusable harness for measuring whether a TickTick retrieval system returns
+Reusable harness for measuring whether an ATS retrieval system returns
 the right answer to a given question.
 
 ## How it works
 
-1. You author 25–30 real questions you'd ask of your TickTick state, each
+1. You author 25–30 real questions you'd ask of your active ATS store, each
    paired with the **gold answer** (the task or note that actually
    contains the answer).
 2. The runner executes every retrieval method on every question, records
@@ -56,16 +56,16 @@ Suggested taxonomy:
 $EDITOR bench/data/questions.jsonl
 
 # 2. Run all current methods → saves to results/
-node bench/run.js
+ats bench run --questions=packages/core/bench/data/questions.jsonl
 
 # 3. Score + diff → writes report
-node bench/score.js
+ats bench score
 
 # 4. After building a new method, re-run only that method
-node bench/run.js --method=suggestor
+ats bench run --method=suggestor --questions=packages/core/bench/data/questions.jsonl
 
 # 5. Re-score, regenerate the comparison
-node bench/score.js
+ats bench score
 ```
 
 ## Metrics
@@ -84,7 +84,7 @@ Edit `run.js` → add an entry to `METHODS`:
 ```js
 const METHODS = {
   semantic: {
-    cmd: (q) => ['ticktick', 'tasks', 'semantic', q, '--limit', '5', '--format', 'json'],
+    cmd: (q) => ['ats', 'tasks', 'semantic', q, '--limit', '5', '--format', 'json'],
     parseTop: (json) => json.tasks.map(t => t.fullId),
   },
   // suggestor: { cmd: ..., parseTop: ... }

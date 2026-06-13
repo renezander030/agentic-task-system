@@ -2,7 +2,7 @@
 
 An [Agentic Task System](https://github.com/renezander030/agentic-task-system) storage adapter for **Obsidian** — the folder of markdown you already keep.
 
-**Adapter, not migration.** Point ATS at your vault and the existing machinery works over it: `ats find` (hybrid + keyword, fused via Reciprocal Rank Fusion), the wiki layer (`ats get / url / links / open`), and the [MCP server](https://www.npmjs.com/package/@reneza/ats-mcp) for Claude Desktop / Cursor. No server, no OAuth, no sync — a vault is just files on disk.
+**Adapter, not migration.** Point ATS at your vault and get `ats find` (ranked keyword + native vault search fused via RRF), the wiki layer (`ats get / url / links / open`), and the [MCP server](https://www.npmjs.com/package/@reneza/ats-mcp) for Claude Desktop / Cursor. No server, OAuth, vector database, or sync service is required.
 
 ## How the vault maps to the contract
 

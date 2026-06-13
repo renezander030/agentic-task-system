@@ -5,7 +5,8 @@
  * A strict, deterministic guard against leaking personal / private data into
  * either public surface this repo exposes:
  *
- *   • the GitHub surface  — every git-tracked file        (default mode)
+ *   • the GitHub surface  — every tracked or untracked commit candidate
+ *                          (default mode; ignored files stay excluded)
  *   • the npm surface     — exactly what `npm publish` ships, per package,
  *                           resolved via `npm pack --dry-run --json`
  *
@@ -54,6 +55,9 @@ const PLACEHOLDER_USERS = new Set([
 ]);
 // E-mail domains that are documentation placeholders, not real addresses.
 const ALLOWED_EMAIL_DOMAINS = new Set(['example.com', 'example.org', 'example.net', 'test.com']);
+// Public product names can also occur in private task data. Keep this list
+// intentionally narrow so the local denylist remains authoritative otherwise.
+const ALLOWED_DENYLIST_TERMS = new Set(['claude', 'claude code']);
 
 const PATTERNS = [
   { id: 'private-key', re: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/g },
@@ -109,6 +113,7 @@ function scanText(rel, text, denylist) {
   if (denylist.length) {
     const lower = text.toLowerCase();
     for (const term of denylist) {
+      if (ALLOWED_DENYLIST_TERMS.has(term)) continue;
       let from = 0;
       let idx;
       while ((idx = lower.indexOf(term, from)) !== -1) {
@@ -148,9 +153,13 @@ function readTextOrNull(abs) {
   }
 }
 
-/** Git-tracked files, repo-relative. */
-function gitTrackedFiles() {
-  const out = execFileSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, encoding: 'utf8' });
+/** Files that would be eligible for the next commit, repo-relative. */
+function gitCandidateFiles() {
+  const out = execFileSync(
+    'git',
+    ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+    { cwd: REPO_ROOT, encoding: 'utf8' }
+  );
   return out.split('\0').filter(Boolean);
 }
 
@@ -195,7 +204,7 @@ function main() {
   let scanned = 0;
 
   if (mode === 'git') {
-    const files = gitTrackedFiles();
+    const files = gitCandidateFiles();
     scanned = files.length;
     results = scanFileList(files, REPO_ROOT, 'git', denylist);
   } else if (mode === 'self') {

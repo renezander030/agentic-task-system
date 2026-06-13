@@ -89,7 +89,7 @@ interface KnowledgeAdapter {
 
 **`bulkFetch()`** — single-call corpus refresh. Cheaper than per-project iteration when the adapter supports it (Notion's database queries, TickTick's v2 batch sync, filesystem walk). Without it, Core iterates `listProjects` → `listTasksInProject`.
 
-**`embeddings(texts)`** — adapter-supplied vector embeddings. Without it, Core uses local nomic-embed via ollama. Useful if the adapter has its own vector backend (Notion AI, Pinecone, etc).
+**`embeddings(texts)`** — adapter-supplied vectors. Core uses them for a dense branch, fuses that branch with its token-based sparse branch, and supports generic `similar`. Without this method, Core stays on keyword/native retrieval; it does not silently start an embedding service.
 
 ## Authentication
 

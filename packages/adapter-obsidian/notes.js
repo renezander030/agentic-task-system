@@ -13,6 +13,7 @@
 
 import fs from 'node:fs';
 import * as vault from './vault.js';
+import { record as logUsage } from '@reneza/ats-core/usage-log';
 
 function slugify(s) {
   return (s || '')
@@ -29,7 +30,7 @@ function scoreTitleMatch(title, query) {
   const q = (query || '').toLowerCase();
   if (!q) return 0;
   if (t === q) return 100;
-  if (slugify(title) === slugify(query)) return 95; // [[parallel-agent-work]] ≈ "Parallel Agent Work"
+  if (slugify(title) === slugify(query)) return 95; // [[demo-reference-note]] matches "Demo Reference Note"
   if (t.startsWith(q)) return 60;
   if (t.includes(q)) return 30;
   const words = q.split(/\s+/).filter(Boolean);
@@ -58,7 +59,15 @@ export async function find(query, options = {}, deps = {}) {
     results.push({ id: t.id, fullId: t.id, projectId: t.projectId, title: t.title, score });
   }
   results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
-  return results.slice(0, limit);
+  const sliced = results.slice(0, limit);
+  logUsage({
+    tool: 'notes_find',
+    query,
+    resultCount: sliced.length,
+    topId: sliced[0]?.fullId || null,
+    meta: { project: options.project || null },
+  });
+  return sliced;
 }
 
 /**

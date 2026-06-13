@@ -18,7 +18,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm run test:fast
+      - name: Full repository gate
+        run: npm test
+      - name: Npm publish disclosure gate
+        run: npm run check:publish

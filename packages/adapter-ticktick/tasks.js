@@ -24,6 +24,8 @@ export async function list(projectId, deps = {}) {
   return data.tasks.map((t) => ({
     id: shortId(t.id),
     fullId: t.id,
+    projectId: shortId(t.projectId),
+    fullProjectId: t.projectId,
     title: t.title,
     content: t.content || '',
     dueDate: t.dueDate,
@@ -31,6 +33,8 @@ export async function list(projectId, deps = {}) {
     tags: t.tags || [],
     status: t.status === 2 ? 'completed' : 'active',
     completedTime: t.completedTime,
+    modifiedTime: t.modifiedTime,
+    attachments: t.attachments || [],
   }));
 }
 
@@ -70,6 +74,7 @@ export async function get(projectId, taskId, deps = {}) {
     reminders: task.reminders,
     repeatFlag: task.repeatFlag,
     items: task.items,
+    attachments: task.attachments || [],
     createdTime: task.createdTime,
     modifiedTime: task.modifiedTime,
   };
@@ -97,11 +102,11 @@ export async function create(projectId, title, options = {}, deps = {}) {
   const resolvedProjectId = await resolveProjectId(projectId, deps);
   const input = { title: title.trim(), projectId: resolvedProjectId };
 
-  if (options.content) input.content = options.content;
-  if (options.dueDate) input.dueDate = options.dueDate;
-  if (options.priority) input.priority = parsePriority(options.priority);
-  if (options.tags) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim());
-  if (options.reminder) {
+  if (options.content !== undefined) input.content = options.content;
+  if (options.dueDate !== undefined) input.dueDate = options.dueDate;
+  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
+  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
+  if (options.reminder !== undefined) {
     const reminder = parseReminder(options.reminder);
     if (reminder) input.reminders = [reminder];
   }
@@ -113,10 +118,19 @@ export async function create(projectId, title, options = {}, deps = {}) {
       id: shortId(task.id),
       fullId: task.id,
       projectId: shortId(task.projectId),
-      title: task.title,
-      dueDate: task.dueDate,
-      priority: formatPriority(task.priority),
-      tags: task.tags || [],
+      fullProjectId: task.projectId,
+      title: task.title || input.title,
+      content: task.content || input.content || '',
+      dueDate: task.dueDate ?? input.dueDate ?? null,
+      priority: formatPriority(task.priority ?? input.priority ?? 0),
+      tags: task.tags ?? input.tags ?? [],
+      status: task.status === 2 ? 'completed' : 'active',
+      reminders: task.reminders ?? input.reminders ?? [],
+      repeatFlag: task.repeatFlag ?? null,
+      items: task.items ?? [],
+      createdTime: task.createdTime,
+      modifiedTime: task.modifiedTime || new Date().toISOString(),
+      attachments: task.attachments || [],
     },
   };
 }
@@ -135,26 +149,32 @@ export async function update(projectId, taskId, options = {}, deps = {}) {
     parseReminder = coreFunctions.parseReminder,
     parsePriority = coreFunctions.parsePriority,
   } = deps;
-  if (!projectId) throw new Error('Project ID required. Usage: ticktick tasks update PROJECT_ID TASK_ID [options]');
+  if (!projectId) throw new Error('Project ID required. Usage: ats tasks update PROJECT_ID TASK_ID [options]');
   if (!taskId) throw new Error('Task ID required.');
   const resolvedProjectId = await resolveProjectId(projectId, deps);
   const resolvedTaskId = await resolveTaskId(taskId, resolvedProjectId, deps);
 
   // Fetch existing task via project-scoped endpoint to preserve fields TickTick resets when omitted.
-  const existing = await apiRequest(
+  const existing = deps.existingTask || await apiRequest(
     'GET',
     `/project/${encodeURIComponent(resolvedProjectId)}/task/${encodeURIComponent(resolvedTaskId)}`,
     undefined,
     deps
   );
   const input = { id: resolvedTaskId, projectId: resolvedProjectId, title: existing.title };
+  for (const field of [
+    'content', 'startDate', 'dueDate', 'timeZone', 'isAllDay', 'priority',
+    'tags', 'reminders', 'repeatFlag', 'items', 'parentId',
+  ]) {
+    if (existing[field] !== undefined) input[field] = existing[field];
+  }
 
-  if (options.title) input.title = options.title;
-  if (options.content) input.content = options.content;
-  if (options.dueDate) input.dueDate = options.dueDate;
-  if (options.priority) input.priority = parsePriority(options.priority);
-  if (options.tags) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim());
-  if (options.reminder) {
+  if (options.title !== undefined) input.title = options.title;
+  if (options.content !== undefined) input.content = options.content;
+  if (options.dueDate !== undefined) input.dueDate = options.dueDate;
+  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
+  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
+  if (options.reminder !== undefined) {
     const reminder = parseReminder(options.reminder);
     if (reminder) input.reminders = [reminder];
   }
@@ -166,10 +186,19 @@ export async function update(projectId, taskId, options = {}, deps = {}) {
       id: shortId(task.id),
       fullId: task.id,
       projectId: shortId(task.projectId),
-      title: task.title,
-      dueDate: task.dueDate,
-      priority: formatPriority(task.priority),
-      tags: task.tags || [],
+      fullProjectId: task.projectId,
+      title: task.title || input.title || existing.title,
+      content: task.content ?? input.content ?? existing.content ?? '',
+      dueDate: task.dueDate ?? input.dueDate ?? existing.dueDate ?? null,
+      priority: formatPriority(task.priority ?? input.priority ?? existing.priority ?? 0),
+      tags: task.tags ?? input.tags ?? existing.tags ?? [],
+      status: task.status === 2 ? 'completed' : 'active',
+      reminders: task.reminders ?? input.reminders ?? existing.reminders ?? [],
+      repeatFlag: task.repeatFlag ?? existing.repeatFlag ?? null,
+      items: task.items ?? existing.items ?? [],
+      createdTime: task.createdTime ?? existing.createdTime,
+      modifiedTime: task.modifiedTime || new Date().toISOString(),
+      attachments: task.attachments || existing.attachments || [],
     },
   };
 }
@@ -470,13 +499,14 @@ export async function find(query, options = {}, deps = {}) {
     apiRequest = coreFunctions.apiRequest,
     formatPriority = coreFunctions.formatPriority,
     vectorHybrid = vectorFunctions.hybrid,
+    loadCorpus: loadCorpusOverride,
   } = deps;
 
   // TickTick-specific corpus loader: prefetch every project's tasks, TTL-cached.
-  // Cuts ~14s wall-clock to <100ms on repeat calls within TTL. Core's generic
+  // Avoids the full remote fan-out on repeat calls within TTL. Core's generic
   // loadCorpus() would also work, but this preserves the exact TickTick shape
   // (id === fullId, fullProjectId, projectName) the branches below rely on.
-  const loadCorpus = async () => {
+  const loadCorpus = loadCorpusOverride || (async () => {
     const cached = corpusCache.read();
     if (cached) {
       const m = corpusCache.meta();
@@ -507,7 +537,7 @@ export async function find(query, options = {}, deps = {}) {
     }
     corpusCache.write(tasks);
     return { corpus: tasks, fromCache: false, ageMs: null };
-  };
+  });
 
   // TickTick-specific retriever: token-aware match restricted to the wiki/notes
   // project (default "Permanent Notes"). Matched by decoration-stripped NAME so
@@ -676,6 +706,7 @@ export async function findSimilar(taskId, options = {}, deps = {}) {
   return retrieval.similar(resolvedTaskId, {
     embedder: { findSimilar: vectorFindSimilar },
     limit: options.limit ?? 5,
+    log: usageLog.record,
   });
 }
 

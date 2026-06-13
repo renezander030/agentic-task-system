@@ -1,6 +1,6 @@
 # @reneza/ats-cli
 
-> **`ats` — one CLI that turns the task app you already use into an agent-native context layer.** Find / get / link / update notes from TickTick or an Obsidian vault today; Notion / Things adapters are roadmap. The retrieval, conventions, and bench harness are storage-agnostic — `ats find` and the wiki layer work over any adapter via core, no per-adapter retrieval code.
+> **`ats` — one CLI that turns the task app you already use into an agent-native context layer.** Find and update items through any contract adapter; adapters that expose the notes extension also provide get / link / open wiki workflows.
 
 The command-line surface for [Agentic Task System](https://github.com/renezander030/agentic-task-system) — an agent-native context layer over the task app you already use, with pluggable storage adapters.
 
@@ -8,7 +8,7 @@ The command-line surface for [Agentic Task System](https://github.com/renezander
 
 Your task app already holds years of curated, deduplicated, prioritized context — you maintain it by hand every day. The fastest path to agent memory isn't standing up a new markdown vault (Karpathy's [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) idea — right about the destination); it's the agent-side primitives that make what you *already* have queryable.
 
-This CLI gives you those primitives: `ats find` runs three retrievers in parallel (hybrid + keyword + notes-find), fuses via Reciprocal Rank Fusion, returns top-K with `sources: [...]` provenance tags. Sub-100ms warm via a 5-min disk-backed corpus cache. 60% top-1 / 80% recall@5 on agent-issued queries vs 20% / 40% for dense alone.
+This CLI gives you those primitives: `ats find` runs every branch available from the active adapter in parallel and fuses them via Reciprocal Rank Fusion. Every result includes `sources: [...]` provenance. The 5-minute disk cache avoids repeated corpus fetches; latency depends on adapter and enabled branches. The published 60% top-1 / 80% recall@5 result is a five-question TickTick micro-benchmark, not a universal guarantee.
 
 ## Install
 
@@ -44,15 +44,15 @@ ats open <id-or-title>             # open it in your task app (urlFor deep link)
 ats get <id-or-title> [--extract raw|json|yaml]
 ats url <id-or-title>              # paste-ready cross-reference link
 ats links <project> <task>         # resolve all deep-links inside a task body
-ats hybrid <query>                 # RRF of dense + sparse only
-ats similar <id>                   # find docs semantically like this one
+ats hybrid <query>                 # dense+sparse RRF when embeddings are available
+ats similar <id>                   # find related docs when embeddings are available
 
 ats create "<title>" [--content "..."] [--project <id>] [--relevance]
 ats update <project> <task> [--content "..."] [--title "..."]
 
 # --json (alias for --format json) on any read command → machine-readable output
 
-ats bench run                      # all retrievers against bench/data/questions.jsonl
+ats bench run                      # run methods against your questions.jsonl
 ats bench score                    # markdown report of hit@1 / recall@5 / MRR
 ats bench analyze-usage            # per-tool stats from search-log.jsonl
 ```

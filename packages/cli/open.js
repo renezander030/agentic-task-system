@@ -8,13 +8,14 @@
 
 import { spawn } from 'node:child_process';
 
-// Two bare hex IDs → an explicit PROJECT_ID TASK_ID pair. Hex-only (0–9, a–f)
-// avoids colliding with two-word unquoted titles, which carry g–z.
-const HEX = /^[0-9a-f]{6,32}$/i;
-
-/** True when argv is exactly two hex tokens → an explicit project/task pair. */
+/**
+ * Two tokens are an explicit PROJECT_ID TASK_ID pair. Titles containing spaces
+ * must be quoted by the shell, as shown in the CLI help. Adapter IDs are not
+ * assumed to be hex: TickTick Inbox IDs and filesystem-backed adapters use
+ * other stable identifier shapes.
+ */
 export function isHexPair(argv) {
-  return Array.isArray(argv) && argv.length === 2 && HEX.test(argv[0]) && HEX.test(argv[1]);
+  return Array.isArray(argv) && argv.length === 2 && argv.every((token) => String(token).length > 0);
 }
 
 /**

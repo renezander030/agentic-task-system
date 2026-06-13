@@ -313,7 +313,7 @@ export async function search(query, options = {}) {
 
   const searchBody = {
     vector,
-    limit,
+    limit: overfetchLimit(limit),
     with_payload: true,
     score_threshold: 0.3,
   };
@@ -330,7 +330,7 @@ export async function search(query, options = {}) {
     searchBody
   );
 
-  return (res.result || []).map((r) => ({
+  return dedupeRankedByTaskId(res.result || [], { limit }).map((r) => ({
     id: r.payload.taskId,
     title: r.payload.title,
     score: Math.round(r.score * 100) / 100,
@@ -395,8 +395,11 @@ export async function hybrid(query, options = {}) {
   // RRF fusion. Build rank maps then sum reciprocal contributions.
   const rrfScores = new Map(); // taskId -> { score, doc, sources }
   const addRanks = (list, sourceName) => {
+    const seen = new Set();
     list.forEach((doc, i) => {
       const id = doc.id;
+      if (!id || seen.has(id)) return;
+      seen.add(id);
       const rank = i + 1;
       const contribution = 1 / (k + rank);
       const cur = rrfScores.get(id);
@@ -520,7 +523,7 @@ export async function findSimilar(taskId, options = {}) {
     'POST',
     {
       vector: sourcePoint.vector,
-      limit: limit + 1,
+      limit: overfetchLimit(limit + 1),
       with_payload: true,
       score_threshold: 0.5,
     }
@@ -532,9 +535,7 @@ export async function findSimilar(taskId, options = {}) {
     project: sourcePoint.payload.projectName,
   };
 
-  const similar = (res.result || [])
-    .filter((r) => r.payload.taskId !== taskId)
-    .slice(0, limit)
+  const similar = dedupeRankedByTaskId(res.result || [], { limit, excludeTaskId: taskId })
     .map((r) => ({
       id: r.payload.taskId,
       title: r.payload.title,
@@ -571,17 +572,42 @@ export async function indexStats() {
 // --- Helpers ---
 
 /**
- * Convert a TickTick task ID (UUID string) to a Qdrant-compatible unsigned integer.
- * Uses a 32-bit FNV-1a hash. Collisions are theoretically possible but
- * extremely unlikely for the typical task count (~hundreds).
+ * Keep the first (highest-ranked) point for each stable task ID.
+ * Shared Qdrant collections can contain stale points created under an older
+ * point-ID scheme, so retrieval must not expose the same task twice.
  */
-function hashId(id) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < id.length; i++) {
-    h ^= id.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
+export function dedupeRankedByTaskId(items, options = {}) {
+  const { limit = Number.POSITIVE_INFINITY, excludeTaskId } = options;
+  if (limit <= 0) return [];
+  const unique = [];
+  const seen = new Set();
+  for (const item of items) {
+    const taskId = item?.payload?.taskId ?? item?.id;
+    if (!taskId || taskId === excludeTaskId || seen.has(taskId)) continue;
+    seen.add(taskId);
+    unique.push(item);
+    if (unique.length >= limit) break;
   }
-  return (h >>> 0); // unsigned 32-bit
+  return unique;
+}
+
+function overfetchLimit(limit) {
+  const requested = Math.max(0, Number(limit) || 0);
+  return Math.max(requested * 3, requested + 10, 10);
+}
+
+/**
+ * Convert a TickTick task ID to the numeric point ID used by ticktick-mcp.
+ * This must stay compatible with vector-service.js so ATS can reuse the
+ * existing centralized Qdrant collection rather than creating duplicates.
+ */
+export function hashId(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = ((h << 5) - h) + id.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
 }
 
 function buildPayload(task, hash) {

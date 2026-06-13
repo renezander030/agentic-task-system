@@ -23,7 +23,7 @@ export async function runSetup() {
   const rl = readline.createInterface({ input, output });
 
   try {
-    console.log('\n=== TickTick CLI Setup ===\n');
+    console.log('\n=== ATS TickTick Adapter Setup ===\n');
 
     // Check if already configured
     if (hasConfig()) {
@@ -123,5 +123,5 @@ async function runAuthFlow(rl, config) {
 
   console.log('\nAuthentication successful!');
   console.log(`Tokens saved to ${TOKEN_PATH}`);
-  console.log('\nYou can now use ticktick-cli. Try: ticktick tasks due');
+  console.log('\nYou can now use ATS. Try: ats tasks due');
 }

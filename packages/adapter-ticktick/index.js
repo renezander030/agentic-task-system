@@ -8,6 +8,22 @@ import * as auth from './auth.js';
 import * as projects from './projects.js';
 import * as tasks from './tasks.js';
 import * as notes from './notes.js';
+import * as relevance from './relevance.js';
+import * as interactive from './interactive.js';
+import * as setup from './setup.js';
+
+function contractTask(task, fallback = {}) {
+  return {
+    id: task.fullId || task.id,
+    title: task.title ?? fallback.title ?? '',
+    content: task.content ?? fallback.content ?? '',
+    projectId: task.fullProjectId || fallback.projectId || task.projectId,
+    tags: task.tags || fallback.tags || [],
+    dueDate: task.dueDate ?? fallback.dueDate,
+    modifiedTime: task.modifiedTime || new Date().toISOString(),
+    raw: task,
+  };
+}
 
 // Required: 6 methods + auth lifecycle.
 export default {
@@ -16,29 +32,12 @@ export default {
 
   listTasksInProject: async (projectId) => {
     const list = await tasks.list(projectId);
-    return list.map((t) => ({
-      id: t.fullId || t.id,
-      title: t.title,
-      content: t.content || '',
-      projectId,
-      tags: t.tags || [],
-      dueDate: t.dueDate,
-      modifiedTime: t.modifiedTime || new Date().toISOString(),
-    }));
+    return list.map((t) => contractTask(t, { projectId }));
   },
 
   getTask: async (projectId, taskId) => {
     const t = await tasks.get(projectId, taskId);
-    return {
-      id: t.fullId,
-      title: t.title,
-      content: t.content || '',
-      projectId: t.fullProjectId || projectId,
-      tags: t.tags || [],
-      dueDate: t.dueDate,
-      modifiedTime: t.modifiedTime || new Date().toISOString(),
-      raw: t,
-    };
+    return contractTask(t, { projectId });
   },
 
   createTask: async (input) => {
@@ -47,17 +46,17 @@ export default {
       tags: input.tags,
       dueDate: input.dueDate,
     });
-    return r.task;
+    return contractTask(r.task, input);
   },
 
   updateTask: async (projectId, taskId, patch) =>
-    (await tasks.update(projectId, taskId, patch)).task,
+    contractTask((await tasks.update(projectId, taskId, patch)).task, { ...patch, projectId }),
 
   urlFor: ({ projectId, taskId }) =>
     `https://ticktick.com/webapp/#p/${projectId}/tasks/${taskId}`,
 
   // --- Optional ---
-  searchByQuery: async (query) => (await tasks.search(query)).tasks,
+  searchByQuery: async (query) => (await tasks.search(query)).tasks.map((task) => contractTask(task)),
 
   // --- Auth ---
   authStatus: () => auth.status(),
@@ -70,5 +69,8 @@ export default {
     projects,
     tasks,
     notes,
+    relevance,
+    interactive,
+    setup,
   },
 };

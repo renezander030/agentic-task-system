@@ -36,7 +36,7 @@ async function resolveNotesProject(projectName, deps = {}) {
   }
 
   const projects = await apiRequest('GET', '/project', undefined, deps);
-  // Strip leading emojis/symbols/whitespace so "Permanent Notes" matches "🔷Permanent Notes".
+  // Strip leading emojis/symbols/whitespace so a decorated wiki name still matches.
   const stripDecorations = (s) =>
     (s || '')
       .normalize('NFKC')
@@ -70,7 +70,7 @@ function scoreTitleMatch(title, query) {
   const q = (query || '').toLowerCase();
   if (!q) return 0;
   if (t === q) return 100;
-  // Slug equivalence — `[[parallel-agent-work]]` matches "Parallel Agent Work".
+  // Slug equivalence — `[[demo-reference-note]]` matches "Demo Reference Note".
   // TickTick markdown breaks links containing spaces, so kebab-case is the
   // canonical link form. Slug match scores just below exact-title.
   if (slugify(title) === slugify(query)) return 95;

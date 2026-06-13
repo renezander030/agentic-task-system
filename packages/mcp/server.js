@@ -20,7 +20,7 @@ import { pathToFileURL } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { validateAdapter, find as coreFind, similar as coreSimilar } from '@reneza/ats-core';
+import { validateAdapter, find as coreFind, similar as coreSimilar, logUsage } from '@reneza/ats-core';
 
 const VERSION = (() => {
   try {
@@ -31,7 +31,7 @@ const VERSION = (() => {
 })();
 
 function atsConfigDir() {
-  const base = path.join(os.homedir(), '.config');
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   const cur = path.join(base, 'ats');
   const legacy = path.join(base, 'akb');
   return !fs.existsSync(cur) && fs.existsSync(legacy) ? legacy : cur;
@@ -68,7 +68,7 @@ export function createServer(adapter) {
 
   server.tool(
     'find',
-    'Read-only. Search the task store by free-text QUERY using hybrid retrieval (dense + sparse + keyword) fused via Reciprocal Rank Fusion. Returns an array of best-matching items (id, projectId, title, snippet, score) with provenance — which retrievers surfaced each. Use this for "what do I have about X". To find items like a KNOWN item instead, use `similar`. Read-only: never writes.',
+    'Read-only. Search the task store by free-text QUERY using available adapter signals plus Core keyword retrieval, fused via Reciprocal Rank Fusion. Adapters with embeddings add dense+sparse hybrid retrieval. Returns best-matching items with provenance. Use this for "what do I have about X". To find items like a KNOWN item instead, use `similar`. Read-only: never writes.',
     {
       query: z.string().describe('Free-text search string, e.g. "auth retry logic" or "Q3 roadmap". Matched against titles and bodies.'),
       limit: z.number().int().positive().max(50).optional().describe('Maximum number of results to return. Default 5, hard cap 50.'),
@@ -86,7 +86,7 @@ export function createServer(adapter) {
         const opts = { limit: limit ?? 5, explain: !!explain };
         const result = ext.tasks?.find
           ? await ext.tasks.find(query, opts)
-          : await coreFind(query, { adapter, ...opts });
+          : await coreFind(query, { adapter, ...opts, log: logUsage });
         return ok(result);
       } catch (e) {
         return fail(e);
@@ -173,7 +173,7 @@ export function createServer(adapter) {
       try {
         const result = ext.tasks?.findSimilar
           ? await ext.tasks.findSimilar(taskId, { limit: limit ?? 5 })
-          : await coreSimilar(taskId, { limit: limit ?? 5 });
+          : await coreSimilar(taskId, { adapter, limit: limit ?? 5, log: logUsage });
         return ok(result);
       } catch (e) {
         return fail(e);

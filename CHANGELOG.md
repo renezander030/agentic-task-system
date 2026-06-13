@@ -1,6 +1,14 @@
 
 # Changelog
 
+## Unreleased - capability and claim alignment
+
+- Generic adapter `embeddings()` now powers Core hybrid retrieval and similarity in CLI and MCP fallbacks.
+- Added working `bench`, `sync vector`, wiki-project configuration, complete command help, and local-path adapter initialization.
+- Reworked `examples/ticktick/sync-trunks.sh` to use ATS instead of raw tokens, validate trunk schema, write atomically, and emit synchronization health state.
+- Corrected reference-adapter write shapes, explicit field clearing, ATS-only follow-up commands, and retrieval usage logging.
+- Documentation now distinguishes universal Core behavior from TickTick/Obsidian adapter-specific capabilities and avoids fixed latency claims.
+
 ## 0.4.0 — Obsidian adapter, a storage-agnostic CLI, and a publish-safety gate
 
 The release that proves "adapter, not migration" over *plain files on disk*: an
@@ -11,7 +19,7 @@ into a public package a build failure.
 ### Added
 
 - **`@reneza/ats-adapter-obsidian`** — an Obsidian-vault storage adapter: point
-  ATS at a folder of markdown and the whole machinery works over it — `ats find`
+  ATS at a folder of markdown and its supported machinery works over it — `ats find`
   (keyword + native + RRF fusion), the wiki layer (`ats get / url / links /
   open`), the conformance kit, and the MCP server — with *zero* retrieval code in
   the adapter. Folders map to projects (vault root = `.`), `.md` files to notes,
@@ -91,7 +99,7 @@ conformance kit, a scaffold, diagnostics, and shipped TypeScript types.
   fusion (`rrf`/`fuse`), corpus loading, and `similar` are now generic and
   storage-agnostic — the TickTick adapter injects its store-specific bits
   (API prefetch, notes branch, embedder) as config rather than owning the
-  algorithm. Behavior is preserved; the adapter delegates to core.
+  algorithm. The adapter delegates its fan-out algorithm to Core.
 - CLI help reworded to the agent-context thesis; stale `ticktick`-prefixed
   examples corrected to `ats`.
 
@@ -129,18 +137,18 @@ Renamed from *Agentic Knowledge Base (AKB)* to **Agentic Task System (ATS)** to 
 
 - **Adapter interface** (`docs/adapter-interface.md`) — six required methods + three optional, plus auth lifecycle. Storage-agnostic.
 - **Parallel retrieval** (`ats find`) — fans out hybrid + keyword + notes-find concurrently against a shared cached corpus, fuses via Reciprocal Rank Fusion, returns top-K with `sources: [...]` provenance tags. Configurable budget (`--budget-ms`, default 3000).
-- **Hybrid retrieval** (`ats hybrid`) — dense + sparse RRF building block. Uses adapter's `embeddings()` if provided, else local nomic-embed via ollama.
+- **Hybrid retrieval** (`ats hybrid`) — dense + sparse RRF building block. Generic adapters can provide `embeddings()`; the TickTick rich adapter uses local nomic-embed via Ollama and Qdrant.
 - **Wiki layer** — `ats find/get/url/links` operate on a designated wiki project (default: first project named `Permanent Notes`, decoration-stripped match).
 - **Agent-data notes** — `ats get <title> --extract json|yaml|raw` parses fenced code blocks in note bodies. The "single source of truth, mobile-editable, agent-readable" pattern.
 - **Cross-references** — `ats url` emits paste-ready adapter-native deep-link markdown. `ats links` resolves them inside any task body.
 - **Capture-time relevance enrichment** — `ats create --relevance` (or `ATS_RELEVANCE=on`) appends an instruction block to the result, prompting an active Claude session to follow up with `ats update` adding a `why: <trunk> — <reason>` line. Trunks loaded from a `Trunk Catalog` agent-data note.
-- **Corpus cache** — disk-backed at `~/.config/ats/corpus-cache.json`, 5-min TTL by default. First call: ~10s. Warm: <100ms.
-- **Usage logging** — every retrieval call writes one JSONL line to `~/.config/ats/search-log.jsonl`. Analyzer at `ats bench analyze-usage` reports per-tool stats and re-query pairs.
+- **Corpus cache** — disk-backed at `~/.config/ats/corpus-cache.json`, 5-min TTL by default. Warm calls avoid repeating the corpus fetch; latency remains adapter-dependent.
+- **Usage logging** — instrumented retrieval commands write JSONL to `~/.config/ats/search-log.jsonl`. Analyzer at `ats bench analyze-usage` reports per-tool stats and re-query pairs.
 - **Bench harness** — `bench/` contains a reusable Q/A scoring system. Author questions paired with gold answers, run all retrieval methods, get a markdown report comparing hit@1 / recall@5 / MRR per tag bucket.
 
 ### Adapters
 
-- **`@reneza/ats-adapter-ticktick`** — reference adapter. Wraps TickTick OpenAPI v1, supports semantic search via local qdrant + nomic-embed via ollama. Implements all required + optional methods.
+- **`@reneza/ats-adapter-ticktick`** — reference adapter. Wraps TickTick OpenAPI v1, supports semantic search via local Qdrant + nomic-embed via Ollama. Implements all required methods plus native search; rich retrieval is exposed through its task extension.
 
 ### CLI
 

@@ -12,6 +12,11 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../server.js';
+import { loadAdapter } from '../server.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 process.env.ATS_CORPUS_CACHE_DISABLE = '1';
 
@@ -167,9 +172,58 @@ test('similar without an embedder-backed adapter surfaces a clean error', async 
   assert.match(textOf(res), /Error:/);
 });
 
+test('similar uses the generic adapter embeddings capability', async () => {
+  const adapter = fakeAdapter();
+  adapter.embeddings = async (texts) => texts.map((text) => {
+    if (text.includes('board deck')) return [0.8, 0.2];
+    if (text.includes('grocery')) return [0, 1];
+    return [1, 0];
+  });
+  const { client } = await connect(adapter);
+  const res = await client.callTool({ name: 'similar', arguments: { taskId: 't1', limit: 2 } });
+  assert.equal(res.isError, undefined);
+  const payload = JSON.parse(textOf(res));
+  assert.equal(payload.source.id, 't1');
+  assert.deepEqual(payload.similar.map((task) => task.id), ['t3', 't2']);
+});
+
 test('tool errors are returned as isError, not thrown', async () => {
   const { client } = await connect(fakeAdapter());
   const res = await client.callTool({ name: 'get_task', arguments: { projectId: 'p1', taskId: 'nope' } });
   assert.equal(res.isError, true);
   assert.match(textOf(res), /no such task/);
+});
+
+test('adapter resolution honors XDG_CONFIG_HOME like the CLI', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-mcp-config-'));
+  const adapterPath = path.join(dir, 'adapter.mjs');
+  fs.writeFileSync(adapterPath, `
+export default {
+  listProjects: async () => [],
+  listTasksInProject: async () => [],
+  getTask: async () => ({}),
+  createTask: async () => ({}),
+  updateTask: async () => ({}),
+  urlFor: () => 'test://item',
+  authStatus: async () => ({ authenticated: true }),
+  authLogin: async () => ({ instructions: 'none' }),
+};
+`);
+  fs.mkdirSync(path.join(dir, 'ats'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'ats', 'adapter'), pathToFileURL(adapterPath).href + '\n');
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  const oldAdapter = process.env.ATS_ADAPTER;
+  delete process.env.ATS_ADAPTER;
+  process.env.XDG_CONFIG_HOME = dir;
+  try {
+    const loaded = await loadAdapter();
+    assert.equal(loaded.pkg, pathToFileURL(adapterPath).href);
+    assert.equal((await loaded.adapter.authStatus()).authenticated, true);
+  } finally {
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldXdg;
+    if (oldAdapter === undefined) delete process.env.ATS_ADAPTER;
+    else process.env.ATS_ADAPTER = oldAdapter;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

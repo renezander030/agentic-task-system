@@ -23,6 +23,15 @@ const args = parseArgs(process.argv.slice(2));
 const questionsPath = args.questions || path.join(__dirname, 'data', 'questions.jsonl');
 const top = Number(args.top) || 5;
 const onlyMethod = args.method || null;
+const resultsDir = path.resolve(args.results || path.join(__dirname, 'results'));
+const cli = process.env.ATS_BENCH_CLI || 'ats';
+
+function runAts(commandArgs) {
+  const isScript = cli.endsWith('.js');
+  return isScript
+    ? spawnSync(process.execPath, [cli, ...commandArgs], { encoding: 'utf8' })
+    : spawnSync(cli, commandArgs, { encoding: 'utf8' });
+}
 
 const METHODS = {
   /**
@@ -31,11 +40,7 @@ const METHODS = {
   semantic: {
     description: 'tasks semantic — current baseline',
     run: (question) => {
-      const res = spawnSync(
-        'ticktick',
-        ['tasks', 'semantic', question, '--limit', String(top), '--format', 'json'],
-        { encoding: 'utf8' }
-      );
+      const res = runAts(['tasks', 'semantic', question, '--limit', String(top), '--format', 'json']);
       if (res.status !== 0) {
         return { error: res.stderr.trim() || `exit ${res.status}`, top: [] };
       }
@@ -56,17 +61,12 @@ const METHODS = {
     },
   },
   /**
-   * Keyword: the original `tasks search` — single-string substring match
-   * on title + content. No ranking. Included for honest comparison.
+   * Keyword: adapter task search over title/content and optional filters.
    */
   keyword: {
     description: 'tasks search — original substring match (no ranking)',
     run: (question) => {
-      const res = spawnSync(
-        'ticktick',
-        ['tasks', 'search', question, '--format', 'json'],
-        { encoding: 'utf8' }
-      );
+      const res = runAts(['tasks', 'search', question, '--format', 'json']);
       if (res.status !== 0) {
         return { error: res.stderr.trim() || `exit ${res.status}`, top: [] };
       }
@@ -89,16 +89,12 @@ const METHODS = {
 
   /**
    * Find: parallel fan-out (hybrid + keyword + notes_find) + RRF fusion.
-   * Best for "max accurate info per unit time" — caches corpus, sub-100ms warm.
+   * Caches the corpus so warm calls avoid repeating the store fetch.
    */
   find: {
     description: 'tasks find — parallel fan-out + RRF',
     run: (question) => {
-      const res = spawnSync(
-        'ticktick',
-        ['tasks', 'find', question, '--limit', String(top), '--budget-ms', '5000', '--format', 'json'],
-        { encoding: 'utf8' }
-      );
+      const res = runAts(['tasks', 'find', question, '--limit', String(top), '--budget-ms', '5000', '--format', 'json']);
       if (res.status !== 0) {
         return { error: res.stderr.trim() || `exit ${res.status}`, top: [] };
       }
@@ -126,11 +122,7 @@ const METHODS = {
   hybrid: {
     description: 'tasks hybrid — RRF of dense (qdrant) + keyword',
     run: (question) => {
-      const res = spawnSync(
-        'ticktick',
-        ['tasks', 'hybrid', question, '--limit', String(top), '--format', 'json'],
-        { encoding: 'utf8' }
-      );
+      const res = runAts(['tasks', 'hybrid', question, '--limit', String(top), '--format', 'json']);
       if (res.status !== 0) {
         return { error: res.stderr.trim() || `exit ${res.status}`, top: [] };
       }
@@ -193,7 +185,6 @@ function runAll() {
   const date = todayStamp();
   const methodNames = onlyMethod ? [onlyMethod] : Object.keys(METHODS);
 
-  const resultsDir = path.join(__dirname, 'results');
   fs.mkdirSync(resultsDir, { recursive: true });
   for (const m of methodNames) {
     if (!METHODS[m]) {

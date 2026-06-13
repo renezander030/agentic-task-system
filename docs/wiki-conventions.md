@@ -3,7 +3,7 @@
 
 ATS treats one project in your storage backend as a wiki — a place where durable, cross-referenceable knowledge lives. Other projects hold ephemeral tasks.
 
-These conventions work the same regardless of adapter (TickTick, Notion, Obsidian, plain markdown). The Core enforces them; the adapter just stores them.
+These conventions are exposed by adapters with a notes/wiki extension. TickTick and Obsidian implement that extension today; a bare six-method adapter still gets Core task retrieval but not title-based `ats get/url/links` commands.
 
 ## Pick a wiki project
 
@@ -13,7 +13,7 @@ ats config set wiki-project "Permanent Notes"
 ats config set wiki-project "<project-id-from-ats-list-projects>"
 ```
 
-The default is the first project named `Permanent Notes` (case-insensitive, decoration-stripped — emoji-prefixed names like `🔷Permanent Notes` match).
+The default is the first project named `Permanent Notes` (case-insensitive and decoration-stripped, so emoji-prefixed names also match).
 
 ## Two kinds of notes
 
@@ -68,15 +68,38 @@ ats get "Trunk Catalog" --extract json | jq '.trunks[].name'
 
 The note is editable from your storage app's mobile UI, agents consume it as structured data. **Single source of truth, mobile-editable, no schema migration.**
 
+### Synchronize trunks for autonomous agents
+
+The TickTick example includes an ATS-native synchronization helper. It never
+reads a raw API token or calls the storage API directly:
+
+```bash
+# Print validated catalog JSON to stdout.
+examples/ticktick/sync-trunks.sh > /path/to/agent-state/trunks.json
+
+# Or let the script replace the file atomically and record verification state.
+OUTPUT_FILE=/path/to/agent-state/trunks.json \
+STATE_FILE=/path/to/agent-state/trunks.sync-state.json \
+ATS_TRUNKS_REFRESH_CACHE=1 \
+QUIET=1 \
+examples/ticktick/sync-trunks.sh
+```
+
+The helper rejects an empty catalog, missing names/descriptions, and duplicate
+trunk names without replacing the last good file. Its state file records the
+successful UTC timestamp, trunk count, source-cache timestamp, and SHA-256 of
+the synchronized catalog. Schedule it with cron, systemd, or a macOS
+LaunchAgent according to the host environment.
+
 ## Cross-references between tasks and notes
 
 Use the adapter's native deep-link markdown form. Don't hand-write — let `ats url` generate it:
 
 ```bash
-ats url "Parallel Agent Work"
-# (ticktick adapter): [Parallel Agent Work](https://ticktick.com/webapp/#p/.../tasks/...)
-# (obsidian adapter): [Parallel Agent Work](obsidian://open?vault=Knowledge&file=...)
-# (notion adapter):   [Parallel Agent Work](https://www.notion.so/...)
+ats url "Demo Reference Note"
+# (ticktick adapter): [Demo Reference Note](https://ticktick.com/webapp/#p/.../tasks/...)
+# (obsidian adapter): [Demo Reference Note](obsidian://open?vault=Knowledge&file=...)
+# (notion adapter):   [Demo Reference Note](https://www.notion.so/...)
 ```
 
 Resolve all such links inside a task body:
@@ -87,15 +110,16 @@ ats links <source_project_id> <source_task_id> --format json
 
 Output includes each linked note's full content so an agent can read context on demand without round-tripping the original task.
 
-> ATS does **not** parse `[[wiki-style]]` references. Use the URL form. Most modern storage backends break `[[X Y Z]]` rendering anyway.
+The TickTick adapter resolves generated deep-link markdown. The Obsidian adapter resolves both generated `obsidian://` links and native `[[wikilinks]]`. Other adapters define their supported reference forms.
 
 ## Retrieval patterns
 
-For agent-driven lookup, prefer `ats find <query>` — fans out three retrievers in parallel against the cached corpus:
+For agent-driven lookup, prefer `ats find <query>` — it fans out the branches available from the active adapter:
 
-1. `hybrid` (dense + sparse RRF — uses adapter's `embeddings` if present, else local nomic-embed via ollama)
-2. `keyword` (substring on cached corpus)
-3. `notes_find` (title-fuzzy on the wiki project)
+1. `hybrid` when embeddings or a rich adapter backend are available
+2. ranked `keyword` over the cached corpus
+3. adapter-native search when exposed
+4. adapter-specific branches such as TickTick's wiki-project `notes_find`
 
 Results RRF-fused and tagged with `sources: [...]`. Multi-source agreement = high confidence.
 

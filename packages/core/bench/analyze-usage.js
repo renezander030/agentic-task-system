@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * bench/analyze-usage.js — read ~/.config/ticktick/search-log.jsonl and
+ * bench/analyze-usage.js — read ~/.config/ats/search-log.jsonl and
  * report which tools got called, how often, with what results, and surface
  * "re-query within 60s" pairs as a proxy for "first result was bad."
  *
@@ -14,8 +14,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const LOG_PATH = process.env.TICKTICK_USAGE_LOG ||
-  path.join(os.homedir(), '.config', 'ticktick', 'search-log.jsonl');
+const LOG_PATH = process.env.ATS_USAGE_LOG ||
+  path.join(os.homedir(), '.config', 'ats', 'search-log.jsonl');
 
 const args = parseArgs(process.argv.slice(2));
 const cutoff = computeCutoff(args);

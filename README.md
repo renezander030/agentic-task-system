@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
 </p>
 
-`ats` is an **MCP server and CLI that gives your AI agent memory from the task manager you already use** — TickTick or an Obsidian vault — with hybrid (dense + sparse + keyword, RRF) retrieval and no vector database to build or maintain. Works with Claude Code, Claude Desktop, Cursor, and any MCP client.
+`ats` is an **MCP server and CLI that gives your AI agent memory from the task manager you already use** — TickTick or an Obsidian vault — with adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF). TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
 Most "agent memory" projects build a *new* store — a vector DB, a bespoke
 framework — that drifts from reality the moment you stop feeding it. But you
@@ -53,7 +53,7 @@ Andrej Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-
 Three shifts, in the order they surprised me in real use:
 
 **1. The task app becomes a two-way bus between you and your agent.**
-It's not just somewhere the agent *reads* — it's where you and the agent hand work back and forth. Drop a task with a file attached and the agent picks it up with full context; the agent writes results back where you'll actually see them. Your existing capture habit becomes the I/O channel — attachments and all.
+It's not just somewhere the agent *reads* — it's where you and the agent hand work back and forth. Drop a task and the agent can read its title, body, tags, dates, checklist data, and any attachment metadata exposed by the adapter; the agent writes results back where you'll actually see them. ATS does not claim to download attachment file contents automatically.
 
 **2. Semantic retrieval makes the *first* fetch the right one.**
 Parallel hybrid retrieval (dense + sparse + keyword, fused with RRF, with provenance) instead of keyword grep. In practice this collapsed the usual "search → refine → search again" loop into a single fetch that comes back both faster and richer. Better context on turn one means better answers on turn one.
@@ -61,7 +61,7 @@ Parallel hybrid retrieval (dense + sparse + keyword, fused with RRF, with proven
 **3. Context gets curated at *write* time, not just read time.**
 The half everyone skips. Every item is hung on a "trunk" — a theme you already care about (`writing`, `client-work`, `side-project`) — the moment it's captured, so retrieval has structure to grab instead of a flat pile.
 
-_Plus the plumbing that makes it usable every turn: a disk-backed corpus cache with sub-100ms warm latency, and a benchmark harness so retrieval quality is measured, not asserted._
+_Plus the plumbing that makes it usable every turn: a disk-backed corpus cache that avoids repeated store fetches, and a benchmark harness so retrieval quality is measured, not asserted. End-to-end latency depends on corpus size and enabled retrievers._
 
 ## Architecture
 
@@ -112,6 +112,8 @@ interface KnowledgeAdapter {
 }
 ```
 
+Without `embeddings()`, Core still provides ranked keyword retrieval and an optional native-search branch. With it, Core also provides dense+sparse hybrid retrieval and generic similarity search.
+
 Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 
 ## Available adapters
@@ -139,7 +141,7 @@ a worked example of the contract over plain markdown — point ATS at a vault wi
 
 The scaffold + conformance kit + interface doc make it a couple-hundred-line job for most well-behaved APIs.
 
-## CLI surface (adapter-agnostic)
+## CLI surface
 
 ```bash
 # Lifecycle
@@ -159,8 +161,8 @@ ats open <id-or-title>             # jump straight to it in your task app (deep 
 ats get <id-or-title> [--extract raw|json|yaml]
 ats url <id-or-title>              # paste-ready cross-reference link
 ats links <project> <task>         # resolve all deep-links inside a task body
-ats hybrid <query>                 # RRF of dense + sparse only
-ats similar <id>                   # find docs semantically like this one
+ats hybrid <query>                 # dense+sparse RRF when embeddings are available
+ats similar <id>                   # similarity when embeddings are available
 
 # Any read command takes --json (alias for --format json) for piping to jq / agents:
 ats find "deploy" --json | jq '.tasks[].title'
@@ -179,8 +181,8 @@ ats bench analyze-usage            # per-tool stats from ~/.config/ats/search-lo
 
 [`@reneza/ats-mcp`](packages/mcp) exposes the active adapter to any MCP client
 as a small tool set — `find`, `get_task`, `list_projects`, `create_task`,
-`update_task`, `similar`, `url_for` — all backed by the same hybrid + RRF
-retrieval. Storage-agnostic over the adapter contract.
+`update_task`, `similar`, `url_for`. The `find` tool uses Core RRF retrieval;
+the other tools delegate directly to the adapter.
 
 For Claude Code this works as persistent memory between sessions without
 introducing a new database: the agent recalls runbooks, decisions, and project
@@ -208,7 +210,7 @@ Already installed from the snippet at the top? Pick up at the OAuth step:
 ```bash
 # Interactive — sets up TickTick OAuth + creates ~/.config/ats/config.json
 ats config use ticktick
-ats auth login
+ats auth login          # prints the OAuth URL and next command
 
 # (optional) For semantic / hybrid retrieval, run a local qdrant + ollama:
 docker run -d --name qdrant -p 6333:6333 qdrant/qdrant

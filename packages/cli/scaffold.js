@@ -23,8 +23,9 @@ const indexTemplate = (slug) => `/**
  * @${'scope'}/ats-adapter-${slug} — an ATS storage adapter.
  *
  * Implement the six required methods (+ auth lifecycle) below and you're done:
- * core handles hybrid retrieval, RRF fusion, the corpus cache, and the CLI/MCP
- * surfaces for free. Verify your work any time with:
+ * core handles keyword/native retrieval, RRF fusion, the corpus cache, and the
+ * CLI/MCP surfaces for free. Add embeddings() to enable dense+sparse hybrid
+ * retrieval. Verify your work any time with:
  *
  *     ats adapter test .
  *

@@ -1,6 +1,6 @@
 # @reneza/ats-core
 
-> **Agent-side retrieval that fans out three retrievers in parallel and votes on the result.** Hybrid (dense + sparse via RRF), keyword, and notes-find run concurrently against a shared cached corpus. The merged top-K comes back with `sources: [...]` provenance — multi-source agreement = high confidence.
+> **Agent-side retrieval that fans out every available retriever in parallel and votes on the result.** Core always provides ranked keyword search, adds adapter-native search when available, and adds dense+sparse hybrid retrieval when the adapter supplies embeddings. The merged top-K includes `sources: [...]` provenance.
 
 The adapter-agnostic core of [Agentic Task System](https://github.com/renezander030/agentic-task-system) — an agent-native context layer over the task app you already use, with pluggable storage adapters.
 
@@ -21,8 +21,8 @@ You'll typically pair it with a storage adapter — see [`@reneza/ats-adapter-ti
 ## What you get
 
 - **Parallel retrieval** — fan-out + RRF fusion, deadline-bounded, provenance-tagged results
-- **Corpus cache** — disk-backed, 5-min TTL, sub-100ms warm latency
-- **Usage logger** — every retrieval call writes one JSONL line for later analysis
+- **Corpus cache** — disk-backed, 5-min TTL; warm calls avoid remote corpus fetches
+- **Usage logger** — instrumented retrieval calls write JSONL for later analysis
 - **Bench harness** — Q/A pairs you author, scored by hit@1 / recall@5 / MRR per tag bucket
 - **Adapter interface + validator** — JSDoc types for the contract every storage adapter implements
 

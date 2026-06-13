@@ -81,6 +81,10 @@ export interface FindOptions {
   cache?: boolean;
   k?: number;
   candidatesPerSource?: number;
+  /** Include Core's built-in keyword branch (default true). */
+  includeKeyword?: boolean;
+  /** Include adapter.searchByQuery when available (default true). */
+  includeNative?: boolean;
   /** Attach a per-result rank/contribution breakdown to each fused doc. */
   explain?: boolean;
   /** Override the corpus loader (store-specific prefetch). */
@@ -113,5 +117,14 @@ export interface FindResult {
 /** Parallel fan-out retrieval fused with RRF. */
 export function find(query: string, cfg?: FindOptions): Promise<FindResult>;
 
-/** Find items similar to a given one; requires an embedder with findSimilar(). */
-export function similar(taskId: string, cfg?: { embedder?: Embedder; limit?: number }): Promise<unknown>;
+/** Find items similar to a given one using findSimilar() or adapter embeddings. */
+export function similar(
+  taskId: string,
+  cfg?: {
+    embedder?: Embedder;
+    adapter?: Adapter;
+    limit?: number;
+    cache?: boolean;
+    log?: (entry: object) => void;
+  }
+): Promise<unknown>;

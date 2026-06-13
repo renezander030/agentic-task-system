@@ -139,13 +139,20 @@ function keywordBranch(query, corpus, { limit = 20 } = {}) {
   const lower = (query || '').toLowerCase();
   if (!lower) return [];
   return corpus
-    .filter(
-      (t) =>
-        (t.title || '').toLowerCase().includes(lower) ||
-        (t.content || '').toLowerCase().includes(lower)
-    )
+    .map((task, index) => {
+      const title = (task.title || '').toLowerCase();
+      const content = (task.content || '').toLowerCase();
+      let score = 0;
+      if (title === lower) score = 100;
+      else if (title.startsWith(lower)) score = 60;
+      else if (title.includes(lower)) score = 30;
+      else if (content.includes(lower)) score = 10;
+      return { task, index, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, limit)
-    .map((t) => ({
+    .map(({ task: t }) => ({
       id: t.id,
       title: t.title,
       content: t.content,
@@ -154,6 +161,81 @@ function keywordBranch(query, corpus, { limit = 20 } = {}) {
       tags: t.tags,
       dueDate: t.dueDate,
     }));
+}
+
+function taskText(task) {
+  return [task.title, task.content, ...(task.tags || [])].filter(Boolean).join('\n');
+}
+
+function tokenize(value) {
+  return String(value || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+}
+
+function cosine(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || a.length !== b.length) {
+    return -Infinity;
+  }
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (!Number.isFinite(a[i]) || !Number.isFinite(b[i])) return -Infinity;
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return normA > 0 && normB > 0 ? dot / Math.sqrt(normA * normB) : -Infinity;
+}
+
+function sparseBranch(query, corpus, { limit = 20 } = {}) {
+  const queryTokens = [...new Set(tokenize(query))];
+  if (queryTokens.length === 0) return [];
+  return corpus
+    .map((task, index) => {
+      const titleTokens = tokenize(task.title);
+      const bodyTokens = tokenize([task.content, ...(task.tags || [])].filter(Boolean).join(' '));
+      const titleSet = new Set(titleTokens);
+      const bodySet = new Set(bodyTokens);
+      let matches = 0;
+      let score = 0;
+      for (const token of queryTokens) {
+        if (titleSet.has(token)) {
+          matches++;
+          score += 3;
+        } else if (bodySet.has(token)) {
+          matches++;
+          score += 1;
+        }
+      }
+      if (matches > 0) score *= matches / queryTokens.length;
+      return { task, index, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map(({ task }) => task);
+}
+
+async function adapterHybridBranch(query, corpus, embeddings, { limit = 20 } = {}) {
+  const vectors = await embeddings([query, ...corpus.map(taskText)]);
+  if (!Array.isArray(vectors) || vectors.length !== corpus.length + 1) {
+    throw new Error(`adapter embeddings returned ${vectors?.length ?? 'invalid'} vectors for ${corpus.length + 1} texts`);
+  }
+  const queryVector = vectors[0];
+  const dense = corpus
+    .map((task, index) => ({ task, index, score: cosine(queryVector, vectors[index + 1]) }))
+    .filter((entry) => Number.isFinite(entry.score))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map(({ task }) => task);
+  const sparse = sparseBranch(query, corpus, { limit });
+  return fuse(
+    [
+      { name: 'dense', docs: dense },
+      { name: 'sparse', docs: sparse },
+    ],
+    { limit }
+  );
 }
 
 /** Run a branch with a per-branch deadline; never rejects. */
@@ -191,6 +273,8 @@ function withDeadline(run, ms) {
  * @param {boolean} [cfg.cache=true]
  * @param {number} [cfg.k=RRF_K]
  * @param {number} [cfg.candidatesPerSource=20]
+ * @param {boolean} [cfg.includeKeyword=true] - include Core's keyword branch
+ * @param {boolean} [cfg.includeNative=true] - include adapter.searchByQuery
  * @param {boolean} [cfg.explain=false] - attach per-result rank/contribution breakdown
  * @param {Function} [cfg.loadCorpus] - override the corpus loader (store-specific)
  * @param {Function} [cfg.log] - usage-log record callback
@@ -206,6 +290,8 @@ export async function find(query, cfg = {}) {
     cache = true,
     k = RRF_K,
     candidatesPerSource = 20,
+    includeKeyword = true,
+    includeNative = true,
     explain = false,
     loadCorpus: loadCorpusOverride,
     log,
@@ -219,6 +305,15 @@ export async function find(query, cfg = {}) {
       ? await loadCorpusOverride()
       : await loadCorpus(adapter, { cache });
   } catch (err) {
+    if (typeof log === 'function') {
+      log({
+        tool: 'find',
+        query,
+        resultCount: 0,
+        topId: null,
+        error: `corpus load failed: ${err.message}`,
+      });
+    }
     return {
       query,
       mode: 'find-failed',
@@ -254,14 +349,23 @@ export async function find(query, cfg = {}) {
             }))
           ),
     });
+  } else if (adapter && typeof adapter.embeddings === 'function') {
+    branchDefs.push({
+      name: 'hybrid',
+      run: () => adapterHybridBranch(query, corpus, adapter.embeddings.bind(adapter), {
+        limit: candidatesPerSource,
+      }),
+    });
   }
 
-  branchDefs.push({
-    name: 'keyword',
-    run: () => keywordBranch(query, corpus, { limit: candidatesPerSource }),
-  });
+  if (includeKeyword) {
+    branchDefs.push({
+      name: 'keyword',
+      run: () => keywordBranch(query, corpus, { limit: candidatesPerSource }),
+    });
+  }
 
-  if (adapter && typeof adapter.searchByQuery === 'function') {
+  if (includeNative && adapter && typeof adapter.searchByQuery === 'function') {
     branchDefs.push({
       name: 'native',
       run: () =>
@@ -323,15 +427,54 @@ export async function find(query, cfg = {}) {
 }
 
 /**
- * Find items similar to a given one. Requires an embedder with findSimilar().
+ * Find items similar to a given one. Uses an explicit findSimilar() embedder
+ * when supplied, otherwise computes cosine similarity from adapter.embeddings().
  *
  * @param {string} taskId
- * @param {{embedder?:object, limit?:number}} [cfg]
+ * @param {{embedder?:object, adapter?:object, limit?:number, cache?:boolean, log?:Function}} [cfg]
  */
 export async function similar(taskId, cfg = {}) {
-  const { embedder, limit = 5 } = cfg;
-  if (!embedder || typeof embedder.findSimilar !== 'function') {
-    throw new Error('similar() requires an embedder with findSimilar(taskId, { limit })');
+  const { embedder, adapter, limit = 5, cache = true, log } = cfg;
+  try {
+    let result;
+    if (embedder && typeof embedder.findSimilar === 'function') {
+      result = await embedder.findSimilar(taskId, { limit });
+    } else {
+      if (!adapter || typeof adapter.embeddings !== 'function') {
+        throw new Error(
+          'similar() requires either an embedder with findSimilar(taskId, { limit }) or an adapter with embeddings(texts)'
+        );
+      }
+
+      const { corpus } = await loadCorpus(adapter, { cache });
+      const source = corpus.find((task) => task.id === taskId || task.fullId === taskId);
+      if (!source) throw new Error(`similar() source item not found in corpus: ${taskId}`);
+      const candidates = corpus.filter((task) => task !== source && task.id !== taskId && task.fullId !== taskId);
+      const vectors = await adapter.embeddings([taskText(source), ...candidates.map(taskText)]);
+      if (!Array.isArray(vectors) || vectors.length !== candidates.length + 1) {
+        throw new Error(`adapter embeddings returned ${vectors?.length ?? 'invalid'} vectors for ${candidates.length + 1} texts`);
+      }
+      const sourceVector = vectors[0];
+      const ranked = candidates
+        .map((task, index) => ({ ...task, score: cosine(sourceVector, vectors[index + 1]) }))
+        .filter((task) => Number.isFinite(task.score))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+      result = { source, similar: ranked };
+    }
+    if (typeof log === 'function') {
+      log({
+        tool: 'similar',
+        query: taskId,
+        resultCount: Array.isArray(result?.similar) ? result.similar.length : 0,
+        topId: result?.similar?.[0]?.id || null,
+      });
+    }
+    return result;
+  } catch (err) {
+    if (typeof log === 'function') {
+      log({ tool: 'similar', query: taskId, resultCount: 0, topId: null, error: err.message });
+    }
+    throw err;
   }
-  return embedder.findSimilar(taskId, { limit });
 }

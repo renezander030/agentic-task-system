@@ -81,6 +81,18 @@ test('find works on a fake adapter with zero retrieval code (keyword branch)', a
   assert.ok(res.branches.some((b) => b.name === 'keyword' && b.ok));
 });
 
+test('keyword branch ranks title matches ahead of earlier content-only matches', async () => {
+  const corpus = [
+    { id: 'content', title: 'Earlier item', content: 'mentions deployment', projectId: 'p' },
+    { id: 'title', title: 'Deployment runbook', content: '', projectId: 'p' },
+  ];
+  const res = await find('deployment', {
+    loadCorpus: async () => ({ corpus, fromCache: false, ageMs: null }),
+    cache: false,
+  });
+  assert.equal(res.tasks[0].id, 'title');
+});
+
 test('find fuses native searchByQuery as its own branch when present', async () => {
   const withNative = {
     ...fakeAdapter,
@@ -104,6 +116,36 @@ test('find adds a hybrid branch when an embedder is supplied', async () => {
   const res = await find('milk', { adapter: fakeAdapter, embedder, cache: false });
   assert.ok(res.branches.map((b) => b.name).includes('hybrid'));
   assert.ok(res.tasks.some((t) => t.id === 't2' && t.sources.includes('hybrid')));
+});
+
+test('find uses adapter-provided embeddings for the generic hybrid branch', async () => {
+  const adapter = {
+    ...fakeAdapter,
+    embeddings: async (texts) => texts.map((text) => {
+      if (text === 'meal planning' || text.includes('groceries')) return [0, 1];
+      return [1, 0];
+    }),
+  };
+  const res = await find('meal planning', { adapter, cache: false });
+  assert.ok(res.branches.some((branch) => branch.name === 'hybrid' && branch.ok));
+  assert.equal(res.tasks[0].id, 't2');
+  assert.ok(res.tasks[0].sources.includes('hybrid'));
+});
+
+test('find can isolate the generic dense+sparse hybrid branch', async () => {
+  const adapter = {
+    ...fakeAdapter,
+    searchByQuery: async () => [{ id: 'native', title: 'Native result' }],
+    embeddings: async (texts) => texts.map((text) => text.includes('groceries') || text === 'food' ? [0, 1] : [1, 0]),
+  };
+  const res = await find('food', {
+    adapter,
+    cache: false,
+    includeKeyword: false,
+    includeNative: false,
+  });
+  assert.deepEqual(res.branches.map((branch) => branch.name), ['hybrid']);
+  assert.equal(res.tasks[0].id, 't2');
 });
 
 test('find injects store-specific custom retrievers', async () => {
@@ -157,7 +199,7 @@ test('loadCorpus fans out listProjects -> listTasksInProject without bulkFetch',
 });
 
 test('similar throws a clear error without an embedder', async () => {
-  await assert.rejects(() => similar('t1', {}), /requires an embedder/);
+  await assert.rejects(() => similar('t1', {}), /requires either an embedder/);
 });
 
 test('similar delegates to embedder.findSimilar', async () => {
@@ -167,4 +209,36 @@ test('similar delegates to embedder.findSimilar', async () => {
   const r = await similar('t1', { embedder, limit: 3 });
   assert.equal(r.source, 't1');
   assert.equal(r.limit, 3);
+});
+
+test('similar uses adapter-provided embeddings when findSimilar is absent', async () => {
+  const tasks = [
+    { id: 'source', title: 'TLS rotation', content: '', projectId: 'p1', tags: [], modifiedTime: NOW },
+    { id: 'near', title: 'Certificate renewal', content: '', projectId: 'p1', tags: [], modifiedTime: NOW },
+    { id: 'far', title: 'Grocery list', content: '', projectId: 'p1', tags: [], modifiedTime: NOW },
+  ];
+  const adapter = {
+    listProjects: async () => [{ id: 'p1', name: 'Work' }],
+    listTasksInProject: async () => tasks,
+    embeddings: async (texts) => texts.map((text) => {
+      if (text.includes('Grocery')) return [0, 1];
+      if (text.includes('Certificate')) return [0.9, 0.1];
+      return [1, 0];
+    }),
+  };
+  const result = await similar('source', { adapter, limit: 2, cache: false });
+  assert.equal(result.source.id, 'source');
+  assert.deepEqual(result.similar.map((task) => task.id), ['near', 'far']);
+  assert.ok(result.similar[0].score > result.similar[1].score);
+});
+
+test('similar rejects malformed adapter embedding output', async () => {
+  const adapter = {
+    ...fakeAdapter,
+    embeddings: async () => [[1, 0]],
+  };
+  await assert.rejects(
+    () => similar('t1', { adapter, cache: false }),
+    /returned 1 vectors for 2 texts/
+  );
 });

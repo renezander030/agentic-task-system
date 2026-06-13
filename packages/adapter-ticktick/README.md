@@ -15,7 +15,7 @@ TickTick has thousands of your durable notes plus an excellent mobile capture fl
 ```bash
 npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
 ats config use ticktick
-ats auth login          # opens TickTick OAuth, paste code back
+ats auth login          # prints TickTick OAuth URL + exchange command
 ats find "deployment runbook"
 ```
 
@@ -41,7 +41,7 @@ All six required methods of the ATS adapter contract:
 
 Plus auth lifecycle (`authStatus` / `authLogin` / `authExchange` for OAuth) and the optional `searchByQuery` (TickTick's substring-only native search).
 
-Adapter ships with the wiki helpers (`notes.find/get/url/links`), capture-time relevance enrichment (`--relevance`), and the qdrant + Ollama integration. `bulkFetch` and `embeddings` optional hooks are on the v0.2 roadmap.
+Adapter ships with the wiki helpers (`notes.find/get/url/links`), capture-time relevance enrichment (`--relevance`), and the Qdrant + Ollama integration through its rich task extension. Its contract-level optional method is `searchByQuery`; the local-cache adapter additionally exposes `bulkFetch`.
 
 ## Repo + docs
 

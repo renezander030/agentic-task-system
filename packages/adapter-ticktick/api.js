@@ -80,11 +80,11 @@ export async function loadConfig(deps = {}) {
     try {
       return JSON.parse(content);
     } catch {
-      throw new Error('Invalid config file. Please run "ticktick setup" to reconfigure.');
+      throw new Error('Invalid config file. Please run "ats setup" to reconfigure.');
     }
   }
 
-  throw new Error(`No config found. Run 'ticktick setup' or create ${CONFIG_PATH}`);
+  throw new Error(`No config found. Run 'ats setup' or create ${CONFIG_PATH}`);
 }
 
 /**
@@ -259,7 +259,7 @@ export async function getValidAccessToken() {
   const tokens = await loadTokens();
 
   if (!tokens) {
-    throw new Error('Not authenticated. Run: ticktick auth login');
+    throw new Error('Not authenticated. Run: ats auth login');
   }
 
   if (isTokenExpired(tokens)) {

@@ -1,43 +1,92 @@
 #!/usr/bin/env bash
-# sync-trunks.sh — pull the canonical "Trunk Catalog" agent-data note from
-# TickTick and emit the parsed JSON on stdout.
+# sync-trunks.sh - extract the canonical "Trunk Catalog" through ATS.
 #
-# Call from eod-triage.sh or any cron that needs the current trunk list:
+# Stdout mode:
 #   ./sync-trunks.sh > trunks.json
 #
-# Reads TICKTICK_API_TOKEN from a .env file. Adapt paths/IDs to your setup.
+# Atomic file mode (recommended for schedulers):
+#   OUTPUT_FILE=/path/to/trunks.json ./sync-trunks.sh
+#
+# Set ATS_TRUNKS_REFRESH_CACHE=1 when the job must first ingest changes made by
+# another client. No raw TickTick token or direct API request is required.
 
 set -euo pipefail
 
-ENV_FILE="${ENV_FILE:-/path/to/ticktick-mcp/.env}"
-NOTES_PROJECT_ID="${NOTES_PROJECT_ID:-<your-permanent-notes-project-id>}"
+ATS_BIN="${ATS_BIN:-$(command -v ats || true)}"
 NOTE_TITLE="${NOTE_TITLE:-Trunk Catalog}"
-API_BASE="https://ticktick.com/open/v1"
+OUTPUT_FILE="${OUTPUT_FILE:-}"
+STATE_FILE="${STATE_FILE:-${OUTPUT_FILE:+${OUTPUT_FILE}.sync-state.json}}"
+REFRESH_CACHE="${ATS_TRUNKS_REFRESH_CACHE:-0}"
+QUIET="${QUIET:-0}"
 
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-: "${TICKTICK_API_TOKEN:?TICKTICK_API_TOKEN missing from $ENV_FILE}"
-
-# Find the note's task ID inside the notes project.
-TASK_ID=$(curl -fsS \
-    -H "Authorization: Bearer $TICKTICK_API_TOKEN" \
-    "$API_BASE/project/$NOTES_PROJECT_ID/data" \
-    | jq -r --arg title "$NOTE_TITLE" '.tasks[] | select(.title == $title) | .id' \
-    | head -n 1)
-
-if [[ -z "$TASK_ID" ]]; then
-    echo "sync-trunks: note titled \"$NOTE_TITLE\" not found in project $NOTES_PROJECT_ID" >&2
-    exit 1
+if [[ -z "$ATS_BIN" || ! -x "$ATS_BIN" ]]; then
+  echo "sync-trunks: ats executable not found: ${ATS_BIN:-<unset>}" >&2
+  exit 1
+fi
+if ! command -v jq >/dev/null 2>&1; then
+  echo "sync-trunks: jq is required" >&2
+  exit 1
 fi
 
-# Fetch the full task and extract the first fenced ```json block.
-curl -fsS \
-    -H "Authorization: Bearer $TICKTICK_API_TOKEN" \
-    "$API_BASE/project/$NOTES_PROJECT_ID/task/$TASK_ID" \
-    | jq -r '.content' \
-    | awk '
-        /^```json[[:space:]]*$/ { in_json = 1; next }
-        /^```[[:space:]]*$/ && in_json { exit }
-        in_json { print }
-    ' \
-    | jq .  # validate + pretty-print
+if [[ "$REFRESH_CACHE" == "1" ]]; then
+  "$ATS_BIN" cache sync --json >/dev/null
+fi
+
+payload=$("$ATS_BIN" notes get "$NOTE_TITLE" --extract json --json)
+
+# Require a non-empty array of uniquely named trunks with descriptions. Keep
+# every source field intact rather than re-encoding into a narrower schema.
+if ! printf '%s\n' "$payload" | jq -e '
+  .trunks as $trunks
+  | ($trunks | type == "array" and length > 0)
+    and all($trunks[];
+      (.name | type == "string" and length > 0)
+      and (.desc | type == "string" and length > 0)
+    )
+    and (([$trunks[].name] | unique | length) == ($trunks | length))
+' >/dev/null; then
+  echo "sync-trunks: invalid Trunk Catalog schema" >&2
+  exit 1
+fi
+
+formatted=$(printf '%s\n' "$payload" | jq .)
+
+if [[ -n "$OUTPUT_FILE" ]]; then
+  output_dir=$(dirname "$OUTPUT_FILE")
+  mkdir -p "$output_dir"
+  output_tmp=$(mktemp "${OUTPUT_FILE}.tmp.XXXXXX")
+  trap 'rm -f "${output_tmp:-}" "${state_tmp:-}"' EXIT
+  printf '%s\n' "$formatted" > "$output_tmp"
+  chmod 0644 "$output_tmp"
+  mv -f "$output_tmp" "$OUTPUT_FILE"
+
+  if [[ -n "$STATE_FILE" ]]; then
+    state_dir=$(dirname "$STATE_FILE")
+    mkdir -p "$state_dir"
+    state_tmp=$(mktemp "${STATE_FILE}.tmp.XXXXXX")
+    checksum=$(shasum -a 256 "$OUTPUT_FILE" | awk '{print $1}')
+    cache_status=$("$ATS_BIN" cache status --json 2>/dev/null || printf '{}')
+    jq -n \
+      --arg syncedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg noteTitle "$NOTE_TITLE" \
+      --arg outputFile "$OUTPUT_FILE" \
+      --arg sha256 "$checksum" \
+      --argjson trunkCount "$(printf '%s\n' "$formatted" | jq '.trunks | length')" \
+      --argjson cacheStatus "$cache_status" \
+      '{
+        success: true,
+        syncedAt: $syncedAt,
+        noteTitle: $noteTitle,
+        outputFile: $outputFile,
+        trunkCount: $trunkCount,
+        sha256: $sha256,
+        cacheLastSync: ($cacheStatus.lastSync // null)
+      }' > "$state_tmp"
+    chmod 0644 "$state_tmp"
+    mv -f "$state_tmp" "$STATE_FILE"
+  fi
+fi
+
+if [[ "$QUIET" != "1" ]]; then
+  printf '%s\n' "$formatted"
+fi

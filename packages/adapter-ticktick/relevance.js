@@ -2,9 +2,9 @@
  * Capture-time Relevance Rule enrichment for the CLI.
  *
  * Builds an instruction block that the active Claude session reads after a
- * `tasks create` call. The block tells Claude to pick a trunk (from the
- * canonical "Trunk Catalog" note in 🔷Permanent Notes) and follow up with
- * `ticktick tasks update` to append a `why:` line.
+ * `tasks create` call. The block tells the active agent to pick a trunk (from the
+ * canonical "Trunk Catalog" note in the configured wiki project) and follow up with
+ * `ats tasks update` to append a `why:` line.
  *
  * Trunks are fetched fresh from TickTick on every call — a single REST GET
  * (~200-500ms). No local cache file. The Trunk Catalog note is the single
@@ -17,12 +17,12 @@
 import * as notes from './notes.js';
 
 const TRUNK_CATALOG_TITLE = 'Trunk Catalog';
-const TRUNK_CATALOG_PROJECT = 'Permanent Notes'; // matches "🔷Permanent Notes" via decoration-stripping
+const trunkCatalogProject = (configured) => configured || process.env.ATS_WIKI_PROJECT || 'Permanent Notes';
 
-async function fetchTrunks(deps) {
+async function fetchTrunks(deps, project) {
   const data = await notes.get(
     TRUNK_CATALOG_TITLE,
-    { project: TRUNK_CATALOG_PROJECT, extract: 'json', exact: false },
+    { project: trunkCatalogProject(project), extract: 'json', exact: false },
     deps
   );
   return Array.isArray(data?.trunks) ? data.trunks : [];
@@ -38,10 +38,10 @@ function trunksBlock(trunks) {
  * @param {{ taskId, projectId, title, content }} input - data about the just-created task
  * @returns {Promise<string>} the instruction block, or '' on failure
  */
-export async function buildEnrichInstruction({ taskId, projectId, title, content }, deps = {}) {
+export async function buildEnrichInstruction({ taskId, projectId, title, content, wikiProject }, deps = {}) {
   let trunks;
   try {
-    trunks = await fetchTrunks(deps);
+    trunks = await fetchTrunks(deps, wikiProject);
   } catch (err) {
     console.error(`[relevance] failed to fetch Trunk Catalog: ${err.message}`);
     return '';
@@ -66,9 +66,9 @@ export async function buildEnrichInstruction({ taskId, projectId, title, content
     '3. If nothing concrete fits, choose "orphan — park 30d". Be willing to choose orphan.',
     '',
     'Then call:',
-    `  ticktick tasks update ${projectId} ${taskId} --content "<existing-content>\\n\\nwhy: <trunk> — <connection>"`,
+    `  ats tasks update ${projectId} ${taskId} --content "<existing-content>\\n\\nwhy: <trunk> — <connection>"`,
     'OR with the orphan form:',
-    `  ticktick tasks update ${projectId} ${taskId} --content "<existing-content>\\n\\nwhy: orphan — park 30d"`,
+    `  ats tasks update ${projectId} ${taskId} --content "<existing-content>\\n\\nwhy: orphan — park 30d"`,
     '',
     "Do this silently in the same turn — don't ask the user.",
   ].join('\n');
@@ -80,5 +80,5 @@ export async function buildEnrichInstruction({ taskId, projectId, title, content
 export function isEnabled(options = {}) {
   if (options.relevance === true) return true;
   if (options.noRelevance === true) return false;
-  return process.env.TICKTICK_RELEVANCE === 'on';
+  return process.env.ATS_RELEVANCE === 'on';
 }

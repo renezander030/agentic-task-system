@@ -32,12 +32,12 @@ function fakeAdapter() {
   };
 }
 
-test('isHexPair only matches two hex tokens', () => {
-  assert.equal(isHexPair(['6890b500ebcdba0000000414', '687c7b0febcdba0000001d29']), true);
-  assert.equal(isHexPair(['p1', 't9']), false); // p/t are non-hex
+test('isHexPair accepts any two stable adapter ids', () => {
+  assert.equal(isHexPair(['cccccccccccccccccccccccc', 'dddddddddddddddddddddddd']), true);
+  assert.equal(isHexPair(['p1', 't9']), true);
+  assert.equal(isHexPair(['inbox000000000', 'eeeeeeeeeeeeeeeeeeeeeeee']), true);
   assert.equal(isHexPair(['deadbeef']), false); // single token
   assert.equal(isHexPair(['deadbeef', 'cafebabe', 'extra']), false); // three tokens
-  assert.equal(isHexPair(['deploy', 'runbook']), false); // a two-word title
 });
 
 test('platformOpener honors ATS_OPEN_CMD over the platform default', () => {
@@ -59,16 +59,16 @@ test('shouldLaunch is false for --json and --print', () => {
 test('resolveOpen treats two hex tokens as an explicit project/task pair', async () => {
   const r = await resolveOpen({
     adapter: fakeAdapter(),
-    argv: ['6890b500ebcdba0000000414', '687c7b0febcdba0000001d29'],
+    argv: ['cccccccccccccccccccccccc', 'dddddddddddddddddddddddd'],
   });
-  assert.equal(r.projectId, '6890b500ebcdba0000000414');
-  assert.equal(r.taskId, '687c7b0febcdba0000001d29');
+  assert.equal(r.projectId, 'cccccccccccccccccccccccc');
+  assert.equal(r.taskId, 'dddddddddddddddddddddddd');
   assert.equal(r.title, undefined); // no title for the direct-pair path
-  assert.equal(r.url, 'fake://open/6890b500ebcdba0000000414/687c7b0febcdba0000001d29');
+  assert.equal(r.url, 'fake://open/cccccccccccccccccccccccc/dddddddddddddddddddddddd');
 });
 
 test('resolveOpen resolves a fuzzy title via the notes ext', async () => {
-  const r = await resolveOpen({ adapter: fakeAdapter(), argv: ['deployment', 'runbook'] });
+  const r = await resolveOpen({ adapter: fakeAdapter(), argv: ['deployment runbook'] });
   assert.equal(r.projectId, 'p1');
   assert.equal(r.taskId, 't9');
   assert.equal(r.title, 'Resolved: deployment runbook');
@@ -97,7 +97,7 @@ test('resolveOpen errors on empty input with a usage hint', async () => {
 test('resolveOpen errors when a title is given but the adapter cannot resolve titles', async () => {
   const noNotes = { urlFor: () => 'x://y' };
   await assert.rejects(
-    () => resolveOpen({ adapter: noNotes, argv: ['some', 'title'] }),
+    () => resolveOpen({ adapter: noNotes, argv: ['some title'] }),
     /can't resolve "some title" by title/
   );
 });

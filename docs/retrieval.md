@@ -1,7 +1,7 @@
 
 # Retrieval
 
-ATS's retrieval is **storage-agnostic** (lives in Core, not in any adapter) and **multi-signal** (fans out hybrid + keyword + notes-find concurrently and fuses).
+ATS's retrieval is **storage-agnostic** in Core and **capability-driven**: it fans out the branches available from the active adapter and fuses them.
 
 This document describes how `ats find` actually works.
 
@@ -20,9 +20,9 @@ This document describes how `ats find` actually works.
             ┌─────────────────┼──────────────────┐
             ▼                 ▼                  ▼
    ┌────────────────┐ ┌────────────────┐ ┌────────────────┐
-   │ hybrid         │ │ keyword        │ │ notes_find     │
-   │ (dense+sparse  │ │ (substring     │ │ (title-fuzzy   │
-   │  RRF, qdrant)  │ │  scan)         │ │  on wiki proj) │
+   │ hybrid         │ │ keyword        │ │ native/custom  │
+   │ when vectors   │ │ ranked scan    │ │ when exposed   │
+   │ are available  │ │ always on      │ │ by adapter     │
    └────────┬───────┘ └────────┬───────┘ └────────┬───────┘
             │                  │                  │
             └──────────────────┼──────────────────┘
@@ -40,24 +40,27 @@ This document describes how `ats find` actually works.
 ### hybrid (dense + sparse, internally RRF'd)
 
 Dense:
-1. Embed the query with the adapter's `embeddings()` if provided, else local nomic-embed via ollama
-2. Cosine search top 20 in qdrant
-3. Filter score < 0.3 (configurable)
+1. A generic adapter may provide `embeddings(texts)`; Core embeds the query and cached corpus together and ranks by cosine similarity.
+2. A rich adapter may instead inject its own hybrid backend. The TickTick adapter uses Ollama + Qdrant and manages its own thresholds/index.
 
 Sparse:
-1. Tokenize the query, drop stopwords (`the`, `what`, `find`, `notes`, etc — full list in `core/retrieval.js`)
-2. For each task in the cached corpus: word-boundary match score (×2 per hit) + substring match (×1 per hit) + title-match boost (+1.5/token) + coverage multiplier (× matched-fraction)
-3. Top 20
+1. Tokenize the query and each task's title/body/tags.
+2. Score exact token coverage with a title boost.
+3. Take the top candidates and fuse them with dense ranking via RRF.
 
 Fuse: RRF k=60.
 
 ### keyword (substring scan)
 
-Single substring match on `title.includes(q) || content.includes(q)`. No ranking — order is corpus order. Top 20.
+Substring match on title/content, ranked as exact title, title prefix, title contains, then body contains. Stable corpus order breaks ties. Top 20.
 
 This is the simplest possible signal. It catches the case where the query happens to be a literal substring of a doc.
 
-### notes_find (title-fuzzy, wiki-project-only)
+### native and custom branches
+
+If the adapter implements `searchByQuery()`, Core adds it as `native`. Rich adapters can inject additional branches. TickTick injects `notes_find`, restricted to the configured wiki project, with title-fuzzy ranking.
+
+### TickTick notes_find (title-fuzzy, wiki-project-only)
 
 Restricted to the configured wiki project (default: `Permanent Notes`). Per-doc score:
 - exact title match: 100
@@ -88,7 +91,7 @@ Corpus prefetch is the slow step (full project list + per-project tasks). Cached
 - Override TTL: `ATS_CORPUS_TTL_MS=60000`
 - Disable: `ATS_CORPUS_CACHE_DISABLE=1`
 
-First call after expiration: full refresh (~10s typical, depends on adapter). Subsequent calls within TTL: <100ms total wall-clock.
+The first call after expiration refreshes the corpus. Warm calls avoid that store fetch, but total wall-clock time still depends on corpus size, embeddings, native search, and custom branches; ATS does not guarantee a fixed latency.
 
 If the active adapter implements `bulkFetch()`, the prefetch uses it (one call). Otherwise, Core iterates `listProjects` → `listTasksInProject` (N+1 calls).
 
@@ -112,7 +115,7 @@ See `bench/README.md` for the schema and authoring guide.
 
 ## Usage logging
 
-Every retrieval call writes one JSONL line to `~/.config/ats/search-log.jsonl`:
+ATS-instrumented `find`, keyword, semantic, hybrid, notes-find, and similar calls write JSONL entries to `~/.config/ats/search-log.jsonl`:
 
 ```json
 {"ts":"2026-05-02T12:34:56Z","tool":"find","query":"...","queryLen":15,"queryTokens":3,"resultCount":5,"topId":"...","error":null,"meta":{"budgetMs":3000,"branches":[...]},"pid":12345}

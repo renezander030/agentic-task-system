@@ -73,10 +73,21 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
     if (typeof vectorStatus === 'function') {
       try {
         const vs = await vectorStatus();
-        const n = vs?.count ?? vs?.points ?? vs?.indexed;
+        const n = vs?.vectorCount ?? vs?.count ?? vs?.points ?? vs?.indexed;
         add('vector-index', 'Vector index', n != null ? pass(`${n} embedded item(s)`) : info(JSON.stringify(vs)));
       } catch (e) {
         add('vector-index', 'Vector index', warn(`unreachable: ${e?.message || e}`));
+      }
+    }
+
+    const cacheStatus = adapter.__ext?.cache?.status;
+    if (typeof cacheStatus === 'function') {
+      try {
+        const cs = await cacheStatus();
+        const ageS = cs.ageMs == null ? '?' : Math.round(cs.ageMs / 1000);
+        add('adapter-cache', 'Adapter cache', pass(`${cs.tasks} task(s), ${cs.projects} project(s), ${ageS}s old via ${cs.syncMethod || 'unknown'}`));
+      } catch (e) {
+        add('adapter-cache', 'Adapter cache', fail(e?.message || String(e)));
       }
     }
 

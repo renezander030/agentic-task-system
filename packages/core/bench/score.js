@@ -17,9 +17,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const RESULTS_DIR = path.join(__dirname, 'results');
-
 const args = parseArgs(process.argv.slice(2));
+const RESULTS_DIR = path.resolve(args.results || path.join(__dirname, 'results'));
 const topK = Number(args.topK) || 5;
 const date = args.date || latestDate();
 

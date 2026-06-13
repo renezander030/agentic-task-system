@@ -1,8 +1,8 @@
 /**
  * Append-only usage log for retrieval calls.
  *
- * Every search/semantic/hybrid/notes-find call appends one JSON line to
- * ~/.config/ticktick/search-log.jsonl. Used to answer:
+ * Instrumented search/semantic/hybrid/notes-find/similar calls append JSON lines to
+ * ~/.config/ats/search-log.jsonl. Used to answer:
  *   - Which tool gets called most by agents in real usage?
  *   - Empty-result rate per tool?
  *   - Query patterns (length, token count) per tool?

@@ -11,9 +11,10 @@
     "prepare": "husky",
     "lint": "eslint packages",
     "check:pii": "node scripts/check-no-pii.mjs",
+    "check:claims": "node scripts/check-claims.mjs",
     "check:publish": "node scripts/check-no-pii.mjs --npm",
-    "test:fast": "node --test --test-timeout=10000 packages/core/test/*.test.js packages/mcp/test/*.test.js packages/cli/test/*.test.js packages/adapter-obsidian/test/*.test.js",
-    "test": "npm run lint && npm run check:pii && npm run test:fast"
+    "test:fast": "node --test --test-timeout=10000 packages/core/test/*.test.js packages/mcp/test/*.test.js packages/cli/test/*.test.js packages/adapter-obsidian/test/*.test.js packages/adapter-ticktick/test/*.test.js packages/adapter-ticktick-cache/test/*.test.js",
+    "test": "npm run lint && npm run check:pii && npm run check:claims && npm run test:fast"
   },
   "license": "MIT",
   "repository": {

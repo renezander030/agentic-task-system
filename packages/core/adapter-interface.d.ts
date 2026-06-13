@@ -53,7 +53,7 @@ export interface Adapter {
   searchByQuery?(query: string): Promise<Task[]>;
   /** Optional: one-shot corpus pull (beats N project calls). */
   bulkFetch?(): Promise<Task[]>;
-  /** Optional: bring your own embedder; else Core uses local nomic-embed. */
+  /** Optional: vectors used by Core for hybrid retrieval and similarity. */
   embeddings?(texts: string[]): Promise<number[][]>;
 
   authStatus(): Promise<AuthStatus> | AuthStatus;
