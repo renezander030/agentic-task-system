@@ -564,8 +564,12 @@ Usage:
   ats bench run [--questions FILE] [--method NAME] [--top N] [--results DIR]
   ats bench score [--date YYYY-MM-DD] [--topK N] [--results DIR]
   ats bench analyze-usage [--days N | --since YYYY-MM-DD]
+  ats bench progress [--episodes FILE] [--output FILE] [--json]
 
-The runner invokes ATS retrieval commands only. It never calls a legacy task CLI.`;
+Retrieval scoring measures whether ATS found the right item. Progress scoring
+measures whether workflow episodes advanced: context precision, irrelevant
+tokens, blockers removed, criteria satisfied, reopen rate, and corrections.
+The runner invokes ATS commands only. It never calls a legacy task CLI.`;
 }
 
 export function getCompletionHelp() {

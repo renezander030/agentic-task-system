@@ -481,7 +481,7 @@ async function handleCache() {
 function benchArgs() {
   const forwarded = [];
   for (const [key, value] of Object.entries(args.options)) {
-    if (['format', 'help', 'version'].includes(key) || value === false || value == null) continue;
+    if (['help', 'version'].includes(key) || value === false || value == null) continue;
     forwarded.push(value === true ? `--${key}` : `--${key}=${value}`);
   }
   return forwarded;
@@ -489,15 +489,17 @@ function benchArgs() {
 
 function handleBench() {
   const scripts = {
-    run: new URL('../../core/bench/run.js', import.meta.url),
-    score: new URL('../../core/bench/score.js', import.meta.url),
-    'analyze-usage': new URL('../../core/bench/analyze-usage.js', import.meta.url),
+    run: '@reneza/ats-core/bench/run',
+    score: '@reneza/ats-core/bench/score',
+    'analyze-usage': '@reneza/ats-core/bench/analyze-usage',
+    progress: '@reneza/ats-core/bench/progress',
   };
-  const script = scripts[args.subcommand];
-  if (!script) {
+  const specifier = scripts[args.subcommand];
+  if (!specifier) {
     console.log(getBenchHelp());
     return;
   }
+  const script = new URL(import.meta.resolve(specifier));
   const result = spawnSync(process.execPath, [fileURLToPath(script), ...benchArgs()], {
     stdio: 'inherit',
     env: { ...process.env, ATS_BENCH_CLI: process.argv[1] },

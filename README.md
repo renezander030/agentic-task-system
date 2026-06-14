@@ -113,7 +113,7 @@ ATS only emits observations. A separate agent may consume them, but it must stil
 **6. Context gets curated at *write* time, not just read time.**
 The half everyone skips. Every item is hung on a "trunk" — a theme you already care about (`writing`, `client-work`, `side-project`) — the moment it's captured, so retrieval has structure to grab instead of a flat pile.
 
-_Plus the plumbing that makes it usable every turn: a disk-backed corpus cache that avoids repeated store fetches, and a benchmark harness so retrieval quality is measured, not asserted. End-to-end latency depends on corpus size and enabled retrievers._
+_Plus the plumbing that makes it usable every turn: a disk-backed corpus cache that avoids repeated store fetches, a retrieval benchmark, and a workflow-progress benchmark. ATS can now measure whether context was relevant and whether work advanced instead of treating a polished response as success. End-to-end latency depends on corpus size and enabled retrievers._
 
 ## Architecture
 
@@ -125,6 +125,7 @@ agentic-task-system/
 │   │   ├── task-context.js          # intent, lifecycle, typed graph/context
 │   │   ├── action-ledger.js         # append-only agent action audit
 │   │   ├── task-events.js           # deterministic corpus-diff events
+│   │   ├── progress-benchmark.js     # workflow outcome scoring
 │   │   ├── corpus-cache.js
 │   │   ├── usage-log.js
 │   │   ├── bench/                  # harness
@@ -243,8 +244,10 @@ ats events watch --json             # emit NDJSON observations; never launch age
 # Ops
 ats bench run                      # run all retrievers against bench/data/questions.jsonl
 ats bench score                    # markdown report of hit@1 / recall@5 / MRR
+ats bench progress                 # advancement, context waste, blockers, criteria, reopen/corrections
 ats bench analyze-usage            # per-tool stats from ~/.config/ats/search-log.jsonl
 npm run prove:intent               # deterministic synthetic execution-context proof
+npm run prove:progress             # deterministic synthetic workflow-outcome proof
 ```
 
 ## Use it from Claude Code, Claude Desktop, Cursor (MCP)

@@ -96,6 +96,26 @@ ats events watch --json --interval 30000
 
 This works across every adapter now and deliberately ships before automatic action policies.
 
+## Workflow-progress benchmark
+
+Search quality and answer quality are not enough to show that an agent advanced work. `ats bench progress` scores labeled workflow episodes across separate, inspectable metrics:
+
+- relevant-context precision and recall;
+- irrelevant tokens injected;
+- blockers removed;
+- completion criteria satisfied;
+- tasks completed or reopened;
+- human corrections and supervision-free runs.
+
+```bash
+ats bench progress --episodes workflow-episodes.jsonl
+ats bench progress --episodes workflow-episodes.jsonl --json
+```
+
+Each JSONL episode contains task references, injected-context references with estimated token counts, the evaluator's relevant-context set, before/after blockers and completion criteria, status, action advancement flags, and correction count. It does not require task bodies. Relevance, blocker, and correction labels must come from a human review or a trusted evaluation harness; ATS does not pretend to infer ground truth from its own output.
+
+The report keeps metrics separate instead of publishing a tunable composite score. Higher is better for advancement, completion, context precision/recall, blocker removal, criteria satisfaction, and supervision-free rate. Lower is better for irrelevant tokens, reopen rate, and corrections.
+
 ## Executable proof
 
 Run:
@@ -104,4 +124,4 @@ Run:
 npm run prove:intent
 ```
 
-The proof uses only synthetic tasks. It covers retrieval versus authority, typed context, lifecycle exclusion, provenance, body preservation, intent, scoped security, access and advancement auditing, deterministic task events, content-free checkpoints, and checkpoint advancement after delivery. See [`examples/intent-layer/`](../examples/intent-layer/).
+The proofs use only synthetic tasks. `npm run prove:intent` covers retrieval versus authority, typed context, lifecycle exclusion, provenance, body preservation, intent, scoped security, access and advancement auditing, deterministic task events, content-free checkpoints, and checkpoint advancement after output. `npm run prove:progress` exercises all workflow-progress metrics, including a stalled and reopened episode.

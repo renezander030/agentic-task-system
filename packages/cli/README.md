@@ -67,6 +67,7 @@ ats events watch --json             # continuous NDJSON observations only
 
 ats bench run                      # run methods against your questions.jsonl
 ats bench score                    # markdown report of hit@1 / recall@5 / MRR
+ats bench progress                 # workflow advancement and outcome metrics
 ats bench analyze-usage            # per-tool stats from search-log.jsonl
 ```
 

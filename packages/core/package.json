@@ -7,7 +7,11 @@
   "types": "./index.d.ts",
   "files": [
     "*.js",
-    "*.d.ts"
+    "*.d.ts",
+    "bench/*.js",
+    "bench/*.md",
+    "bench/data/*.md",
+    "bench/data/*.jsonl"
   ],
   "exports": {
     ".": { "types": "./index.d.ts", "default": "./index.js" },
@@ -17,6 +21,11 @@
     "./task-context": { "types": "./task-context.d.ts", "default": "./task-context.js" },
     "./action-ledger": { "types": "./action-ledger.d.ts", "default": "./action-ledger.js" },
     "./task-events": { "types": "./task-events.d.ts", "default": "./task-events.js" },
+    "./progress-benchmark": { "types": "./progress-benchmark.d.ts", "default": "./progress-benchmark.js" },
+    "./bench/run": "./bench/run.js",
+    "./bench/score": "./bench/score.js",
+    "./bench/analyze-usage": "./bench/analyze-usage.js",
+    "./bench/progress": "./bench/progress.js",
     "./conformance": { "types": "./conformance.d.ts", "default": "./conformance.js" },
     "./adapter-interface": { "types": "./adapter-interface.d.ts", "default": "./adapter-interface.js" }
   },

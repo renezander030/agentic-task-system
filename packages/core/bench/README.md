@@ -1,7 +1,8 @@
-# Search Accuracy Benchmark
+# ATS Benchmarks
 
-Reusable harness for measuring whether an ATS retrieval system returns
-the right answer to a given question.
+Reusable harnesses for measuring retrieval accuracy and whether agent work actually advanced.
+
+## Retrieval accuracy
 
 ## How it works
 
@@ -92,3 +93,55 @@ const METHODS = {
 ```
 
 The scorer auto-discovers any method that has results in `results/`.
+
+## Workflow progress
+
+`ats bench progress` scores one JSON object per workflow episode. The default file is the synthetic [`data/progress-episodes.jsonl`](data/progress-episodes.jsonl).
+
+```bash
+ats bench progress
+ats bench progress --episodes=/path/to/workflow-episodes.jsonl
+ats bench progress --episodes=/path/to/workflow-episodes.jsonl --json
+ats bench progress --episodes=/path/to/workflow-episodes.jsonl --output=/tmp/progress.md
+```
+
+Episode schema:
+
+```json
+{
+  "id": "release-advanced",
+  "task": "demo/release-plan",
+  "context": {
+    "included": [
+      { "ref": "demo/decision", "tokens": 120 },
+      { "ref": "demo/old-chat", "tokens": 200 }
+    ],
+    "relevant": ["demo/decision"]
+  },
+  "doneWhen": ["Checks pass", "Approval recorded"],
+  "before": {
+    "status": "active",
+    "blockers": ["missing approval"],
+    "criteriaSatisfied": []
+  },
+  "after": {
+    "status": "active",
+    "blockers": [],
+    "criteriaSatisfied": ["Checks pass"]
+  },
+  "actions": [{ "action": "release.prepared", "advanced": true }],
+  "humanCorrections": 0
+}
+```
+
+Task and context references can also be `{ "projectId": "...", "taskId": "..." }`. `tokens` is an evaluator-supplied estimate and task bodies are not stored in the episode. Relevance, blockers, satisfied criteria, reopen state, and human corrections are labels from a human reviewer or trusted evaluation harness, not self-grades produced by the agent under test.
+
+The report deliberately exposes separate metrics rather than a composite score:
+
+- task advancement and completion rates;
+- relevant-context precision and recall;
+- irrelevant token total, average, and rate;
+- blocker removal rate;
+- completion-criteria satisfaction rate;
+- reopen rate;
+- total/average human corrections and supervision-free rate.

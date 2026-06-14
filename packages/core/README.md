@@ -29,6 +29,7 @@ You'll typically pair it with a storage adapter — see [`@reneza/ats-adapter-ti
 - **Action ledger** — append-only JSONL records of agent actions, sources, approvals, output, and advancement
 - **Scoped security decisions** — default-deny trust/action/resource policy with approval checks and mandatory allow/deny auditing
 - **Task event stream** — deterministic corpus diffs with stable IDs, atomic content-free checkpoints, and no autonomous execution
+- **Workflow-progress benchmark** — separate advancement, context waste, blocker, completion, reopen, and correction metrics over disclosure-safe episode records
 
 ## Quick example
 
@@ -40,7 +41,7 @@ validateAdapter(adapter);
 // adapter is now ready to plug into core.find / core.get / core.url
 ```
 
-See the [agent execution layer](https://github.com/renezander030/agentic-task-system/blob/main/docs/agent-layer.md) and run `npm run prove:intent` in the repository for a synthetic end-to-end proof.
+See the [agent execution layer](https://github.com/renezander030/agentic-task-system/blob/main/docs/agent-layer.md). Run `npm run prove:intent` and `npm run prove:progress` in the repository for synthetic end-to-end proofs.
 
 ## Adapter contract (six methods, three optional)
 

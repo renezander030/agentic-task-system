@@ -38,3 +38,9 @@ export {
   snapshotTaskEvents,
   collectTaskEvents,
 } from './task-events.js';
+export {
+  PROGRESS_BENCHMARK_VERSION,
+  scoreProgressEpisode,
+  scoreProgressEpisodes,
+  formatProgressBenchmark,
+} from './progress-benchmark.js';

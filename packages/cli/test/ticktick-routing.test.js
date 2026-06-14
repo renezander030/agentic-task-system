@@ -367,6 +367,25 @@ test('documented benchmark run, score, and usage analysis execute end to end', (
   assert.match(usage.stdout, /No usage log yet/);
 });
 
+test('workflow progress benchmark executes through the packaged Core subpath', () => {
+  const episodes = path.join(tempDir, 'progress-episodes.jsonl');
+  fs.writeFileSync(episodes, JSON.stringify({
+    id: 'synthetic-progress',
+    task: 'demo/work',
+    context: { included: [{ ref: 'demo/decision', tokens: 20 }], relevant: ['demo/decision'] },
+    doneWhen: ['Verified'],
+    before: { status: 'active', blockers: ['check'], criteriaSatisfied: [] },
+    after: { status: 'completed', blockers: [], criteriaSatisfied: ['Verified'] },
+    humanCorrections: 0,
+  }) + '\n');
+  const proc = runProcess('bench', 'progress', '--episodes', episodes, '--json');
+  assert.equal(proc.status, 0, proc.stderr);
+  const report = JSON.parse(proc.stdout);
+  assert.equal(report.episodeCount, 1);
+  assert.equal(report.metrics.taskAdvancementRate, 1);
+  assert.equal(report.metrics.contextPrecision, 1);
+});
+
 test('completion generators expose the full top-level command surface', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const proc = runProcess('completion', shell);
