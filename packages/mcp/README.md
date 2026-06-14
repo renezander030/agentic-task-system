@@ -24,10 +24,11 @@ It exposes **the task app you already use** to any MCP client (Claude Desktop, C
 | `task_graph` | Traverse incoming and outgoing typed relationships. |
 | `context_for_task` | Return valid deliberate context first, then retrieval discoveries, with provenance. |
 | `record_action` / `list_actions` | Write and inspect the append-only agent action ledger. |
-| `snapshot_task_events` / `poll_task_events` | Establish and poll a deterministic local task-state event checkpoint. Observation only; no agent execution. |
+| `snapshot_task_events` / `poll_task_events` | Establish and poll deterministic task-state events, durably staged before checkpoint advancement. Observation only; no agent execution. |
+| `list_pending_task_events` / `acknowledge_task_events` | Recover unacknowledged event envelopes and explicitly remove successfully consumed ids. |
 
 The security tools are a decision point for cooperating MCP clients. They do not sandbox tools outside ATS.
-The event tools emit state changes only. Consumers remain responsible for intent, lifecycle, and access checks before acting.
+The event tools emit state changes only. The local spool stores references and hashes, not task bodies. Consumers remain responsible for intent, lifecycle, access checks, and acknowledgement after successful handling.
 
 ## Install & run
 

@@ -4,8 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  acknowledgeTaskEvents,
+  collectAndSpoolTaskEvents,
   collectTaskEvents,
+  listPendingTaskEvents,
   readTaskEventCheckpoint,
+  stageTaskEvents,
   snapshotTaskEvents,
   writeTaskEventCheckpoint,
 } from '../task-events.js';
@@ -104,4 +108,57 @@ test('volatile adapter modifiedTime values do not create false updates', async (
   for (const task of tasks) task.modifiedTime = '2026-06-14T00:00:01Z';
   const result = await collectTaskEvents(adapter, { statePath, now: '2026-06-14T00:00:01Z' });
   assert.equal(result.eventCount, 0);
+});
+
+test('durable spool deduplicates events until explicit acknowledgement', async () => {
+  const { adapter, tasks, statePath } = fixture();
+  const spoolPath = path.join(path.dirname(statePath), 'task-event-spool.json');
+  await snapshotTaskEvents(adapter, { statePath, now: '2026-06-14T00:00:00Z' });
+  tasks.push({ id: 'created', projectId: 'demo', title: 'Created task', content: '', status: 'active', tags: [] });
+
+  const first = await collectAndSpoolTaskEvents(adapter, {
+    statePath,
+    spoolPath,
+    now: '2026-06-14T01:00:00Z',
+  });
+  assert.equal(first.eventCount, 1);
+  assert.equal(first.stagedCount, 1);
+  assert.equal(first.pendingCount, 1);
+  assert.equal(fs.statSync(spoolPath).mode & 0o777, 0o600);
+  assert.doesNotMatch(fs.readFileSync(spoolPath, 'utf8'), /Created task/);
+
+  const second = await collectAndSpoolTaskEvents(adapter, {
+    statePath,
+    spoolPath,
+    now: '2026-06-14T02:00:00Z',
+  });
+  assert.equal(second.eventCount, 0);
+  assert.equal(second.stagedCount, 0);
+  assert.equal(second.pendingCount, 1);
+
+  assert.equal(stageTaskEvents(first.events, { spoolPath }).addedCount, 0);
+  const eventId = first.events[0].id;
+  const acknowledged = acknowledgeTaskEvents([eventId, 'unknown-event'], { spoolPath });
+  assert.deepEqual(acknowledged.acknowledged, [eventId]);
+  assert.deepEqual(acknowledged.unknown, ['unknown-event']);
+  assert.equal(acknowledged.pendingCount, 0);
+  assert.equal(listPendingTaskEvents({ spoolPath }).pendingCount, 0);
+});
+
+test('checkpoint does not advance when durable event staging fails', async () => {
+  const { adapter, tasks, statePath } = fixture();
+  await snapshotTaskEvents(adapter, { statePath, now: '2026-06-14T00:00:00Z' });
+  const before = readTaskEventCheckpoint({ statePath });
+  tasks.push({ id: 'created', projectId: 'demo', title: 'Created task', content: '', status: 'active', tags: [] });
+
+  const invalidSpoolPath = path.dirname(statePath);
+  await assert.rejects(
+    () => collectAndSpoolTaskEvents(adapter, {
+      statePath,
+      spoolPath: invalidSpoolPath,
+      now: '2026-06-14T01:00:00Z',
+    }),
+    /task event spool/i
+  );
+  assert.equal(readTaskEventCheckpoint({ statePath }).cursor, before.cursor);
 });

@@ -106,7 +106,7 @@ ATS security is a decision point for cooperating clients, not an operating-syste
 The metadata lives in one managed JSON block inside the normal task body, so the same model works through every six-method adapter. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the complete path.
 
 **5. Agents can react to state changes without becoming open-ended autonomous runners.**
-`ats events snapshot` establishes a local baseline; `ats events watch --json` emits deterministic `task.created`, `task.updated`, `task.completed`, `task.removed`, `task.unblocked`, `task.validity.changed`, and `task.due.soon` envelopes as newline-delimited JSON. The checkpoint stores references, operational state, and hashes — not task bodies — and advances only after CLI output is written. Event IDs are stable so consumers can deduplicate retries.
+`ats events snapshot` establishes a local baseline; `ats events watch --json` emits deterministic `task.created`, `task.updated`, `task.completed`, `task.removed`, `task.unblocked`, `task.validity.changed`, and `task.due.soon` envelopes as newline-delimited JSON. Before advancing the checkpoint, ATS atomically stages those content-free envelopes in a mode-`0600` local spool. `ats events pending` recovers unacknowledged observations after a consumer or output failure; `ats events ack` removes them only after explicit consumer acknowledgement. Stable event IDs deduplicate retries.
 
 ATS only emits observations. A separate agent may consume them, but it must still evaluate task intent, validity, authority, and scoped security before acting.
 
@@ -240,6 +240,8 @@ ats security set <project> <task> --trust untrusted --allow-actions read,write -
 ats security check <project> <task> --action write --resource repo://sample/CHANGELOG.md --reason "Record approved result" --approvals owner
 ats events snapshot                 # establish a local content-free checkpoint
 ats events watch --json             # emit NDJSON observations; never launch agents
+ats events pending --json           # recover every unacknowledged event
+ats events ack <event-id>            # remove only after successful consumption
 
 # Ops
 ats bench run                      # run all retrievers against bench/data/questions.jsonl
@@ -257,8 +259,8 @@ as a tool set spanning retrieval, CRUD, and execution context: `find`,
 `get_task`, `list_projects`, `create_task`, `update_task`, `similar`, `url_for`,
 `set_task_intent`, `set_task_lifecycle`, `get_task_security`, `set_task_security`,
 `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`,
-`context_for_task`, `record_action`, `list_actions`, `snapshot_task_events`, and
-`poll_task_events`.
+`context_for_task`, `record_action`, `list_actions`, `snapshot_task_events`,
+`poll_task_events`, `list_pending_task_events`, and `acknowledge_task_events`.
 
 For Claude Code this works as persistent memory between sessions without
 introducing a new database: the agent recalls runbooks, decisions, and project

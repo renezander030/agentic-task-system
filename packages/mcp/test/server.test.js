@@ -22,6 +22,7 @@ process.env.ATS_CORPUS_CACHE_DISABLE = '1';
 const actionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-mcp-actions-'));
 process.env.ATS_ACTION_LOG = path.join(actionDir, 'action-log.jsonl');
 process.env.ATS_EVENT_STATE = path.join(actionDir, 'task-events.json');
+process.env.ATS_EVENT_SPOOL = path.join(actionDir, 'task-event-spool.json');
 after(() => fs.rmSync(actionDir, { recursive: true, force: true }));
 
 /** A minimal contract-satisfying adapter with NO retrieval code of its own. */
@@ -95,6 +96,7 @@ test('registers the full ATS tool set', async () => {
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
+    'acknowledge_task_events',
     'add_task_link',
     'check_task_access',
     'context_for_task',
@@ -103,6 +105,7 @@ test('registers the full ATS tool set', async () => {
     'get_task',
     'get_task_security',
     'list_actions',
+    'list_pending_task_events',
     'list_projects',
     'poll_task_events',
     'record_action',
@@ -132,6 +135,19 @@ test('task event tools snapshot and emit deterministic corpus changes', async ()
 
   const empty = JSON.parse(textOf(await client.callTool({ name: 'poll_task_events', arguments: {} })));
   assert.equal(empty.eventCount, 0);
+  assert.equal(empty.pendingCount, 1);
+
+  const pending = JSON.parse(textOf(await client.callTool({ name: 'list_pending_task_events', arguments: {} })));
+  assert.equal(pending.pendingCount, 1);
+  assert.equal(pending.pending[0].event.id, poll.events[0].id);
+
+  const acknowledged = JSON.parse(textOf(await client.callTool({
+    name: 'acknowledge_task_events',
+    arguments: { eventIds: [poll.events[0].id, 'unknown-event'] },
+  })));
+  assert.deepEqual(acknowledged.acknowledged, [poll.events[0].id]);
+  assert.deepEqual(acknowledged.unknown, ['unknown-event']);
+  assert.equal(acknowledged.pendingCount, 0);
 });
 
 test('find works over a generic adapter via core retrieval (the thesis)', async () => {

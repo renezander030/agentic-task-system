@@ -179,6 +179,7 @@ test('routes TickTick task lifecycle and filter options', () => {
 test('events snapshot, status, and one-shot watch work over a generic adapter', () => {
   const xdg = path.join(tempDir, 'events-xdg');
   const statePath = path.join(xdg, 'ats', 'task-events.json');
+  const spoolPath = path.join(xdg, 'ats', 'task-event-spool.json');
   const env = {
     ...process.env,
     ATS_ADAPTER: genericAdapterUrl,
@@ -196,6 +197,29 @@ test('events snapshot, status, and one-shot watch work over a generic adapter', 
   assert.equal(invoke('events', 'snapshot', '--due-within-hours', '12').taskCount, 2);
   assert.equal(invoke('events', 'status').dueWithinHours, 12);
   assert.equal(invoke('events', 'watch', '--once').eventCount, 0);
+  const pendingEvent = (id) => ({
+    stagedAt: '2026-06-14T00:00:00.000Z',
+    event: {
+      id,
+      type: 'task.created',
+      timestamp: '2026-06-14T00:00:00.000Z',
+      task: { projectId: 'demo', taskId: id },
+      beforeHash: null,
+      afterHash: 'abc',
+      causationId: null,
+    },
+  });
+  fs.writeFileSync(spoolPath, JSON.stringify({
+    version: 1,
+    updatedAt: '2026-06-14T00:00:00.000Z',
+    pending: [pendingEvent('synthetic-event'), pendingEvent('second-event')],
+  }));
+  const limited = invoke('events', 'pending', '--limit', '1');
+  assert.equal(limited.pendingCount, 2);
+  assert.deepEqual(limited.pending.map((item) => item.event.id), ['synthetic-event']);
+  assert.deepEqual(invoke('events', 'ack', 'synthetic-event').acknowledged, ['synthetic-event']);
+  assert.deepEqual(invoke('events', 'ack', '--all').acknowledged, ['second-event']);
+  assert.equal(invoke('events', 'status').pendingCount, 0);
 });
 
 test('routes capture-time relevance and validates note extraction', () => {

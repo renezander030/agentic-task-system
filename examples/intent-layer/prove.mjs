@@ -5,18 +5,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   addTaskLink,
+  acknowledgeTaskEvents,
   checkTaskAccess,
+  collectAndSpoolTaskEvents,
   collectTaskEvents,
   contextForTask,
   find,
   listActions,
+  listPendingTaskEvents,
   parseTaskMetadata,
   recordAction,
   setTaskIntent,
   setTaskLifecycle,
   setTaskSecurity,
   snapshotTaskEvents,
-  writeTaskEventCheckpoint,
 } from '../../packages/core/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -82,11 +84,17 @@ async function run() {
   let accessAudits;
   let eventBatch;
   let repeatedEventBatch;
+  let durableEventBatch;
   let emptyEventBatch;
+  let pendingBeforeAck;
+  let pendingAfterAck;
+  let acknowledgement;
   let eventCheckpointIsContentFree;
+  let eventSpoolIsContentFree;
   try {
     const logPath = path.join(tempDir, 'action-log.jsonl');
     const eventStatePath = path.join(tempDir, 'task-events.json');
+    const eventSpoolPath = path.join(tempDir, 'task-event-spool.json');
     deniedAccess = await checkTaskAccess(adapter, root.projectId, root.taskId, {
       agent: 'synthetic-proof-agent',
       action: 'write',
@@ -119,8 +127,20 @@ async function run() {
     });
     eventBatch = await collectTaskEvents(adapter, { statePath: eventStatePath, now: '2026-06-14T01:00:00Z' });
     repeatedEventBatch = await collectTaskEvents(adapter, { statePath: eventStatePath, now: '2026-06-14T01:00:00Z' });
-    writeTaskEventCheckpoint(eventBatch.checkpoint, { statePath: eventStatePath });
-    emptyEventBatch = await collectTaskEvents(adapter, { statePath: eventStatePath, now: '2026-06-14T01:00:00Z' });
+    durableEventBatch = await collectAndSpoolTaskEvents(adapter, {
+      statePath: eventStatePath,
+      spoolPath: eventSpoolPath,
+      now: '2026-06-14T01:00:00Z',
+    });
+    eventSpoolIsContentFree = !fs.readFileSync(eventSpoolPath, 'utf8').includes('Synthetic event proof');
+    emptyEventBatch = await collectAndSpoolTaskEvents(adapter, {
+      statePath: eventStatePath,
+      spoolPath: eventSpoolPath,
+      now: '2026-06-14T02:00:00Z',
+    });
+    pendingBeforeAck = listPendingTaskEvents({ spoolPath: eventSpoolPath });
+    acknowledgement = acknowledgeTaskEvents(durableEventBatch.events.map((event) => event.id), { spoolPath: eventSpoolPath });
+    pendingAfterAck = listPendingTaskEvents({ spoolPath: eventSpoolPath });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -141,7 +161,11 @@ async function run() {
     taskCreatedEventEmitted: eventBatch.events.some((event) => event.type === 'task.created' && event.task.taskId === 'event-proof'),
     eventIdsAreStable: eventBatch.events[0]?.id === repeatedEventBatch.events[0]?.id,
     eventCheckpointOmitsTaskBodies: eventCheckpointIsContentFree,
+    eventSpoolOmitsTaskBodies: eventSpoolIsContentFree,
+    eventStagedBeforeCheckpointAdvance: durableEventBatch.stagedCount === durableEventBatch.eventCount,
     deliveredCheckpointAdvances: emptyEventBatch.eventCount === 0,
+    pendingEventsSurviveEmptyPoll: pendingBeforeAck.pendingCount === durableEventBatch.eventCount,
+    explicitAcknowledgementClearsPending: acknowledgement.acknowledged.length === durableEventBatch.eventCount && pendingAfterAck.pendingCount === 0,
   };
   for (const [name, passed] of Object.entries(checks)) assert.equal(passed, true, `Proof failed: ${name}`);
 
@@ -167,6 +191,8 @@ async function run() {
       auditedAdvancement: 1,
       deterministicTaskEvents: 1,
       contentFreeEventCheckpoint: 1,
+      durableEventSpooling: 1,
+      explicitEventAcknowledgement: 1,
     },
     checks,
     result: 'PASS',

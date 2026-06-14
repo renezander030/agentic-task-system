@@ -37,8 +37,9 @@ import {
   recordAction,
   listActions,
   snapshotTaskEvents,
-  collectTaskEvents,
-  writeTaskEventCheckpoint,
+  collectAndSpoolTaskEvents,
+  listPendingTaskEvents,
+  acknowledgeTaskEvents,
 } from '@reneza/ats-core';
 
 const VERSION = (() => {
@@ -469,19 +470,46 @@ export function createServer(adapter) {
 
   server.tool(
     'poll_task_events',
-    'WRITE/LOCAL. Diffs the current task corpus against the local checkpoint, returns deterministic event envelopes, then advances the checkpoint. Events are observation-only and must be acted on separately under normal ATS intent and security checks.',
+    'WRITE/LOCAL. Diffs the current task corpus, durably stages deterministic event envelopes, then advances the checkpoint. Returns newly observed events plus the unacknowledged pending spool. Events are observation-only and must be acted on separately under normal ATS intent and security checks.',
     {
       dueWithinHours: z.number().nonnegative().optional().describe('Override the task.due.soon horizon stored in the checkpoint.'),
     },
     async ({ dueWithinHours }) => {
       try {
-        const result = await collectTaskEvents(adapter, {
+        return ok(await collectAndSpoolTaskEvents(adapter, {
           dueWithinHours,
           actions: listActions({ limit: 500 }),
-        });
-        const { checkpoint, ...response } = result;
-        writeTaskEventCheckpoint(checkpoint);
-        return ok(response);
+        }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'list_pending_task_events',
+    'Read-only. Lists durable task-event envelopes that have not been acknowledged by a consumer. Task bodies are not stored in the spool.',
+    {
+      limit: z.number().int().positive().max(1000).optional(),
+    },
+    async ({ limit }) => {
+      try {
+        return ok(listPendingTaskEvents({ limit }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'acknowledge_task_events',
+    'WRITE/LOCAL. Explicitly acknowledges one or more durable task-event ids and removes them from the pending spool. Unknown ids are reported without failing known acknowledgements.',
+    {
+      eventIds: z.array(z.string().min(1)).min(1).max(1000),
+    },
+    async ({ eventIds }) => {
+      try {
+        return ok(acknowledgeTaskEvents(eventIds));
       } catch (e) {
         return fail(e);
       }

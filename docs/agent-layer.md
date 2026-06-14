@@ -83,15 +83,18 @@ The adapter contract is intentionally portable, and most task backends do not ex
 2. `ats events poll --json` runs one diff; `ats events watch --json` continuously refreshes through `bulkFetch()` or project iteration.
 3. It emits stable envelopes for `task.created`, `task.updated`, `task.completed`, `task.removed`, `task.unblocked`, `task.validity.changed`, and `task.due.soon`.
 4. Each envelope includes an event id, timestamp, task reference, before/after hashes, and an optional action-ledger causation id.
-5. Checkpoints are mode `0600` and written atomically after CLI output. Stable IDs let consumers deduplicate repeated observations; downstream acknowledgement and durable event spooling are not implemented yet.
-6. Agents consume events separately and still apply intent, lifecycle, authority, and approval rules before acting.
+5. ATS atomically stages new envelopes in a mode-`0600` local spool before advancing the checkpoint. A staging failure leaves the checkpoint unchanged, so the next poll can retry the same deterministic IDs.
+6. `ats events pending` lists the durable unacknowledged spool. `ats events ack EVENT_ID...` or `ats events ack --all` removes events only after explicit consumer acknowledgement.
+7. Agents consume events separately and still apply intent, lifecycle, authority, and approval rules before acting.
 
-The MCP tools `snapshot_task_events` and `poll_task_events` expose the same observation layer. Polling advances the MCP checkpoint after the result is assembled. Backend-specific webhooks and consumer acknowledgement remain future reliability optimizations.
+The MCP tools `snapshot_task_events`, `poll_task_events`, `list_pending_task_events`, and `acknowledge_task_events` expose the same observation and acknowledgement layer. Backend-specific webhooks remain a future optimization; the portable implementation works through every adapter's normal corpus reads.
 
 ```bash
 ats events snapshot --due-within-hours 24
 ats events poll --json
 ats events watch --json --interval 30000
+ats events pending --json
+ats events ack <event-id>
 ```
 
 This works across every adapter now and deliberately ships before automatic action policies.
@@ -124,4 +127,4 @@ Run:
 npm run prove:intent
 ```
 
-The proofs use only synthetic tasks. `npm run prove:intent` covers retrieval versus authority, typed context, lifecycle exclusion, provenance, body preservation, intent, scoped security, access and advancement auditing, deterministic task events, content-free checkpoints, and checkpoint advancement after output. `npm run prove:progress` exercises all workflow-progress metrics, including a stalled and reopened episode.
+The proofs use only synthetic tasks. `npm run prove:intent` covers retrieval versus authority, typed context, lifecycle exclusion, provenance, body preservation, intent, scoped security, access and advancement auditing, deterministic task events, content-free checkpoints and spools, durable staging before checkpoint advancement, pending-event recovery, and explicit acknowledgement. `npm run prove:progress` exercises all workflow-progress metrics, including a stalled and reopened episode.

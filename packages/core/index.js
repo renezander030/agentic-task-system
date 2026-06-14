@@ -31,12 +31,19 @@ export {
 export { actionLogPath, recordAction, listActions } from './action-ledger.js';
 export {
   TASK_EVENT_STATE_VERSION,
+  TASK_EVENT_SPOOL_VERSION,
   taskEventStatePath,
+  taskEventSpoolPath,
   readTaskEventCheckpoint,
   writeTaskEventCheckpoint,
   diffTaskEventCheckpoints,
   snapshotTaskEvents,
   collectTaskEvents,
+  readTaskEventSpool,
+  stageTaskEvents,
+  listPendingTaskEvents,
+  acknowledgeTaskEvents,
+  collectAndSpoolTaskEvents,
 } from './task-events.js';
 export {
   PROGRESS_BENCHMARK_VERSION,

@@ -589,16 +589,23 @@ Usage:
   ats events status [options]
   ats events poll [options]
   ats events watch [options]
+  ats events pending [--limit N] [options]
+  ats events ack EVENT_ID... [options]
+  ats events ack --all [options]
 
 Options:
   --state <path>              Override the local checkpoint path
+  --spool <path>              Override the durable pending-event spool path
   --due-within-hours <n>      Emit task.due.soon inside this horizon (default 24)
   --interval <ms>             Watch polling interval (default 30000, minimum 250)
   --once                      Run one watch cycle and exit
+  --limit <n>                 Limit pending events returned
+  --all                       Acknowledge every pending event
   --json                      poll emits a JSON batch; watch emits NDJSON events
 
-Events are deterministic corpus diffs. ATS writes the checkpoint only after
-CLI output and never launches an agent or executes an external action.`;
+Events are deterministic corpus diffs. ATS durably stages each event before
+advancing the checkpoint. Events remain pending until explicit acknowledgement.
+ATS never launches an agent or executes an external action.`;
 }
 
 /**

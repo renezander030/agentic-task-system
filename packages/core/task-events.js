@@ -6,10 +6,16 @@ import { loadCorpus } from './retrieval.js';
 import { evaluateLifecycle, parseTaskMetadata } from './task-context.js';
 
 export const TASK_EVENT_STATE_VERSION = 1;
+export const TASK_EVENT_SPOOL_VERSION = 1;
 
 export function taskEventStatePath() {
   const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   return process.env.ATS_EVENT_STATE || path.join(configBase, 'ats', 'task-events.json');
+}
+
+export function taskEventSpoolPath() {
+  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return process.env.ATS_EVENT_SPOOL || path.join(configBase, 'ats', 'task-event-spool.json');
 }
 
 function stable(value) {
@@ -20,6 +26,12 @@ function stable(value) {
 
 function digest(value) {
   return createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
+}
+
+function isoTimestamp(value, label) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error(`${label} must be a valid date.`);
+  return date.toISOString();
 }
 
 function taskRef(task) {
@@ -140,6 +152,127 @@ export function writeTaskEventCheckpoint(checkpoint, { statePath = taskEventStat
   return { statePath, cursor: checkpoint.cursor, generatedAt: checkpoint.generatedAt, taskCount: Object.keys(checkpoint.tasks).length };
 }
 
+function emptySpool() {
+  return { version: TASK_EVENT_SPOOL_VERSION, updatedAt: null, pending: [] };
+}
+
+export function readTaskEventSpool({ spoolPath = taskEventSpoolPath() } = {}) {
+  if (!fs.existsSync(spoolPath)) return emptySpool();
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(spoolPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Invalid task event spool: ${spoolPath}`, { cause: error });
+  }
+  if (parsed?.version !== TASK_EVENT_SPOOL_VERSION || !Array.isArray(parsed.pending)) {
+    throw new Error(`Unsupported task event spool: ${spoolPath}`);
+  }
+  if (parsed.pending.some((item) => !item?.event?.id || typeof item.event.id !== 'string' || typeof item.stagedAt !== 'string')) {
+    throw new Error(`Invalid task event spool entries: ${spoolPath}`);
+  }
+  return parsed;
+}
+
+function writeTaskEventSpoolUnlocked(spool, spoolPath) {
+  fs.mkdirSync(path.dirname(spoolPath), { recursive: true, mode: 0o700 });
+  const temp = `${spoolPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(spool, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(temp, spoolPath);
+  fs.chmodSync(spoolPath, 0o600);
+}
+
+function withSpoolLock(spoolPath, run) {
+  fs.mkdirSync(path.dirname(spoolPath), { recursive: true, mode: 0o700 });
+  const lockPath = `${spoolPath}.lock`;
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+  let lock;
+  for (let attempt = 0; attempt < 80; attempt++) {
+    try {
+      lock = fs.openSync(lockPath, 'wx', 0o600);
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      try {
+        if (Date.now() - fs.statSync(lockPath).mtimeMs > 30000) fs.unlinkSync(lockPath);
+      } catch (statError) {
+        if (statError.code !== 'ENOENT') throw statError;
+      }
+      Atomics.wait(waitBuffer, 0, 0, 25);
+    }
+  }
+  if (lock === undefined) throw new Error(`Timed out waiting for task event spool lock: ${lockPath}`);
+  let result;
+  let runError;
+  try {
+    result = run();
+  } catch (error) {
+    runError = error;
+  }
+  let cleanupError;
+  try {
+    fs.closeSync(lock);
+  } catch (error) {
+    cleanupError = error;
+  }
+  try {
+    fs.unlinkSync(lockPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT' && !cleanupError) cleanupError = error;
+  }
+  if (runError) throw runError;
+  if (cleanupError) throw cleanupError;
+  return result;
+}
+
+export function stageTaskEvents(events, { spoolPath = taskEventSpoolPath(), now = new Date() } = {}) {
+  if (!Array.isArray(events)) throw new Error('Task events must be an array.');
+  const stagedAt = isoTimestamp(now, 'Event staging time');
+  return withSpoolLock(spoolPath, () => {
+    const spool = readTaskEventSpool({ spoolPath });
+    const known = new Set(spool.pending.map((item) => item.event.id));
+    const added = [];
+    for (const event of events) {
+      if (!event?.id || typeof event.id !== 'string') throw new Error('Every staged task event requires a stable id.');
+      if (known.has(event.id)) continue;
+      spool.pending.push({ event, stagedAt });
+      known.add(event.id);
+      added.push(event.id);
+    }
+    if (added.length > 0 || !fs.existsSync(spoolPath)) {
+      spool.updatedAt = stagedAt;
+      writeTaskEventSpoolUnlocked(spool, spoolPath);
+    }
+    return { spoolPath, added, addedCount: added.length, pendingCount: spool.pending.length };
+  });
+}
+
+export function listPendingTaskEvents({ limit, spoolPath = taskEventSpoolPath() } = {}) {
+  const spool = readTaskEventSpool({ spoolPath });
+  const parsedLimit = Number.parseInt(limit, 10);
+  const pending = Number.isFinite(parsedLimit) && parsedLimit > 0 ? spool.pending.slice(0, parsedLimit) : spool.pending;
+  return { spoolPath, pendingCount: spool.pending.length, pending };
+}
+
+export function acknowledgeTaskEvents(eventIds, { spoolPath = taskEventSpoolPath(), now = new Date() } = {}) {
+  if (!Array.isArray(eventIds) || eventIds.length === 0 || eventIds.some((id) => typeof id !== 'string' || !id)) {
+    throw new Error('Acknowledgement requires one or more event ids.');
+  }
+  const requested = new Set(eventIds);
+  const acknowledgedAt = isoTimestamp(now, 'Event acknowledgement time');
+  return withSpoolLock(spoolPath, () => {
+    const spool = readTaskEventSpool({ spoolPath });
+    const acknowledged = spool.pending.filter((item) => requested.has(item.event.id)).map((item) => item.event.id);
+    const acknowledgedSet = new Set(acknowledged);
+    spool.pending = spool.pending.filter((item) => !acknowledgedSet.has(item.event.id));
+    const unknown = [...requested].filter((id) => !acknowledgedSet.has(id));
+    if (acknowledged.length > 0) {
+      spool.updatedAt = acknowledgedAt;
+      writeTaskEventSpoolUnlocked(spool, spoolPath);
+    }
+    return { spoolPath, acknowledgedAt, acknowledged, unknown, pendingCount: spool.pending.length };
+  });
+}
+
 function changedFields(before, after) {
   return Object.keys(after.fieldHashes).filter((key) => before.fieldHashes[key] !== after.fieldHashes[key]);
 }
@@ -231,5 +364,19 @@ export async function collectTaskEvents(adapter, options = {}) {
     eventCount: events.length,
     events,
     checkpoint,
+  };
+}
+
+export async function collectAndSpoolTaskEvents(adapter, options = {}) {
+  const result = await collectTaskEvents(adapter, options);
+  const staged = stageTaskEvents(result.events, options);
+  writeTaskEventCheckpoint(result.checkpoint, options);
+  const pending = listPendingTaskEvents(options);
+  const { checkpoint: _checkpoint, ...batch } = result;
+  return {
+    ...batch,
+    stagedCount: staged.addedCount,
+    pendingCount: pending.pendingCount,
+    pending: pending.pending,
   };
 }

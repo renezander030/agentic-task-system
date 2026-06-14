@@ -53,10 +53,13 @@ import {
   recordAction,
   listActions,
   taskEventStatePath,
+  taskEventSpoolPath,
   readTaskEventCheckpoint,
-  writeTaskEventCheckpoint,
+  readTaskEventSpool,
+  listPendingTaskEvents,
+  acknowledgeTaskEvents,
   snapshotTaskEvents,
-  collectTaskEvents,
+  collectAndSpoolTaskEvents,
 } from '@reneza/ats-core';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
@@ -271,10 +274,7 @@ async function main() {
           relevanceBlock = result._relevanceInstruction;
           delete result._relevanceInstruction;
         }
-        const eventCheckpoint = result && typeof result === 'object' ? result.__eventCheckpoint : undefined;
-        if (eventCheckpoint) delete result.__eventCheckpoint;
         console.log(formatOutput(result, args.options.format));
-        if (eventCheckpoint) writeTaskEventCheckpoint(eventCheckpoint.checkpoint, eventCheckpoint.options);
         if (relevanceBlock) console.log(relevanceBlock);
       }
     }
@@ -971,17 +971,13 @@ function eventOptions() {
   }
   return {
     statePath: args.options.state || taskEventStatePath(),
+    spoolPath: args.options.spool || taskEventSpoolPath(),
     dueWithinHours,
   };
 }
 
-function publicEventBatch(result, options) {
-  const { checkpoint, ...batch } = result;
-  return { ...batch, __eventCheckpoint: { checkpoint, options } };
-}
-
 async function collectEventBatch(adapter, options) {
-  return collectTaskEvents(adapter, {
+  return collectAndSpoolTaskEvents(adapter, {
     ...options,
     actions: listActions({ limit: 500 }),
   });
@@ -991,25 +987,43 @@ async function handleEvents() {
   const options = eventOptions();
   if (args.subcommand === 'status') {
     const checkpoint = readTaskEventCheckpoint(options);
-    return checkpoint
-      ? {
-          initialized: true,
-          statePath: options.statePath,
-          cursor: checkpoint.cursor,
-          generatedAt: checkpoint.generatedAt,
-          dueWithinHours: checkpoint.dueWithinHours,
-          taskCount: Object.keys(checkpoint.tasks).length,
-        }
-      : { initialized: false, statePath: options.statePath };
+    const spool = readTaskEventSpool(options);
+    return {
+      initialized: !!checkpoint,
+      statePath: options.statePath,
+      spoolPath: options.spoolPath,
+      spoolInitialized: fs.existsSync(options.spoolPath),
+      pendingCount: spool.pending.length,
+      ...(checkpoint ? {
+        cursor: checkpoint.cursor,
+        generatedAt: checkpoint.generatedAt,
+        dueWithinHours: checkpoint.dueWithinHours,
+        taskCount: Object.keys(checkpoint.tasks).length,
+      } : {}),
+    };
+  }
+  if (args.subcommand === 'pending') {
+    const limit = args.options.limit === undefined ? undefined : Number(args.options.limit);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error('--limit must be a positive integer.');
+    return listPendingTaskEvents({ ...options, limit });
+  }
+  if (args.subcommand === 'ack') {
+    const pending = args.options.all ? listPendingTaskEvents(options) : null;
+    const eventIds = pending ? pending.pending.map((item) => item.event.id) : args.positional;
+    if (eventIds.length === 0 && args.options.all) {
+      return { spoolPath: options.spoolPath, acknowledgedAt: null, acknowledged: [], unknown: [], pendingCount: 0 };
+    }
+    if (eventIds.length === 0) throw new Error('Usage: ats events ack EVENT_ID... | ats events ack --all');
+    return acknowledgeTaskEvents(eventIds, options);
   }
   const adapter = await loadAdapter();
   if (args.subcommand === 'snapshot') return snapshotTaskEvents(adapter, options);
-  if (args.subcommand === 'poll') return publicEventBatch(await collectEventBatch(adapter, options), options);
+  if (args.subcommand === 'poll') return collectEventBatch(adapter, options);
   if (args.subcommand !== 'watch') {
     console.log(getEventsHelp());
     return;
   }
-  if (args.options.once) return publicEventBatch(await collectEventBatch(adapter, options), options);
+  if (args.options.once) return collectEventBatch(adapter, options);
 
   const interval = args.options.interval === undefined ? 30000 : Number(args.options.interval);
   if (!Number.isFinite(interval) || interval < 250) throw new Error('--interval must be at least 250 milliseconds.');
@@ -1020,7 +1034,6 @@ async function handleEvents() {
     } else if (result.events.length > 0) {
       console.log(formatOutput({ generatedAt: result.generatedAt, events: result.events }, 'text'));
     }
-    writeTaskEventCheckpoint(result.checkpoint, options);
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
 }
