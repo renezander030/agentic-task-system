@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   addTaskLink,
   checkTaskAccess,
+  collectTaskEvents,
   contextForTask,
   find,
   listActions,
@@ -14,6 +15,8 @@ import {
   setTaskIntent,
   setTaskLifecycle,
   setTaskSecurity,
+  snapshotTaskEvents,
+  writeTaskEventCheckpoint,
 } from '../../packages/core/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -77,8 +80,13 @@ async function run() {
   let deniedAccess;
   let approvedAccess;
   let accessAudits;
+  let eventBatch;
+  let repeatedEventBatch;
+  let emptyEventBatch;
+  let eventCheckpointIsContentFree;
   try {
     const logPath = path.join(tempDir, 'action-log.jsonl');
+    const eventStatePath = path.join(tempDir, 'task-events.json');
     deniedAccess = await checkTaskAccess(adapter, root.projectId, root.taskId, {
       agent: 'synthetic-proof-agent',
       action: 'write',
@@ -103,6 +111,16 @@ async function run() {
     }, { logPath });
     accessAudits = listActions({ agent: 'synthetic-proof-agent' }, { logPath })
       .filter((entry) => entry.action.startsWith('access.'));
+    await snapshotTaskEvents(adapter, { statePath: eventStatePath, now: '2026-06-14T00:00:00Z' });
+    eventCheckpointIsContentFree = !fs.readFileSync(eventStatePath, 'utf8').includes('Human-authored plan:');
+    tasks.push({
+      id: 'event-proof', projectId: 'demo', title: 'Synthetic event proof', content: 'Synthetic data only.',
+      status: 'active', tags: [], modifiedTime: '2026-06-14T01:00:00Z',
+    });
+    eventBatch = await collectTaskEvents(adapter, { statePath: eventStatePath, now: '2026-06-14T01:00:00Z' });
+    repeatedEventBatch = await collectTaskEvents(adapter, { statePath: eventStatePath, now: '2026-06-14T01:00:00Z' });
+    writeTaskEventCheckpoint(eventBatch.checkpoint, { statePath: eventStatePath });
+    emptyEventBatch = await collectTaskEvents(adapter, { statePath: eventStatePath, now: '2026-06-14T01:00:00Z' });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -120,6 +138,10 @@ async function run() {
     approvedScopedWriteAllowed: approvedAccess.decision.allowed === true && approvedAccess.audit.action === 'access.allowed',
     accessChecksAudited: accessAudits.length === 2,
     advancementAudited: action?.advanced === true && action.sources.includes('demo/decision-17'),
+    taskCreatedEventEmitted: eventBatch.events.some((event) => event.type === 'task.created' && event.task.taskId === 'event-proof'),
+    eventIdsAreStable: eventBatch.events[0]?.id === repeatedEventBatch.events[0]?.id,
+    eventCheckpointOmitsTaskBodies: eventCheckpointIsContentFree,
+    deliveredCheckpointAdvances: emptyEventBatch.eventCount === 0,
   };
   for (const [name, passed] of Object.entries(checks)) assert.equal(passed, true, `Proof failed: ${name}`);
 
@@ -143,6 +165,8 @@ async function run() {
       scopedAccessDecisions: 1,
       accessAuditCoverage: 1,
       auditedAdvancement: 1,
+      deterministicTaskEvents: 1,
+      contentFreeEventCheckpoint: 1,
     },
     checks,
     result: 'PASS',

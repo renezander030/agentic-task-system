@@ -63,3 +63,14 @@ export type { LinkType, LifecycleStatus, ContentTrust, TaskIntent, TaskLifecycle
 
 export { actionLogPath, recordAction, listActions } from './action-ledger.js';
 export type { ActionLedgerEntry, ActionLedgerRecord } from './action-ledger.js';
+
+export {
+  TASK_EVENT_STATE_VERSION,
+  taskEventStatePath,
+  readTaskEventCheckpoint,
+  writeTaskEventCheckpoint,
+  diffTaskEventCheckpoints,
+  snapshotTaskEvents,
+  collectTaskEvents,
+} from './task-events.js';
+export type { TaskEventRef, TaskEvent, TaskEventCheckpoint } from './task-events.js';

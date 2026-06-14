@@ -176,6 +176,28 @@ test('routes TickTick task lifecycle and filter options', () => {
   });
 });
 
+test('events snapshot, status, and one-shot watch work over a generic adapter', () => {
+  const xdg = path.join(tempDir, 'events-xdg');
+  const statePath = path.join(xdg, 'ats', 'task-events.json');
+  const env = {
+    ...process.env,
+    ATS_ADAPTER: genericAdapterUrl,
+    ATS_CORPUS_CACHE_DISABLE: '1',
+    ATS_USAGE_DISABLE: '1',
+    ATS_EVENT_STATE: statePath,
+    ATS_ACTION_LOG: path.join(xdg, 'ats', 'action-log.jsonl'),
+    XDG_CONFIG_HOME: xdg,
+  };
+  const invoke = (...argv) => {
+    const proc = spawnSync(process.execPath, [cli, ...argv, '--json'], { encoding: 'utf8', env });
+    assert.equal(proc.status, 0, proc.stderr);
+    return JSON.parse(proc.stdout);
+  };
+  assert.equal(invoke('events', 'snapshot', '--due-within-hours', '12').taskCount, 2);
+  assert.equal(invoke('events', 'status').dueWithinHours, 12);
+  assert.equal(invoke('events', 'watch', '--once').eventCount, 0);
+});
+
 test('routes capture-time relevance and validates note extraction', () => {
   const relevance = runProcess('tasks', 'create', 'p1', 'Task', '--relevance');
   assert.equal(relevance.status, 0, relevance.stderr);
@@ -349,14 +371,14 @@ test('completion generators expose the full top-level command surface', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const proc = runProcess('completion', shell);
     assert.equal(proc.status, 0, proc.stderr);
-    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes', 'intent', 'context', 'ledger', 'security']) {
+    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes', 'intent', 'context', 'ledger', 'security', 'events']) {
       assert.match(proc.stdout, new RegExp(`\\b${command}\\b`));
     }
   }
 });
 
 test('documents help for every top-level operational group', () => {
-  for (const command of ['config', 'cache', 'bench', 'completion', 'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security']) {
+  for (const command of ['config', 'cache', 'bench', 'completion', 'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security', 'events']) {
     const proc = runProcess(command, '--help');
     assert.equal(proc.status, 0, proc.stderr);
     assert.match(proc.stdout, new RegExp(`ats ${command}`));

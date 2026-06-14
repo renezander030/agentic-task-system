@@ -21,6 +21,7 @@ import { pathToFileURL } from 'node:url';
 process.env.ATS_CORPUS_CACHE_DISABLE = '1';
 const actionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-mcp-actions-'));
 process.env.ATS_ACTION_LOG = path.join(actionDir, 'action-log.jsonl');
+process.env.ATS_EVENT_STATE = path.join(actionDir, 'task-events.json');
 after(() => fs.rmSync(actionDir, { recursive: true, force: true }));
 
 /** A minimal contract-satisfying adapter with NO retrieval code of its own. */
@@ -103,16 +104,34 @@ test('registers the full ATS tool set', async () => {
     'get_task_security',
     'list_actions',
     'list_projects',
+    'poll_task_events',
     'record_action',
     'remove_task_link',
     'set_task_intent',
     'set_task_lifecycle',
     'set_task_security',
     'similar',
+    'snapshot_task_events',
     'task_graph',
     'update_task',
     'url_for',
   ]);
+});
+
+test('task event tools snapshot and emit deterministic corpus changes', async () => {
+  const adapter = fakeAdapter();
+  const { client } = await connect(adapter);
+  const snapshot = JSON.parse(textOf(await client.callTool({ name: 'snapshot_task_events', arguments: {} })));
+  assert.equal(snapshot.taskCount, 3);
+
+  await client.callTool({ name: 'create_task', arguments: { title: 'Event-created task', projectId: 'p1' } });
+  const poll = JSON.parse(textOf(await client.callTool({ name: 'poll_task_events', arguments: {} })));
+  assert.equal(poll.eventCount, 1);
+  assert.equal(poll.events[0].type, 'task.created');
+  assert.match(poll.events[0].task.taskId, /^new/);
+
+  const empty = JSON.parse(textOf(await client.callTool({ name: 'poll_task_events', arguments: {} })));
+  assert.equal(empty.eventCount, 0);
 });
 
 test('find works over a generic adapter via core retrieval (the thesis)', async () => {

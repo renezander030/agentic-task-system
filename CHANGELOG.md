@@ -7,8 +7,9 @@
 - Added typed task relationship add/remove, incoming/outgoing graph traversal, lifecycle validity, supersession handling, and provenance-preserving context assembly.
 - Added an append-only action ledger with automatic CLI/MCP write auditing and explicit outcome records.
 - Added default-deny scoped security policies, trust-aware approval checks, and fail-closed access-decision auditing.
-- Added CLI commands `intent`, `lifecycle`, `link`, `graph`, `context`, `ledger`, and `security`, plus matching MCP tools.
-- Added a deterministic synthetic proof (`npm run prove:intent`) and documented the recommended corpus-diff event-stream design.
+- Added a deterministic, observation-only corpus-diff event stream with atomic content-free checkpoints, stable event IDs, CLI snapshot/poll/watch commands, and MCP snapshot/poll tools.
+- Added CLI commands `intent`, `lifecycle`, `link`, `graph`, `context`, `ledger`, `security`, and `events`, plus matching MCP tools.
+- Expanded the deterministic synthetic proof (`npm run prove:intent`) across execution context, security, auditing, and task events.
 
 ## 0.5.0 - TickTick parity, local cache, and secure trunk sync
 

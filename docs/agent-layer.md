@@ -75,18 +75,26 @@ This is an authorization decision point for clients that cooperate with ATS. It 
 
 The same layer is available through `set_task_intent`, `set_task_lifecycle`, `get_task_security`, `set_task_security`, `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`, `context_for_task`, `record_action`, and `list_actions`. Normal `create_task` and `update_task` calls also emit best-effort audit entries after a successful write.
 
-## Recommended event stream approach
+## Observation-only event stream
 
-The adapter contract is intentionally portable, and most task backends do not expose compatible webhooks. The best first implementation is therefore a deterministic corpus-diff event emitter, not an autonomous agent runner.
+The adapter contract is intentionally portable, and most task backends do not expose compatible webhooks. ATS therefore implements a deterministic corpus-diff event emitter rather than an autonomous agent runner.
 
-1. `ats events snapshot` stores a normalized task snapshot and cursor locally.
-2. `ats events watch --json` refreshes through `bulkFetch()` or project iteration and diffs against the checkpoint.
-3. It emits stable envelopes for `task.created`, `task.updated`, `task.completed`, `task.unblocked`, `task.validity.changed`, and `task.due.soon`.
+1. `ats events snapshot` stores task references, operational state, field hashes, and a cursor locally. It does not duplicate task bodies.
+2. `ats events poll --json` runs one diff; `ats events watch --json` continuously refreshes through `bulkFetch()` or project iteration.
+3. It emits stable envelopes for `task.created`, `task.updated`, `task.completed`, `task.removed`, `task.unblocked`, `task.validity.changed`, and `task.due.soon`.
 4. Each envelope includes an event id, timestamp, task reference, before/after hashes, and an optional action-ledger causation id.
-5. Checkpoints are written atomically after delivery. Delivery is at least once; consumers deduplicate by event id.
+5. Checkpoints are mode `0600` and written atomically after CLI output. Stable IDs let consumers deduplicate repeated observations; downstream acknowledgement and durable event spooling are not implemented yet.
 6. Agents consume events separately and still apply intent, lifecycle, authority, and approval rules before acting.
 
-This sequence is actionable because it works across every adapter now, can be observed safely in production, and leaves backend-specific webhooks as later latency optimizations. The event emitter should ship before automatic action policies.
+The MCP tools `snapshot_task_events` and `poll_task_events` expose the same observation layer. Polling advances the MCP checkpoint after the result is assembled. Backend-specific webhooks and consumer acknowledgement remain future reliability optimizations.
+
+```bash
+ats events snapshot --due-within-hours 24
+ats events poll --json
+ats events watch --json --interval 30000
+```
+
+This works across every adapter now and deliberately ships before automatic action policies.
 
 ## Executable proof
 
@@ -96,4 +104,4 @@ Run:
 npm run prove:intent
 ```
 
-The proof uses only synthetic tasks. It asserts that retrieval alone misses an authoritative decision in top-2, a typed link restores it, stale linked context is excluded, provenance is present, the human task body survives, intent and security policy round-trip, unapproved access is denied, approved scoped access is allowed, every access check is audited, and task advancement is audited. See [`examples/intent-layer/`](../examples/intent-layer/).
+The proof uses only synthetic tasks. It covers retrieval versus authority, typed context, lifecycle exclusion, provenance, body preservation, intent, scoped security, access and advancement auditing, deterministic task events, content-free checkpoints, and checkpoint advancement after delivery. See [`examples/intent-layer/`](../examples/intent-layer/).

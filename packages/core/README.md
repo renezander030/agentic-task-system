@@ -28,6 +28,7 @@ You'll typically pair it with a storage adapter — see [`@reneza/ats-adapter-ti
 - **Portable execution context** — intent, lifecycle validity, typed relationships, graph traversal, and context assembly in task bodies
 - **Action ledger** — append-only JSONL records of agent actions, sources, approvals, output, and advancement
 - **Scoped security decisions** — default-deny trust/action/resource policy with approval checks and mandatory allow/deny auditing
+- **Task event stream** — deterministic corpus diffs with stable IDs, atomic content-free checkpoints, and no autonomous execution
 
 ## Quick example
 

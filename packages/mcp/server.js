@@ -36,6 +36,9 @@ import {
   contextForTask,
   recordAction,
   listActions,
+  snapshotTaskEvents,
+  collectTaskEvents,
+  writeTaskEventCheckpoint,
 } from '@reneza/ats-core';
 
 const VERSION = (() => {
@@ -443,6 +446,42 @@ export function createServer(adapter) {
     async (filters) => {
       try {
         return ok(listActions(filters));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'snapshot_task_events',
+    'WRITE/LOCAL. Creates or replaces the local corpus-diff event checkpoint. This only observes task state; it never launches an agent or performs an external action.',
+    {
+      dueWithinHours: z.number().nonnegative().optional().describe('Horizon for future task.due.soon events. Default 24 hours.'),
+    },
+    async ({ dueWithinHours }) => {
+      try {
+        return ok(await snapshotTaskEvents(adapter, { dueWithinHours: dueWithinHours ?? 24 }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'poll_task_events',
+    'WRITE/LOCAL. Diffs the current task corpus against the local checkpoint, returns deterministic event envelopes, then advances the checkpoint. Events are observation-only and must be acted on separately under normal ATS intent and security checks.',
+    {
+      dueWithinHours: z.number().nonnegative().optional().describe('Override the task.due.soon horizon stored in the checkpoint.'),
+    },
+    async ({ dueWithinHours }) => {
+      try {
+        const result = await collectTaskEvents(adapter, {
+          dueWithinHours,
+          actions: listActions({ limit: 500 }),
+        });
+        const { checkpoint, ...response } = result;
+        writeTaskEventCheckpoint(checkpoint);
+        return ok(response);
       } catch (e) {
         return fail(e);
       }

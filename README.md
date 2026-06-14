@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
 </p>
 
-`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task manager you already use** — TickTick or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, typed task relationships, lifecycle validity, scoped access decisions, context assembly, and an action ledger. TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
+`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task manager you already use** — TickTick or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, typed task relationships, lifecycle validity, scoped access decisions, context assembly, an action ledger, and bounded task-state events. TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
 ```mermaid
 %%{init: {"theme": "neutral", "quadrantChart": {"pointRadius": 4, "pointLabelFontSize": 14}}}%%
@@ -66,7 +66,7 @@ Andrej Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-
 
 ## What changes when you wire it up
 
-Five shifts, in the order they surprised me in real use:
+Six shifts, in the order they surprised me in real use:
 
 **1. The task app becomes a two-way bus between you and your agent.**
 It's not just somewhere the agent *reads* — it's where you and the agent hand work back and forth. Drop a task and the agent can read its title, body, tags, dates, checklist data, and any attachment metadata exposed by the adapter; the agent writes results back where you'll actually see them. ATS does not claim to download attachment file contents automatically.
@@ -105,7 +105,12 @@ ATS security is a decision point for cooperating clients, not an operating-syste
 
 The metadata lives in one managed JSON block inside the normal task body, so the same model works through every six-method adapter. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the complete path.
 
-**5. Context gets curated at *write* time, not just read time.**
+**5. Agents can react to state changes without becoming open-ended autonomous runners.**
+`ats events snapshot` establishes a local baseline; `ats events watch --json` emits deterministic `task.created`, `task.updated`, `task.completed`, `task.removed`, `task.unblocked`, `task.validity.changed`, and `task.due.soon` envelopes as newline-delimited JSON. The checkpoint stores references, operational state, and hashes — not task bodies — and advances only after CLI output is written. Event IDs are stable so consumers can deduplicate retries.
+
+ATS only emits observations. A separate agent may consume them, but it must still evaluate task intent, validity, authority, and scoped security before acting.
+
+**6. Context gets curated at *write* time, not just read time.**
 The half everyone skips. Every item is hung on a "trunk" — a theme you already care about (`writing`, `client-work`, `side-project`) — the moment it's captured, so retrieval has structure to grab instead of a flat pile.
 
 _Plus the plumbing that makes it usable every turn: a disk-backed corpus cache that avoids repeated store fetches, and a benchmark harness so retrieval quality is measured, not asserted. End-to-end latency depends on corpus size and enabled retrievers._
@@ -119,6 +124,7 @@ agentic-task-system/
 │   │   ├── retrieval.js            # find, hybrid, RRF
 │   │   ├── task-context.js          # intent, lifecycle, typed graph/context
 │   │   ├── action-ledger.js         # append-only agent action audit
+│   │   ├── task-events.js           # deterministic corpus-diff events
 │   │   ├── corpus-cache.js
 │   │   ├── usage-log.js
 │   │   ├── bench/                  # harness
@@ -231,6 +237,8 @@ ats context <project> <task> --limit 8
 ats ledger record <project> <task> --action release.verified --advanced true
 ats security set <project> <task> --trust untrusted --allow-actions read,write --allow-resources "repo://sample/*"
 ats security check <project> <task> --action write --resource repo://sample/CHANGELOG.md --reason "Record approved result" --approvals owner
+ats events snapshot                 # establish a local content-free checkpoint
+ats events watch --json             # emit NDJSON observations; never launch agents
 
 # Ops
 ats bench run                      # run all retrievers against bench/data/questions.jsonl
@@ -246,7 +254,8 @@ as a tool set spanning retrieval, CRUD, and execution context: `find`,
 `get_task`, `list_projects`, `create_task`, `update_task`, `similar`, `url_for`,
 `set_task_intent`, `set_task_lifecycle`, `get_task_security`, `set_task_security`,
 `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`,
-`context_for_task`, `record_action`, and `list_actions`.
+`context_for_task`, `record_action`, `list_actions`, `snapshot_task_events`, and
+`poll_task_events`.
 
 For Claude Code this works as persistent memory between sessions without
 introducing a new database: the agent recalls runbooks, decisions, and project

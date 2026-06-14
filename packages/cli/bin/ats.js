@@ -29,6 +29,7 @@ import {
   getCacheHelp,
   getBenchHelp,
   getCompletionHelp,
+  getEventsHelp,
   getAgentLayerHelp,
 } from '../parser.js';
 import {
@@ -51,6 +52,11 @@ import {
   contextForTask,
   recordAction,
   listActions,
+  taskEventStatePath,
+  readTaskEventCheckpoint,
+  writeTaskEventCheckpoint,
+  snapshotTaskEvents,
+  collectTaskEvents,
 } from '@reneza/ats-core';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
@@ -230,6 +236,9 @@ async function main() {
       case 'security':
         result = await handleSecurity();
         break;
+      case 'events':
+        result = await handleEvents();
+        break;
       case 'find':
       case 'get':
       case 'url':
@@ -262,7 +271,10 @@ async function main() {
           relevanceBlock = result._relevanceInstruction;
           delete result._relevanceInstruction;
         }
+        const eventCheckpoint = result && typeof result === 'object' ? result.__eventCheckpoint : undefined;
+        if (eventCheckpoint) delete result.__eventCheckpoint;
         console.log(formatOutput(result, args.options.format));
+        if (eventCheckpoint) writeTaskEventCheckpoint(eventCheckpoint.checkpoint, eventCheckpoint.options);
         if (relevanceBlock) console.log(relevanceBlock);
       }
     }
@@ -314,6 +326,7 @@ function helpFor(command) {
     case 'cache': return getCacheHelp();
     case 'bench': return getBenchHelp();
     case 'completion': return getCompletionHelp();
+    case 'events': return getEventsHelp();
     case 'intent':
     case 'lifecycle':
     case 'link':
@@ -327,7 +340,7 @@ function helpFor(command) {
 
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
-  'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security',
+  'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security', 'events',
   'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
@@ -945,6 +958,69 @@ async function handleSecurity() {
     reason: args.options.reason,
     approvals: tagsToArray(args.options.approvals) || [],
   });
+}
+
+function eventOptions() {
+  const dueWithinHours = args.options['due-within-hours'] === undefined
+    ? undefined
+    : Number(args.options['due-within-hours']);
+  if (dueWithinHours !== undefined && (!Number.isFinite(dueWithinHours) || dueWithinHours < 0)) {
+    throw new Error('--due-within-hours must be a non-negative number.');
+  }
+  return {
+    statePath: args.options.state || taskEventStatePath(),
+    dueWithinHours,
+  };
+}
+
+function publicEventBatch(result, options) {
+  const { checkpoint, ...batch } = result;
+  return { ...batch, __eventCheckpoint: { checkpoint, options } };
+}
+
+async function collectEventBatch(adapter, options) {
+  return collectTaskEvents(adapter, {
+    ...options,
+    actions: listActions({ limit: 500 }),
+  });
+}
+
+async function handleEvents() {
+  const options = eventOptions();
+  if (args.subcommand === 'status') {
+    const checkpoint = readTaskEventCheckpoint(options);
+    return checkpoint
+      ? {
+          initialized: true,
+          statePath: options.statePath,
+          cursor: checkpoint.cursor,
+          generatedAt: checkpoint.generatedAt,
+          dueWithinHours: checkpoint.dueWithinHours,
+          taskCount: Object.keys(checkpoint.tasks).length,
+        }
+      : { initialized: false, statePath: options.statePath };
+  }
+  const adapter = await loadAdapter();
+  if (args.subcommand === 'snapshot') return snapshotTaskEvents(adapter, options);
+  if (args.subcommand === 'poll') return publicEventBatch(await collectEventBatch(adapter, options), options);
+  if (args.subcommand !== 'watch') {
+    console.log(getEventsHelp());
+    return;
+  }
+  if (args.options.once) return publicEventBatch(await collectEventBatch(adapter, options), options);
+
+  const interval = args.options.interval === undefined ? 30000 : Number(args.options.interval);
+  if (!Number.isFinite(interval) || interval < 250) throw new Error('--interval must be at least 250 milliseconds.');
+  while (true) {
+    const result = await collectEventBatch(adapter, options);
+    if (args.options.format === 'json') {
+      for (const event of result.events) process.stdout.write(`${JSON.stringify(event)}\n`);
+    } else if (result.events.length > 0) {
+      console.log(formatOutput({ generatedAt: result.generatedAt, events: result.events }, 'text'));
+    }
+    writeTaskEventCheckpoint(result.checkpoint, options);
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
 }
 
 async function handleNotes() {

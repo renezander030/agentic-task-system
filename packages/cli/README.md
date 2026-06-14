@@ -59,6 +59,9 @@ ats context <project> <task> --limit 8
 ats ledger record <project> <task> --action release.verified --advanced true
 ats security set <project> <task> --trust untrusted --allow-actions read,write --allow-resources "repo://sample/*"
 ats security check <project> <task> --action write --resource repo://sample/CHANGELOG.md --reason "Record approved result" --approvals owner
+ats events snapshot                 # establish the local event baseline
+ats events poll --json              # one deterministic event batch
+ats events watch --json             # continuous NDJSON observations only
 
 # --json (alias for --format json) on any read command → machine-readable output
 

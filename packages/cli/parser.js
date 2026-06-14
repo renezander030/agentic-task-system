@@ -405,6 +405,7 @@ Commands:
   context        Assemble valid linked + retrieved context with provenance
   ledger         Record or inspect agent actions and work advancement
   security       Define task trust/resource scope and audit access decisions
+  events         Snapshot, poll, or watch observation-only task state changes
   doctor         Diagnose adapter, auth, capabilities, cache, retrieval
   status         Alias for doctor
   cache          Inspect or refresh the adapter's centralized cache
@@ -574,6 +575,26 @@ Usage:
   ats completion bash
   ats completion zsh
   ats completion fish`;
+}
+
+export function getEventsHelp() {
+  return `ats events - Observation-only task event stream
+
+Usage:
+  ats events snapshot [options]
+  ats events status [options]
+  ats events poll [options]
+  ats events watch [options]
+
+Options:
+  --state <path>              Override the local checkpoint path
+  --due-within-hours <n>      Emit task.due.soon inside this horizon (default 24)
+  --interval <ms>             Watch polling interval (default 30000, minimum 250)
+  --once                      Run one watch cycle and exit
+  --json                      poll emits a JSON batch; watch emits NDJSON events
+
+Events are deterministic corpus diffs. ATS writes the checkpoint only after
+CLI output and never launches an agent or executes an external action.`;
 }
 
 /**
