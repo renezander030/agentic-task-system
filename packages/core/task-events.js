@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { loadCorpus } from './retrieval.js';
-import { evaluateLifecycle, parseTaskMetadata } from './task-context.js';
+import { evaluateLifecycle, taskMetadataForRead } from './task-context.js';
 
 export const TASK_EVENT_STATE_VERSION = 1;
 export const TASK_EVENT_SPOOL_VERSION = 1;
@@ -48,7 +48,7 @@ function taskKey(ref) {
 function normalizedTask(task) {
   const ref = taskRef(task);
   if (!ref.projectId || !ref.taskId) throw new Error('Event snapshots require stable projectId and taskId values.');
-  const metadata = parseTaskMetadata(task.content || '');
+  const metadata = taskMetadataForRead(task);
   return {
     ref,
     title: task.title || '',

@@ -31,6 +31,17 @@ ats find "deployment runbook"
 
 Other stores (Notion / Things) are roadmap.
 
+Using Taskmaster in a code repository:
+
+```bash
+git clone https://github.com/renezander030/agentic-task-system.git
+cd agentic-task-system && npm install
+cd /path/to/taskmaster-project
+ats config use /path/to/agentic-task-system/packages/adapter-taskmaster
+ats tasks search "dependency validation"
+ats context master master:3
+```
+
 ## CLI surface
 
 ```

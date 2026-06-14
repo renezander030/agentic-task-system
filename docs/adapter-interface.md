@@ -36,6 +36,7 @@ type Task = {
   tags: string[]                 // empty array if adapter has no tags
   dueDate?: string               // ISO 8601, optional
   modifiedTime: string           // ISO 8601 — used for cache invalidation
+  links?: TaskLink[]             // adapter-native read-only relationships
   raw?: any                      // adapter-internal extras
 }
 
@@ -54,7 +55,7 @@ type TaskPatch = Partial<TaskInput> & { title?: string }
 
 **`listProjects()`** — returns every project visible to the active user. Cheap, called once per corpus refresh. Adapters with no project concept (e.g. plain markdown vault) can return a single synthetic project.
 
-**`listTasksInProject(projectId)`** — every active task in the project. Excludes completed/archived. Adapters with infinite or paginated lists should return at least the most recently modified N items (configurable).
+**`listTasksInProject(projectId)`** — tasks visible in the project. Most task-app adapters return active work; history-oriented local adapters may also include completed items so decisions and prior implementation context remain searchable. Adapters with infinite or paginated lists should return at least the most recently modified N items (configurable) and document their inclusion policy.
 
 **`getTask(projectId, taskId)`** — full task including content. Should be O(1) from the adapter's perspective.
 
@@ -72,6 +73,8 @@ type TaskPatch = Partial<TaskInput> & { title?: string }
 | things         | `things:///show?id=<taskId>`                                    |
 
 If the adapter has no concept of a deep link (rare), return a stable identifier the adapter can resolve back via the CLI (e.g. `ats-ref://<adapter>/<id>`).
+
+Adapters may also return a `links` array on tasks for native relationships such as dependencies. Core merges these links into graph, context, and event reads, but ATS metadata writes remain confined to the managed task-body block. This keeps the storage system authoritative for its own relationships.
 
 ## Optional methods
 

@@ -117,3 +117,20 @@ test('a supersedes edge invalidates the target without mutating it', async () =>
   assert.equal(old.lifecycle.valid, false);
   assert.deepEqual(old.lifecycle.supersededBy, ['demo/decision']);
 });
+
+test('adapter-native links participate in graph and context reads but are not persisted by ATS metadata writes', async () => {
+  const adapter = fakeAdapter();
+  const plan = adapter.tasks.find((task) => task.id === 'plan');
+  plan.links = [{ type: 'depends-on', projectId: 'demo', taskId: 'decision', title: 'Decision' }];
+
+  const graph = await buildTaskGraph(adapter, { projectId: 'demo', taskId: 'plan' }, { depth: 1, cache: false });
+  assert.ok(graph.edges.some((edge) => edge.type === 'depends-on' && edge.targetKey === 'demo/decision'));
+
+  const context = await contextForTask(adapter, { projectId: 'demo', taskId: 'plan' }, { cache: false });
+  assert.equal(context.context[0].task.id, 'decision');
+  assert.ok(context.context[0].provenance.some((entry) => entry.type === 'depends-on'));
+
+  await setTaskIntent(adapter, 'demo', 'plan', { outcome: 'Use native dependency context' });
+  const metadata = parseTaskMetadata((await adapter.getTask('demo', 'plan')).content);
+  assert.deepEqual(metadata.links, []);
+});

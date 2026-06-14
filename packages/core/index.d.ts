@@ -46,6 +46,7 @@ export {
   CONTENT_TRUST_LEVELS,
   normalizeTaskMetadata,
   parseTaskMetadata,
+  taskMetadataForRead,
   writeTaskMetadata,
   evaluateLifecycle,
   setTaskIntent,

@@ -16,6 +16,8 @@ export interface Task {
   /** ISO 8601 — drives the corpus cache. */
   modifiedTime: string;
   dueDate?: string;
+  /** Adapter-native relationships merged into ATS graph/context reads. */
+  links?: Array<{ type: string; projectId: string; taskId: string; title?: string; url?: string }>;
   /** Adapters may carry store-specific extras. */
   [key: string]: unknown;
 }

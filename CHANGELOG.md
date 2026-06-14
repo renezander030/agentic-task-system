@@ -9,6 +9,8 @@
 - Added default-deny scoped security policies, trust-aware approval checks, and fail-closed access-decision auditing.
 - Added a deterministic, observation-only corpus-diff event stream with atomic content-free checkpoints, a durable mode-`0600` pending spool, stable event IDs, explicit consumer acknowledgement, CLI snapshot/poll/watch/pending/ack commands, and matching MCP tools.
 - Added `ats bench progress`, a disclosure-safe workflow-episode scorer for advancement, context precision/recall, irrelevant tokens, blockers removed, completion criteria, reopened tasks, and human corrections.
+- Added a local Taskmaster adapter with cross-tag and subtask search, globally unique references, native dependency context, field-preserving atomic writes, completion/deletion support, and a synthetic CLI proof.
+- Adapter-native read-only links can now participate in Core graph, context, and event reads without being persisted into ATS-managed metadata.
 - Added CLI commands `intent`, `lifecycle`, `link`, `graph`, `context`, `ledger`, `security`, and `events`, plus matching MCP tools.
 - Expanded the deterministic synthetic proof (`npm run prove:intent`) across execution context, security, auditing, durable task-event recovery, and acknowledgement.
 

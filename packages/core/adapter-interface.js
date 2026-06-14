@@ -23,6 +23,7 @@
  * @property {string[]} tags - empty array if adapter has no tags
  * @property {string=} dueDate - ISO 8601
  * @property {string} modifiedTime - ISO 8601, used for cache invalidation
+ * @property {Array<{type:string,projectId:string,taskId:string,title?:string,url?:string}>=} links - adapter-native read-only relationships
  * @property {Object=} raw
  */
 

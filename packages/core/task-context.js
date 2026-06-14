@@ -222,13 +222,32 @@ export function evaluateLifecycle(metadata, { now = new Date(), supersededBy = [
 
 const refKey = (projectId, taskId) => `${projectId}/${taskId}`;
 
+function adapterLinksForTask(task) {
+  if (task?.links === undefined) return [];
+  if (!Array.isArray(task.links)) throw new Error('Adapter task links must be an array.');
+  return task.links.map(normalizeLink);
+}
+
+export function taskMetadataForRead(task) {
+  const metadata = parseTaskMetadata(task?.content || '');
+  const links = [...metadata.links];
+  const known = new Set(links.map((link) => `${link.type}|${link.projectId}|${link.taskId}`));
+  for (const link of adapterLinksForTask(task)) {
+    const key = `${link.type}|${link.projectId}|${link.taskId}`;
+    if (known.has(key)) continue;
+    links.push(link);
+    known.add(key);
+  }
+  return { ...metadata, links };
+}
+
 function metadataForTask(task) {
-  return parseTaskMetadata(task?.content || '');
+  return taskMetadataForRead(task);
 }
 
 async function updateMetadata(adapter, projectId, taskId, mutate) {
   const task = await adapter.getTask(projectId, taskId);
-  const metadata = metadataForTask(task);
+  const metadata = parseTaskMetadata(task?.content || '');
   const next = normalizeTaskMetadata(await mutate(metadata, task));
   const updated = await adapter.updateTask(projectId, taskId, {
     content: writeTaskMetadata(task.content || '', next),

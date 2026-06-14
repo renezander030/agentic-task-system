@@ -73,6 +73,7 @@ export const LIFECYCLE_STATUSES: readonly LifecycleStatus[];
 export const CONTENT_TRUST_LEVELS: readonly ContentTrust[];
 export function normalizeTaskMetadata(value?: Partial<TaskMetadata>): TaskMetadata;
 export function parseTaskMetadata(content?: string): TaskMetadata;
+export function taskMetadataForRead(task: { content?: string; links?: TaskLink[] }): TaskMetadata;
 export function writeTaskMetadata(content: string, metadata: Partial<TaskMetadata>): string;
 export function evaluateLifecycle(metadata: Partial<TaskMetadata>, options?: { now?: Date | string; supersededBy?: string[] }): TaskLifecycle & { valid: boolean; reasons: string[]; supersededBy: string[]; evaluatedAt: string };
 export function setTaskIntent(adapter: Adapter, projectId: string, taskId: string, patch: Partial<TaskIntent>): Promise<{ task: Task; metadata: TaskMetadata }>;

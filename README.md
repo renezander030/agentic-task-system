@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
 </p>
 
-`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task manager you already use** — TickTick or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, typed task relationships, lifecycle validity, scoped access decisions, context assembly, an action ledger, and bounded task-state events. TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
+`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task system you already use** — TickTick, Taskmaster, or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, typed task relationships, lifecycle validity, scoped access decisions, context assembly, an action ledger, and bounded task-state events. TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
 ```mermaid
 %%{init: {"theme": "neutral", "quadrantChart": {"pointRadius": 4, "pointLabelFontSize": 14}}}%%
@@ -36,8 +36,8 @@ already maintain a knowledge base by hand, every day: your task app. Years of
 curated, prioritized, deduplicated context, pre-filtered by the most reliable
 ranker there is — you.
 
-ATS makes that context agent-native. **Adapter, not migration**: keep the app
-you already live in (TickTick or an Obsidian vault today; Notion next) and give
+ATS makes that context agent-native. **Adapter, not migration**: keep the system
+you already live in (TickTick, Taskmaster, or an Obsidian vault today) and give
 your agent a fast, structured, two-way channel into it.
 
 ```bash
@@ -132,6 +132,7 @@ agentic-task-system/
 │   │   └── adapter-interface.md
 │   ├── adapter-ticktick/           # reference adapter (today)
 │   ├── adapter-obsidian/           # local markdown vault (shipped v0.4)
+│   ├── adapter-taskmaster/          # local tagged tasks.json + native dependencies
 │   ├── adapter-notion/             # planned
 │   ├── cli/                        # `ats` command
 │   └── mcp/                        # `@reneza/ats-mcp` — MCP server
@@ -179,6 +180,7 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 | --------------- | ----------------- | ------------------------------- |
 | `ticktick`      | reference         | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
 | `obsidian`      | shipped v0.4      | local markdown vault (files on disk) |
+| `taskmaster`    | available on main | local `.taskmaster/tasks/tasks.json` |
 | `notion`        | planned           | Notion API                      |
 | `things`        | wishlist          | Things URL scheme + AppleScript |
 | `apple-notes`   | wishlist          | AppleScript                     |
@@ -190,6 +192,20 @@ PRs welcome. Scaffold one in seconds and verify it against the contract:
 ats adapter new notion              # writes ats-adapter-notion/ (six stubs + package.json)
 # …implement the six methods…
 ats adapter test ./ats-adapter-notion   # pass/fail/skip per contract check
+```
+
+### Taskmaster: search and context over repo-local agent tasks
+
+The [Taskmaster adapter](packages/adapter-taskmaster/README.md) treats tags as projects, flattens subtasks into stable `<tag>:<id>` references, searches every native text field without model tokens, and exposes native dependencies as read-only `depends-on` context:
+
+```bash
+git clone https://github.com/renezander030/agentic-task-system.git
+cd agentic-task-system && npm install
+cd /path/to/taskmaster-project
+ats config use /path/to/agentic-task-system/packages/adapter-taskmaster
+ats tasks search "upload limit" --json
+ats context master master:4
+cd /path/to/agentic-task-system && npm run prove:taskmaster
 ```
 
 Already shipped: the [Obsidian adapter](packages/adapter-obsidian/README.md) is

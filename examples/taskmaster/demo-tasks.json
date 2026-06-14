@@ -1,0 +1,64 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Implement sample upload endpoint",
+        "description": "Create a bounded upload endpoint for synthetic image fixtures.",
+        "status": "pending",
+        "dependencies": [2],
+        "priority": "high",
+        "details": "Implement the synthetic endpoint without external services.",
+        "testStrategy": "Verify accepted and rejected fixture sizes.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Validate multipart size",
+            "description": "Reject synthetic multipart payloads above the configured limit.",
+            "status": "pending",
+            "dependencies": [],
+            "details": "Enforce a ten megabyte fixture limit before persistence.",
+            "testStrategy": "Submit a multipart fixture over 10MB and expect HTTP 413."
+          }
+        ],
+        "demoField": "preserve-this-field"
+      },
+      {
+        "id": 2,
+        "title": "Decision: sample upload limit",
+        "description": "The approved synthetic upload limit is ten megabytes.",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "details": "This decision is authoritative for the sample endpoint.",
+        "testStrategy": "Confirm the endpoint tests use the same limit.",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2026-06-01T00:00:00.000Z",
+      "updated": "2026-06-02T00:00:00.000Z",
+      "description": "Synthetic master workstream"
+    }
+  },
+  "feature-auth": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Implement sample OAuth callback",
+        "description": "Handle a synthetic callback without real credentials.",
+        "status": "pending",
+        "dependencies": [],
+        "priority": "medium",
+        "details": "Use fixture identities only.",
+        "testStrategy": "Verify success and denial fixtures.",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2026-06-03T00:00:00.000Z",
+      "updated": "2026-06-04T00:00:00.000Z",
+      "description": "Synthetic authentication workstream"
+    }
+  }
+}
