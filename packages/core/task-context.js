@@ -1,4 +1,5 @@
 import { find, loadCorpus } from './retrieval.js';
+import { recordAction } from './action-ledger.js';
 
 export const TASK_CONTEXT_VERSION = 1;
 export const LINK_TYPES = Object.freeze([
@@ -12,6 +13,7 @@ export const LINK_TYPES = Object.freeze([
   'related',
 ]);
 export const LIFECYCLE_STATUSES = Object.freeze(['active', 'archived', 'superseded']);
+export const CONTENT_TRUST_LEVELS = Object.freeze(['trusted', 'untrusted', 'mixed']);
 
 const BLOCK_START = '<!-- ats:context -->';
 const BLOCK_END = '<!-- /ats:context -->';
@@ -28,6 +30,14 @@ const emptyMetadata = () => ({
     approvalRequired: false,
   },
   lifecycle: { status: 'active' },
+  security: {
+    contentTrust: 'untrusted',
+    allowedActions: [],
+    allowedResources: [],
+    deniedResources: [],
+    approvalRequiredFor: [],
+    approvers: [],
+  },
   links: [],
 });
 
@@ -51,6 +61,31 @@ function isoDate(value, field) {
     throw new Error(`ATS metadata field "${field}" must be an ISO 8601 date.`);
   }
   return result;
+}
+
+function resourcePatterns(value, field) {
+  const patterns = stringArray(value, field);
+  for (const pattern of patterns) {
+    const wildcard = pattern.indexOf('*');
+    if (wildcard !== -1 && (wildcard !== pattern.length - 1 || pattern.indexOf('*', wildcard + 1) !== -1)) {
+      throw new Error(`ATS metadata field "${field}" only supports a single trailing wildcard.`);
+    }
+  }
+  return patterns;
+}
+
+function actionNames(value, field) {
+  const actions = stringArray(value, field);
+  if (actions.some((action) => action.includes('*') && action !== '*')) {
+    throw new Error(`ATS metadata field "${field}" supports exact actions or "*" only.`);
+  }
+  return actions;
+}
+
+function contentHandling(contentTrust) {
+  if (contentTrust === 'trusted') return 'instructions-allowed-within-policy';
+  if (contentTrust === 'mixed') return 'verify-before-following-instructions';
+  return 'treat-as-data';
 }
 
 function normalizeLink(link, index) {
@@ -84,8 +119,10 @@ export function normalizeTaskMetadata(value = {}) {
   const base = emptyMetadata();
   const intent = value.intent || {};
   const lifecycle = value.lifecycle || {};
+  const security = value.security || {};
   if (typeof intent !== 'object' || Array.isArray(intent)) throw new Error('ATS metadata field "intent" must be an object.');
   if (typeof lifecycle !== 'object' || Array.isArray(lifecycle)) throw new Error('ATS metadata field "lifecycle" must be an object.');
+  if (typeof security !== 'object' || Array.isArray(security)) throw new Error('ATS metadata field "security" must be an object.');
   const status = lifecycle.status || 'active';
   if (!LIFECYCLE_STATUSES.includes(status)) {
     throw new Error(`ATS lifecycle status must be one of: ${LIFECYCLE_STATUSES.join(', ')}.`);
@@ -95,6 +132,10 @@ export function normalizeTaskMetadata(value = {}) {
   }
   if (value.links !== undefined && !Array.isArray(value.links)) {
     throw new Error('ATS metadata field "links" must be an array.');
+  }
+  const contentTrust = security.contentTrust || base.security.contentTrust;
+  if (!CONTENT_TRUST_LEVELS.includes(contentTrust)) {
+    throw new Error(`ATS content trust must be one of: ${CONTENT_TRUST_LEVELS.join(', ')}.`);
   }
   return {
     version: TASK_CONTEXT_VERSION,
@@ -110,6 +151,14 @@ export function normalizeTaskMetadata(value = {}) {
       status,
       ...(isoDate(lifecycle.validFrom, 'lifecycle.validFrom') ? { validFrom: lifecycle.validFrom } : {}),
       ...(isoDate(lifecycle.validUntil, 'lifecycle.validUntil') ? { validUntil: lifecycle.validUntil } : {}),
+    },
+    security: {
+      contentTrust,
+      allowedActions: actionNames(security.allowedActions, 'security.allowedActions'),
+      allowedResources: resourcePatterns(security.allowedResources, 'security.allowedResources'),
+      deniedResources: resourcePatterns(security.deniedResources, 'security.deniedResources'),
+      approvalRequiredFor: actionNames(security.approvalRequiredFor, 'security.approvalRequiredFor'),
+      approvers: stringArray(security.approvers, 'security.approvers'),
     },
     links: (value.links || []).map(normalizeLink),
   };
@@ -199,6 +248,114 @@ export async function setTaskLifecycle(adapter, projectId, taskId, patch) {
     ...metadata,
     lifecycle: { ...metadata.lifecycle, ...patch },
   }));
+}
+
+export async function setTaskSecurity(adapter, projectId, taskId, patch) {
+  return updateMetadata(adapter, projectId, taskId, (metadata) => ({
+    ...metadata,
+    security: { ...metadata.security, ...patch },
+  }));
+}
+
+function matchesPattern(pattern, value) {
+  if (pattern === '*') return true;
+  return pattern.endsWith('*') ? value.startsWith(pattern.slice(0, -1)) : value === pattern;
+}
+
+function matchesAny(patterns, value) {
+  return patterns.find((pattern) => matchesPattern(pattern, value));
+}
+
+export function evaluateTaskAccess(metadata, request = {}, { now = new Date() } = {}) {
+  const input = request && typeof request === 'object' ? request : {};
+  const normalized = normalizeTaskMetadata(metadata);
+  const action = typeof input.action === 'string' ? input.action.trim() : '';
+  const resource = typeof input.resource === 'string' ? input.resource.trim() : '';
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  const approvals = input.approvals === undefined ? [] : stringArray(input.approvals, 'access.approvals');
+  const lifecycle = evaluateLifecycle(normalized, { now });
+  const policy = normalized.security;
+  const reasons = [];
+  if (!action) reasons.push('action-required');
+  if (!resource) reasons.push('resource-required');
+  if (!reason) reasons.push('reason-required');
+  if (!lifecycle.valid) reasons.push('task-context-invalid');
+
+  const actionAllowed = action && matchesAny(policy.allowedActions, action);
+  if (action && !actionAllowed) reasons.push('action-not-allowed');
+  const deniedPattern = resource && matchesAny(policy.deniedResources, resource);
+  const allowedPattern = resource && matchesAny(policy.allowedResources, resource);
+  if (deniedPattern) reasons.push('resource-denied');
+  if (resource && !allowedPattern) reasons.push('resource-not-allowed');
+
+  const approvalByPolicy = action && Boolean(matchesAny(policy.approvalRequiredFor, action));
+  const approvalByIntent = normalized.intent.approvalRequired;
+  const approvalByTrust = policy.contentTrust === 'untrusted'
+    ? ['write', 'execute', 'network', 'secret'].includes(action)
+    : policy.contentTrust === 'mixed' && ['execute', 'secret'].includes(action);
+  const requiresApproval = Boolean(approvalByPolicy || approvalByIntent || approvalByTrust);
+  let approvalSatisfied = !requiresApproval;
+  if (requiresApproval && approvals.length > 0) {
+    approvalSatisfied = policy.approvers.length === 0 || approvals.some((approval) => policy.approvers.includes(approval));
+  }
+  if (requiresApproval && !approvalSatisfied) reasons.push('approval-required');
+
+  const evaluatedAt = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(evaluatedAt.getTime())) throw new Error('Access evaluation requires a valid date.');
+  return {
+    allowed: reasons.length === 0,
+    reasons,
+    request: { action, resource, reason, approvals },
+    contentTrust: policy.contentTrust,
+    contentHandling: contentHandling(policy.contentTrust),
+    requiresApproval,
+    approvalSatisfied,
+    matchedAllowPattern: allowedPattern || null,
+    matchedDenyPattern: deniedPattern || null,
+    lifecycle,
+    evaluatedAt: evaluatedAt.toISOString(),
+  };
+}
+
+export async function checkTaskAccess(adapter, projectId, taskId, request, options = {}) {
+  const input = request && typeof request === 'object' ? request : {};
+  const task = await adapter.getTask(projectId, taskId);
+  const metadata = metadataForTask(task);
+  const decision = evaluateTaskAccess(metadata, input, { now: options.now });
+  let audit;
+  try {
+    audit = recordAction({
+      agent: options.agent || input.agent || process.env.ATS_AGENT_ID || 'unknown-agent',
+      action: decision.allowed ? 'access.allowed' : 'access.denied',
+      task: { projectId, taskId },
+      sources: [`task://${projectId}/${taskId}`],
+      approvals: decision.request.approvals,
+      output: decision.allowed ? 'allowed' : 'denied',
+      advanced: false,
+      metadata: {
+        access: {
+          action: decision.request.action,
+          resource: decision.request.resource,
+          reason: decision.request.reason,
+        },
+        decision: {
+          allowed: decision.allowed,
+          reasons: decision.reasons,
+          contentTrust: decision.contentTrust,
+          requiresApproval: decision.requiresApproval,
+        },
+      },
+    }, { logPath: options.logPath });
+    if (!audit) throw new Error('Action ledger is disabled.');
+  } catch (err) {
+    throw new Error('Access denied because the decision could not be audited.', { cause: err });
+  }
+  return {
+    task: { projectId: task.projectId, taskId: task.id, title: task.title },
+    policy: metadata.security,
+    decision,
+    audit,
+  };
 }
 
 export async function addTaskLink(adapter, source, target, type) {
@@ -299,6 +456,7 @@ function graphNode(key, state, fallback) {
     title: task?.title || fallback?.title || '(unresolved task)',
     missing: !task,
     intent: metadata.intent,
+    security: { ...metadata.security, contentHandling: contentHandling(metadata.security.contentTrust) },
     lifecycle: lifecycleForKey(key, state),
   };
 }
@@ -417,9 +575,14 @@ export async function contextForTask(adapter, root, { limit = 8, semanticLimit =
       });
       continue;
     }
+    const candidateMetadata = state.metadata.get(refKey(candidate.task.projectId, candidate.task.id));
     const item = {
       task: candidate.task,
-      metadata: state.metadata.get(refKey(candidate.task.projectId, candidate.task.id)),
+      metadata: candidateMetadata,
+      security: {
+        ...candidateMetadata.security,
+        contentHandling: contentHandling(candidateMetadata.security.contentTrust),
+      },
       lifecycle: candidate.lifecycle,
       provenance: candidate.provenance,
     };
@@ -430,6 +593,7 @@ export async function contextForTask(adapter, root, { limit = 8, semanticLimit =
   return {
     task,
     intent: rootMetadata.intent,
+    security: { ...rootMetadata.security, contentHandling: contentHandling(rootMetadata.security.contentTrust) },
     lifecycle: lifecycleForKey(rootKey, state),
     context: ordered,
     counts: { explicit: explicit.length, discovered: discovered.length, returned: ordered.length, excluded: excluded.length },

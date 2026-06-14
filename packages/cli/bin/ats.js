@@ -42,6 +42,8 @@ import {
   evaluateLifecycle,
   setTaskIntent,
   setTaskLifecycle,
+  setTaskSecurity,
+  checkTaskAccess,
   addTaskLink,
   removeTaskLink,
   listTaskLinks,
@@ -225,6 +227,9 @@ async function main() {
       case 'ledger':
         result = await handleLedger();
         break;
+      case 'security':
+        result = await handleSecurity();
+        break;
       case 'find':
       case 'get':
       case 'url':
@@ -314,14 +319,15 @@ function helpFor(command) {
     case 'link':
     case 'graph':
     case 'context':
-    case 'ledger': return getAgentLayerHelp(command);
+    case 'ledger':
+    case 'security': return getAgentLayerHelp(command);
     default: return getMainHelp();
   }
 }
 
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
-  'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger',
+  'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security',
   'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
@@ -903,6 +909,42 @@ async function handleLedger() {
     });
   }
   console.log(getAgentLayerHelp('ledger'));
+}
+
+async function handleSecurity() {
+  const adapter = await loadAdapter();
+  const [projectId, taskId] = args.positional;
+  if (!projectId || !taskId || !['get', 'set', 'check'].includes(args.subcommand)) {
+    console.log(getAgentLayerHelp('security'));
+    return;
+  }
+  if (args.subcommand === 'get') {
+    const task = await adapter.getTask(projectId, taskId);
+    return { task: { projectId: task.projectId, taskId: task.id, title: task.title }, security: parseTaskMetadata(task.content).security };
+  }
+  if (args.subcommand === 'set') {
+    const patch = {};
+    if (args.options.trust !== undefined) patch.contentTrust = args.options.trust;
+    if (args.options['allow-actions'] !== undefined) patch.allowedActions = tagsToArray(args.options['allow-actions']) || [];
+    if (args.options['allow-resources'] !== undefined) patch.allowedResources = tagsToArray(args.options['allow-resources']) || [];
+    if (args.options['deny-resources'] !== undefined) patch.deniedResources = tagsToArray(args.options['deny-resources']) || [];
+    if (args.options['approval-actions'] !== undefined) patch.approvalRequiredFor = tagsToArray(args.options['approval-actions']) || [];
+    if (args.options.approvers !== undefined) patch.approvers = tagsToArray(args.options.approvers) || [];
+    const result = await setTaskSecurity(adapter, projectId, taskId, patch);
+    auditCliWrite('task.security.updated', result, { projectId, taskId }, { fields: Object.keys(patch) });
+    return result;
+  }
+  if (!args.options.action || !args.options.resource || !args.options.reason) {
+    console.error('Usage: ats security check PROJECT_ID TASK_ID --action ACTION --resource RESOURCE --reason REASON');
+    process.exit(1);
+  }
+  return checkTaskAccess(adapter, projectId, taskId, {
+    agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+    action: args.options.action,
+    resource: args.options.resource,
+    reason: args.options.reason,
+    approvals: tagsToArray(args.options.approvals) || [],
+  });
 }
 
 async function handleNotes() {

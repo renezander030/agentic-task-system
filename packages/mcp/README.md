@@ -17,11 +17,15 @@ It exposes **the task app you already use** to any MCP client (Claude Desktop, C
 | `url_for` | Paste-ready deep link back to the item in its native app. |
 | `set_task_intent` | Store outcome, completion conditions, authority, constraints, and approval requirement. |
 | `set_task_lifecycle` | Set active/archived/superseded state and validity windows. |
+| `get_task_security` / `set_task_security` | Read or define task content trust, action/resource scope, denials, and approval boundaries. |
+| `check_task_access` | Require a reason, evaluate one scoped request, and append an allow/deny audit record. |
 | `add_task_link` | Add a typed relationship between two tasks. |
 | `remove_task_link` | Remove one exact typed relationship. |
 | `task_graph` | Traverse incoming and outgoing typed relationships. |
 | `context_for_task` | Return valid deliberate context first, then retrieval discoveries, with provenance. |
 | `record_action` / `list_actions` | Write and inspect the append-only agent action ledger. |
+
+The security tools are a decision point for cooperating MCP clients. They do not sandbox tools outside ATS.
 
 ## Install & run
 

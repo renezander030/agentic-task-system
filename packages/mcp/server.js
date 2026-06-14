@@ -25,8 +25,11 @@ import {
   find as coreFind,
   similar as coreSimilar,
   logUsage,
+  parseTaskMetadata,
   setTaskIntent,
   setTaskLifecycle,
+  setTaskSecurity,
+  checkTaskAccess,
   addTaskLink,
   removeTaskLink,
   buildTaskGraph,
@@ -240,6 +243,69 @@ export function createServer(adapter) {
         const result = await setTaskLifecycle(adapter, projectId, taskId, patch);
         auditWrite('task.lifecycle.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) });
         return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'get_task_security',
+    'Read-only. Returns the portable trust, action, resource, denial, approval, and approver policy for one task. Unconfigured tasks default to untrusted content and no granted access.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+    },
+    async ({ projectId, taskId }) => {
+      try {
+        const task = await adapter.getTask(projectId, taskId);
+        return ok({ task: { projectId: task.projectId, taskId: task.id, title: task.title }, security: parseTaskMetadata(task.content).security });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'set_task_security',
+    'WRITE. Sets a portable task security policy. This policy is a decision point for cooperating clients; it does not sandbox unrelated external tools.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      contentTrust: z.enum(['trusted', 'untrusted', 'mixed']).optional(),
+      allowedActions: z.array(z.string()).optional(),
+      allowedResources: z.array(z.string()).optional(),
+      deniedResources: z.array(z.string()).optional(),
+      approvalRequiredFor: z.array(z.string()).optional(),
+      approvers: z.array(z.string()).optional(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, agent, ...patch }) => {
+      try {
+        const result = await setTaskSecurity(adapter, projectId, taskId, patch);
+        auditWrite('task.security.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'check_task_access',
+    'WRITE/AUDIT. Evaluates one task-scoped access request and appends an allow or deny record. Requires an action, resource, and reason. Denial wins over allowance; untrusted high-risk actions and configured boundaries require approval. Fails closed if auditing fails.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      action: z.string(),
+      resource: z.string(),
+      reason: z.string(),
+      approvals: z.array(z.string()).optional(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, ...request }) => {
+      try {
+        return ok(await checkTaskAccess(adapter, projectId, taskId, request));
       } catch (e) {
         return fail(e);
       }

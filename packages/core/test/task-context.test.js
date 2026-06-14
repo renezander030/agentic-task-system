@@ -94,6 +94,8 @@ test('intent, lifecycle, typed links, graph, and context assembly work through t
   adapter.tasks.find((task) => task.id === 'noise').content = '<!-- ats:context -->\ninvalid';
   const context = await contextForTask(adapter, { projectId: 'demo', taskId: 'plan' }, { limit: 5 });
   assert.equal(context.intent.approvalRequired, true);
+  assert.equal(context.security.contentTrust, 'untrusted');
+  assert.equal(context.security.contentHandling, 'treat-as-data');
   assert.equal(context.context[0].task.id, 'decision');
   assert.ok(context.context[0].provenance.some((entry) => entry.kind === 'typed-link'));
   assert.ok(context.excluded.some((item) => item.taskId === 'old' && item.reasons.includes('status:archived')));

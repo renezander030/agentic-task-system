@@ -21,6 +21,14 @@ ATS stores one managed JSON block at the end of the normal task body. The human-
     "status": "active",
     "validUntil": "2026-12-31T23:59:59Z"
   },
+  "security": {
+    "contentTrust": "untrusted",
+    "allowedActions": ["read", "write"],
+    "allowedResources": ["repo://sample-release/*"],
+    "deniedResources": ["repo://sample-release/private/*"],
+    "approvalRequiredFor": ["write"],
+    "approvers": ["sample-release-owner"]
+  },
   "links": [
     {
       "type": "decision",
@@ -45,6 +53,8 @@ ats graph PROJECT TASK --depth 2
 ats context PROJECT TASK --limit 8
 ats ledger record PROJECT TASK --action release.verified --sources "PROJECT/DECISION" --advanced true
 ats ledger list --project PROJECT --task TASK
+ats security set PROJECT TASK --trust untrusted --allow-actions read,write --allow-resources "repo://sample-release/*" --approval-actions write --approvers sample-release-owner
+ats security check PROJECT TASK --action write --resource repo://sample-release/CHANGELOG.md --reason "Record the approved result" --approvals sample-release-owner
 ```
 
 Link types are `blocks`, `depends-on`, `supports`, `evidence`, `decision`, `output`, `supersedes`, and `related`.
@@ -53,9 +63,17 @@ Link types are `blocks`, `depends-on`, `supports`, `evidence`, `decision`, `outp
 
 The action ledger is append-only JSONL at `~/.config/ats/action-log.jsonl`. Override it with `ATS_ACTION_LOG`; set the default actor with `ATS_AGENT_ID`.
 
+## Scoped security decisions
+
+Tasks default to `untrusted` content with no granted actions or resources. A policy can mark content `trusted`, `untrusted`, or `mixed`; allow exact actions; allow or deny exact resources or trailing-wildcard scopes; and name actions and approvers that require approval. Denial overrides allowance. Untrusted `write`, `execute`, `network`, and `secret` actions require approval even when the action and resource are otherwise in scope.
+
+Every `security check` requires a human-readable reason and appends either `access.allowed` or `access.denied` to the action ledger. If that audit write fails, the check fails closed. `ats context` also labels task content with `treat-as-data`, `verify-before-following-instructions`, or `instructions-allowed-within-policy` handling guidance.
+
+This is an authorization decision point for clients that cooperate with ATS. It does not intercept filesystem, network, shell, or model tools outside ATS, so it is not an operating-system sandbox.
+
 ## MCP
 
-The same layer is available through `set_task_intent`, `set_task_lifecycle`, `add_task_link`, `remove_task_link`, `task_graph`, `context_for_task`, `record_action`, and `list_actions`. Normal `create_task` and `update_task` calls also emit best-effort audit entries after a successful write.
+The same layer is available through `set_task_intent`, `set_task_lifecycle`, `get_task_security`, `set_task_security`, `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`, `context_for_task`, `record_action`, and `list_actions`. Normal `create_task` and `update_task` calls also emit best-effort audit entries after a successful write.
 
 ## Recommended event stream approach
 
@@ -78,4 +96,4 @@ Run:
 npm run prove:intent
 ```
 
-The proof uses only synthetic tasks. It asserts that retrieval alone misses an authoritative decision in top-2, a typed link restores it, stale linked context is excluded, provenance is present, the human task body survives, intent round-trips, and task advancement is audited. See [`examples/intent-layer/`](../examples/intent-layer/).
+The proof uses only synthetic tasks. It asserts that retrieval alone misses an authoritative decision in top-2, a typed link restores it, stale linked context is excluded, provenance is present, the human task body survives, intent and security policy round-trip, unapproved access is denied, approved scoped access is allowed, every access check is audited, and task advancement is audited. See [`examples/intent-layer/`](../examples/intent-layer/).

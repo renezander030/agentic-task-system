@@ -5,12 +5,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   addTaskLink,
+  checkTaskAccess,
   contextForTask,
   find,
+  listActions,
   parseTaskMetadata,
   recordAction,
   setTaskIntent,
   setTaskLifecycle,
+  setTaskSecurity,
 } from '../../packages/core/index.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -57,13 +60,38 @@ async function run() {
     approvalRequired: true,
   });
   await setTaskLifecycle(adapter, stale.projectId, stale.taskId, { status: 'archived' });
+  await setTaskSecurity(adapter, root.projectId, root.taskId, {
+    contentTrust: 'untrusted',
+    allowedActions: ['read', 'write'],
+    allowedResources: ['repo://synthetic-release/*'],
+    deniedResources: ['repo://synthetic-release/private/*'],
+    approvalRequiredFor: ['write'],
+    approvers: ['synthetic-release-owner'],
+  });
   await addTaskLink(adapter, root, authority, 'decision');
   await addTaskLink(adapter, root, stale, 'evidence');
 
   const context = await contextForTask(adapter, root, { limit: 5, cache: false });
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-intent-proof-'));
   let action;
+  let deniedAccess;
+  let approvedAccess;
+  let accessAudits;
   try {
+    const logPath = path.join(tempDir, 'action-log.jsonl');
+    deniedAccess = await checkTaskAccess(adapter, root.projectId, root.taskId, {
+      agent: 'synthetic-proof-agent',
+      action: 'write',
+      resource: 'repo://synthetic-release/CHANGELOG.md',
+      reason: 'Record the synthetic release outcome.',
+    }, { logPath });
+    approvedAccess = await checkTaskAccess(adapter, root.projectId, root.taskId, {
+      agent: 'synthetic-proof-agent',
+      action: 'write',
+      resource: 'repo://synthetic-release/CHANGELOG.md',
+      reason: 'Record the approved synthetic release outcome.',
+      approvals: ['synthetic-release-owner'],
+    }, { logPath });
     action = recordAction({
       agent: 'synthetic-proof-agent',
       action: 'sample-release.verified',
@@ -72,7 +100,9 @@ async function run() {
       approvals: ['synthetic-release-owner'],
       output: 'All deterministic proof checks passed.',
       advanced: true,
-    }, { logPath: path.join(tempDir, 'action-log.jsonl') });
+    }, { logPath });
+    accessAudits = listActions({ agent: 'synthetic-proof-agent' }, { logPath })
+      .filter((entry) => entry.action.startsWith('access.'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -85,6 +115,10 @@ async function run() {
     provenanceExplainsAuthority: context.context[0]?.provenance.some((entry) => entry.kind === 'typed-link' && entry.type === 'decision') === true,
     humanBodyPreserved: rootTask.content.startsWith('Human-authored plan:'),
     intentRoundTrips: parseTaskMetadata(rootTask.content).intent.doneWhen.length === 2,
+    securityPolicyRoundTrips: parseTaskMetadata(rootTask.content).security.allowedResources.includes('repo://synthetic-release/*'),
+    untrustedWriteDeniedWithoutApproval: deniedAccess.decision.allowed === false && deniedAccess.audit.action === 'access.denied',
+    approvedScopedWriteAllowed: approvedAccess.decision.allowed === true && approvedAccess.audit.action === 'access.allowed',
+    accessChecksAudited: accessAudits.length === 2,
     advancementAudited: action?.advanced === true && action.sources.includes('demo/decision-17'),
   };
   for (const [name, passed] of Object.entries(checks)) assert.equal(passed, true, `Proof failed: ${name}`);
@@ -100,11 +134,14 @@ async function run() {
       includedIds: context.context.map((item) => item.task.id),
       excluded: context.excluded,
       authorityFirst: checks.typedContextRestoresAuthority,
+      contentHandling: context.security.contentHandling,
     },
     metrics: {
       explicitAuthorityRecall: 1,
       staleContextExclusion: 1,
       provenanceCoverage: 1,
+      scopedAccessDecisions: 1,
+      accessAuditCoverage: 1,
       auditedAdvancement: 1,
     },
     checks,

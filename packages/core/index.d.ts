@@ -43,19 +43,23 @@ export {
   TASK_CONTEXT_VERSION,
   LINK_TYPES,
   LIFECYCLE_STATUSES,
+  CONTENT_TRUST_LEVELS,
   normalizeTaskMetadata,
   parseTaskMetadata,
   writeTaskMetadata,
   evaluateLifecycle,
   setTaskIntent,
   setTaskLifecycle,
+  setTaskSecurity,
+  evaluateTaskAccess,
+  checkTaskAccess,
   addTaskLink,
   removeTaskLink,
   listTaskLinks,
   buildTaskGraph,
   contextForTask,
 } from './task-context.js';
-export type { LinkType, LifecycleStatus, TaskIntent, TaskLifecycle, TaskLink, TaskMetadata } from './task-context.js';
+export type { LinkType, LifecycleStatus, ContentTrust, TaskIntent, TaskLifecycle, TaskSecurity, TaskAccessRequest, TaskAccessDecision, TaskLink, TaskMetadata } from './task-context.js';
 
 export { actionLogPath, recordAction, listActions } from './action-ledger.js';
 export type { ActionLedgerEntry, ActionLedgerRecord } from './action-ledger.js';

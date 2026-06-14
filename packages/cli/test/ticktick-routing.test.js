@@ -283,6 +283,14 @@ test('portable agent-layer commands work over a generic adapter', () => {
   const lifecycle = invoke('lifecycle', 'set', 'p1', 't1', '--status', 'active', '--valid-until', '2099-01-01');
   assert.equal(lifecycle.evaluation.valid, true);
 
+  const security = invoke('security', 'set', 'p1', 't1', '--trust', 'untrusted', '--allow-actions', 'read,write', '--allow-resources', 'repo://demo/*', '--approval-actions', 'write', '--approvers', 'demo-owner');
+  assert.deepEqual(security.metadata.security.allowedActions, ['read', 'write']);
+  const securityRead = invoke('security', 'get', 'p1', 't1');
+  assert.equal(securityRead.security.contentTrust, 'untrusted');
+  const access = invoke('security', 'check', 'p1', 't1', '--action', 'read', '--resource', 'repo://demo/README.md', '--reason', 'Inspect synthetic documentation');
+  assert.equal(access.decision.allowed, false);
+  assert.equal(access.audit.action, 'access.denied');
+
   const link = invoke('link', 'add', 'p1', 't1', 'p1', 't2', '--type', 'evidence');
   assert.equal(link.metadata.links[0].type, 'evidence');
   const removed = invoke('link', 'remove', 'p1', 't1', 'p1', 't2', '--type', 'evidence');
@@ -341,14 +349,14 @@ test('completion generators expose the full top-level command surface', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const proc = runProcess('completion', shell);
     assert.equal(proc.status, 0, proc.stderr);
-    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes', 'intent', 'context', 'ledger']) {
+    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes', 'intent', 'context', 'ledger', 'security']) {
       assert.match(proc.stdout, new RegExp(`\\b${command}\\b`));
     }
   }
 });
 
 test('documents help for every top-level operational group', () => {
-  for (const command of ['config', 'cache', 'bench', 'completion', 'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger']) {
+  for (const command of ['config', 'cache', 'bench', 'completion', 'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security']) {
     const proc = runProcess(command, '--help');
     assert.equal(proc.status, 0, proc.stderr);
     assert.match(proc.stdout, new RegExp(`ats ${command}`));

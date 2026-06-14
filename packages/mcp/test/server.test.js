@@ -95,16 +95,19 @@ test('registers the full ATS tool set', async () => {
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
     'add_task_link',
+    'check_task_access',
     'context_for_task',
     'create_task',
     'find',
     'get_task',
+    'get_task_security',
     'list_actions',
     'list_projects',
     'record_action',
     'remove_task_link',
     'set_task_intent',
     'set_task_lifecycle',
+    'set_task_security',
     'similar',
     'task_graph',
     'update_task',
@@ -199,6 +202,35 @@ test('intent, lifecycle, links, graph, context, and ledger work through MCP', as
     arguments: { projectId: 'p2', taskId: 't3', status: 'archived' },
   })));
   assert.equal(lifecycle.metadata.lifecycle.status, 'archived');
+
+  const security = JSON.parse(textOf(await client.callTool({
+    name: 'set_task_security',
+    arguments: {
+      projectId: 'p1',
+      taskId: 't1',
+      contentTrust: 'trusted',
+      allowedActions: ['read'],
+      allowedResources: ['repo://demo/*'],
+      approvers: ['demo-owner'],
+      agent: 'demo-mcp-agent',
+    },
+  })));
+  assert.equal(security.metadata.security.contentTrust, 'trusted');
+  const securityRead = JSON.parse(textOf(await client.callTool({
+    name: 'get_task_security',
+    arguments: { projectId: 'p1', taskId: 't1' },
+  })));
+  assert.deepEqual(securityRead.security.allowedActions, ['read']);
+
+  const access = JSON.parse(textOf(await client.callTool({
+    name: 'check_task_access',
+    arguments: {
+      projectId: 'p1', taskId: 't1', action: 'read', resource: 'repo://demo/README.md',
+      reason: 'Prepare the synthetic certificate summary.', approvals: ['demo-owner'], agent: 'demo-mcp-agent',
+    },
+  })));
+  assert.equal(access.decision.allowed, true);
+  assert.equal(access.audit.action, 'access.allowed');
 
   const link = await client.callTool({
     name: 'add_task_link',

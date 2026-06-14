@@ -404,6 +404,7 @@ Commands:
   graph          Traverse the typed task graph around an item
   context        Assemble valid linked + retrieved context with provenance
   ledger         Record or inspect agent actions and work advancement
+  security       Define task trust/resource scope and audit access decisions
   doctor         Diagnose adapter, auth, capabilities, cache, retrieval
   status         Alias for doctor
   cache          Inspect or refresh the adapter's centralized cache
@@ -505,6 +506,27 @@ Record options:
   --advanced <bool>     Whether the action advanced the task
 
 List filters: --project, --task, --agent, --action, --advanced, --limit`,
+    security: `ats security - Portable task access policy and audited decisions
+
+Usage:
+  ats security get PROJECT_ID TASK_ID
+  ats security set PROJECT_ID TASK_ID [options]
+  ats security check PROJECT_ID TASK_ID --action ACTION --resource RESOURCE --reason REASON [options]
+
+Set options:
+  --trust <trusted|untrusted|mixed>
+  --allow-actions <a,b>       Exact actions or *
+  --allow-resources <a,b>     Exact resources or trailing-wildcard scopes
+  --deny-resources <a,b>      Denial wins over allowance
+  --approval-actions <a,b>    Actions requiring approval
+  --approvers <a,b>           Accepted approval identities
+
+Check options:
+  --agent <id>
+  --approvals <a,b>
+
+Every check requires a reason and appends an allow/deny ledger record. ATS is a
+decision point for cooperating clients; it does not sandbox external tools.`,
   };
   return help[command] || getMainHelp();
 }

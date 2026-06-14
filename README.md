@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
 </p>
 
-`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task manager you already use** — TickTick or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, typed task relationships, lifecycle validity, context assembly, and an action ledger. TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
+`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task manager you already use** — TickTick or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, typed task relationships, lifecycle validity, scoped access decisions, context assembly, and an action ledger. TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
 ```mermaid
 %%{init: {"theme": "neutral", "quadrantChart": {"pointRadius": 4, "pointLabelFontSize": 14}}}%%
@@ -99,7 +99,9 @@ sequenceDiagram
 This adds structure *after* semantic search: retrieval proposes candidates; links preserve deliberate relationships, dependencies, and handoffs so another agent can reproduce the context later. ATS provides the shared read/write/link layer; agents remain independent and do not need direct agent-to-agent coordination.
 
 **4. Agents receive execution intent, current validity, and an audit trail.**
-`ats intent` captures the desired outcome, why it matters, completion conditions, authority, constraints, and approval requirement. `ats lifecycle` prevents archived, expired, future, or superseded context from silently steering current work. `ats ledger` records what an agent did, which sources and approvals it used, its output, and whether the task advanced.
+`ats intent` captures the desired outcome, why it matters, completion conditions, authority, constraints, and approval boundary. `ats lifecycle` prevents archived, expired, future, or superseded context from silently steering current work. `ats security` marks content trust, scopes actions and resources, checks approvals, requires a reason, and audits allow/deny decisions. `ats ledger` records what an agent did, which sources and approvals it used, its output, and whether the task advanced.
+
+ATS security is a decision point for cooperating clients, not an operating-system sandbox: it cannot intercept unrelated shell, filesystem, or network tools.
 
 The metadata lives in one managed JSON block inside the normal task body, so the same model works through every six-method adapter. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the complete path.
 
@@ -227,6 +229,8 @@ ats link remove <src-project> <src-task> <dst-project> <dst-task> --type decisio
 ats graph <project> <task> --depth 2
 ats context <project> <task> --limit 8
 ats ledger record <project> <task> --action release.verified --advanced true
+ats security set <project> <task> --trust untrusted --allow-actions read,write --allow-resources "repo://sample/*"
+ats security check <project> <task> --action write --resource repo://sample/CHANGELOG.md --reason "Record approved result" --approvals owner
 
 # Ops
 ats bench run                      # run all retrievers against bench/data/questions.jsonl
@@ -240,7 +244,8 @@ npm run prove:intent               # deterministic synthetic execution-context p
 [`@reneza/ats-mcp`](packages/mcp) exposes the active adapter to any MCP client
 as a tool set spanning retrieval, CRUD, and execution context: `find`,
 `get_task`, `list_projects`, `create_task`, `update_task`, `similar`, `url_for`,
-`set_task_intent`, `set_task_lifecycle`, `add_task_link`, `remove_task_link`, `task_graph`,
+`set_task_intent`, `set_task_lifecycle`, `get_task_security`, `set_task_security`,
+`check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`,
 `context_for_task`, `record_action`, and `list_actions`.
 
 For Claude Code this works as persistent memory between sessions without
