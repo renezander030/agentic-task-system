@@ -40,15 +40,19 @@ import {
   similar as coreSimilar,
   logUsage,
   parseTaskMetadata,
+  taskMetadataForRead,
   evaluateLifecycle,
   setTaskIntent,
   setTaskLifecycle,
   setTaskSecurity,
+  setTaskHierarchy,
+  promoteExploration,
   checkTaskAccess,
   addTaskLink,
   removeTaskLink,
   listTaskLinks,
   buildTaskGraph,
+  evaluateTaskHierarchy,
   contextForTask,
   recordAction,
   listActions,
@@ -221,6 +225,12 @@ async function main() {
       case 'intent':
         result = await handleIntent();
         break;
+      case 'promote':
+        result = await handlePromote();
+        break;
+      case 'hierarchy':
+        result = await handleHierarchy();
+        break;
       case 'lifecycle':
         result = await handleLifecycle();
         break;
@@ -328,6 +338,8 @@ function helpFor(command) {
     case 'completion': return getCompletionHelp();
     case 'events': return getEventsHelp();
     case 'intent':
+    case 'promote':
+    case 'hierarchy':
     case 'lifecycle':
     case 'link':
     case 'graph':
@@ -340,7 +352,7 @@ function helpFor(command) {
 
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
-  'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security', 'events',
+  'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security', 'events',
   'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
@@ -804,6 +816,75 @@ async function handleIntent() {
   if (args.options['approval-required'] !== undefined) patch.approvalRequired = booleanOption(args.options['approval-required'], 'approval-required');
   const result = await setTaskIntent(adapter, projectId, taskId, patch);
   auditCliWrite('task.intent.updated', result, { projectId, taskId }, { fields: Object.keys(patch) });
+  return result;
+}
+
+async function handlePromote() {
+  const sourceProjectId = args.subcommand;
+  const [sourceTaskId, targetProjectId] = args.positional;
+  if (!sourceProjectId || !sourceTaskId || !targetProjectId || !args.options.outcome || args.options['done-when'] === undefined) {
+    console.log(getAgentLayerHelp('promote'));
+    return;
+  }
+  const parentProjectId = args.options['parent-project'];
+  const parentTaskId = args.options['parent-task'];
+  if (Boolean(parentProjectId) !== Boolean(parentTaskId)) throw new Error('--parent-project and --parent-task must be provided together.');
+  const adapter = await loadAdapter();
+  const result = await promoteExploration(adapter, { projectId: sourceProjectId, taskId: sourceTaskId }, {
+    projectId: targetProjectId,
+    title: args.options.title,
+    content: args.options.content,
+    kind: args.options.kind,
+    outcome: args.options.outcome,
+    why: args.options.why,
+    doneWhen: tagsToArray(args.options['done-when']) || [],
+    authority: tagsToArray(args.options.authority) || [],
+    constraints: tagsToArray(args.options.constraints) || [],
+    approvalRequired: booleanOption(args.options['approval-required'], 'approval-required') ?? false,
+    ...(parentProjectId ? { parent: { projectId: parentProjectId, taskId: parentTaskId } } : {}),
+    ...(args.options.tags === undefined ? {} : { tags: tagsToArray(args.options.tags) || [] }),
+    ...(args.options.due === undefined ? {} : { dueDate: args.options.due }),
+    ...(args.options.priority === undefined ? {} : { priority: args.options.priority }),
+  });
+  auditCliWrite('task.promoted', result, { projectId: result.task.projectId, taskId: result.task.id }, {
+    source: result.source,
+    kind: result.metadata.hierarchy.kind,
+  });
+  return result;
+}
+
+async function handleHierarchy() {
+  const [projectId, taskId] = args.positional;
+  if (!projectId || !taskId || !['get', 'set', 'evaluate'].includes(args.subcommand)) {
+    console.log(getAgentLayerHelp('hierarchy'));
+    return;
+  }
+  const adapter = await loadAdapter();
+  if (args.subcommand === 'evaluate') {
+    return evaluateTaskHierarchy(adapter, { projectId, taskId }, {
+      maxDepth: args.options['max-depth'] === undefined ? 12 : Number(args.options['max-depth']),
+    });
+  }
+  if (args.subcommand === 'get') {
+    const task = await adapter.getTask(projectId, taskId);
+    const metadata = taskMetadataForRead(task);
+    return {
+      task: { projectId: task.projectId, taskId: task.id, title: task.title },
+      hierarchy: metadata.hierarchy,
+      parent: metadata.links.find((link) => link.type === 'parent') || null,
+    };
+  }
+  const parentProjectId = args.options['parent-project'];
+  const parentTaskId = args.options['parent-task'];
+  if (args.options['clear-parent'] && (parentProjectId || parentTaskId)) throw new Error('--clear-parent cannot be combined with parent options.');
+  if (Boolean(parentProjectId) !== Boolean(parentTaskId)) throw new Error('--parent-project and --parent-task must be provided together.');
+  const patch = {};
+  if (args.options.kind !== undefined) patch.kind = args.options.kind;
+  if (args.options['clear-parent']) patch.parent = null;
+  else if (parentProjectId) patch.parent = { projectId: parentProjectId, taskId: parentTaskId };
+  if (Object.keys(patch).length === 0) throw new Error('Hierarchy set requires --kind, parent options, or --clear-parent.');
+  const result = await setTaskHierarchy(adapter, projectId, taskId, patch);
+  auditCliWrite('task.hierarchy.updated', result, { projectId, taskId }, { fields: Object.keys(patch) });
   return result;
 }
 

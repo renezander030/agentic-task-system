@@ -31,6 +31,15 @@ ats find "deployment runbook"
 
 Other stores (Notion / Things) are roadmap.
 
+Using Beads in a code repository:
+
+```bash
+npm install -g @reneza/ats-cli @reneza/ats-adapter-beads
+cd /path/to/beads-repository
+ats config use beads
+ats find "dependency validation"
+```
+
 Using Taskmaster in a code repository:
 
 ```bash
@@ -62,6 +71,9 @@ ats create "<title>" [--content "..."] [--project <id>] [--relevance]
 ats update <project> <task> [--content "..."] [--title "..."]
 
 ats intent set <project> <task> --outcome "..." --done-when "a,b"
+ats promote <source-project> <source-task> <target-project> --outcome "..." --done-when "a,b"
+ats hierarchy set <project> <task> --kind task --parent-project <project> --parent-task <task>
+ats hierarchy evaluate <project> <task>
 ats lifecycle set <project> <task> --status active --valid-until 2026-12-31
 ats link add <src-project> <src-task> <dst-project> <dst-task> --type decision
 ats link remove <src-project> <src-task> <dst-project> <dst-task> --type decision

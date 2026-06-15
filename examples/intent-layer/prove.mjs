@@ -10,12 +10,15 @@ import {
   collectAndSpoolTaskEvents,
   collectTaskEvents,
   contextForTask,
+  evaluateTaskHierarchy,
   find,
   listActions,
   listPendingTaskEvents,
   parseTaskMetadata,
+  promoteExploration,
   recordAction,
   setTaskIntent,
+  setTaskHierarchy,
   setTaskLifecycle,
   setTaskSecurity,
   snapshotTaskEvents,
@@ -33,7 +36,18 @@ const adapter = {
     if (!task) throw new Error(`Synthetic task not found: ${projectId}/${taskId}`);
     return task;
   },
-  createTask: async (input) => input,
+  createTask: async (input) => {
+    const task = {
+      id: `promoted-${tasks.length + 1}`,
+      projectId: input.projectId || 'demo',
+      tags: [],
+      content: '',
+      modifiedTime: new Date().toISOString(),
+      ...input,
+    };
+    tasks.push(task);
+    return task;
+  },
   updateTask: async (projectId, taskId, patch) => {
     const index = tasks.findIndex((item) => item.projectId === projectId && item.id === taskId);
     tasks[index] = { ...tasks[index], ...patch, modifiedTime: new Date().toISOString() };
@@ -75,6 +89,21 @@ async function run() {
   });
   await addTaskLink(adapter, root, authority, 'decision');
   await addTaskLink(adapter, root, stale, 'evidence');
+  await setTaskIntent(adapter, authority.projectId, authority.taskId, {
+    outcome: 'Keep the sample release within the approved risk boundary',
+    doneWhen: ['The release decision remains satisfied'],
+  });
+  await setTaskHierarchy(adapter, authority.projectId, authority.taskId, { kind: 'goal' });
+  await setTaskHierarchy(adapter, root.projectId, root.taskId, { kind: 'task', parent: authority });
+  const hierarchy = await evaluateTaskHierarchy(adapter, root, { cache: false, now: '2026-06-14T00:00:00Z' });
+  await setTaskHierarchy(adapter, 'demo', 'announcement', { kind: 'exploration' });
+  const promoted = await promoteExploration(adapter, { projectId: 'demo', taskId: 'announcement' }, {
+    projectId: 'demo',
+    title: 'Publish sample release announcement',
+    outcome: 'Publish the approved release announcement',
+    doneWhen: ['Announcement is published'],
+    parent: authority,
+  });
 
   const context = await contextForTask(adapter, root, { limit: 5, cache: false });
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-intent-proof-'));
@@ -153,6 +182,8 @@ async function run() {
     provenanceExplainsAuthority: context.context[0]?.provenance.some((entry) => entry.kind === 'typed-link' && entry.type === 'decision') === true,
     humanBodyPreserved: rootTask.content.startsWith('Human-authored plan:'),
     intentRoundTrips: parseTaskMetadata(rootTask.content).intent.doneWhen.length === 2,
+    hierarchyProvesParentSupport: hierarchy.aligned === true && hierarchy.chain.map((node) => node.kind).join(',') === 'task,goal',
+    explorationPromotionKeepsSourceScoped: parseTaskMetadata(promoted.task.content).links.some((link) => link.type === 'evidence' && link.taskId === 'announcement') && !promoted.task.content.includes('Draft public announcement copy.'),
     securityPolicyRoundTrips: parseTaskMetadata(rootTask.content).security.allowedResources.includes('repo://synthetic-release/*'),
     untrustedWriteDeniedWithoutApproval: deniedAccess.decision.allowed === false && deniedAccess.audit.action === 'access.denied',
     approvedScopedWriteAllowed: approvedAccess.decision.allowed === true && approvedAccess.audit.action === 'access.allowed',
@@ -189,6 +220,8 @@ async function run() {
       scopedAccessDecisions: 1,
       accessAuditCoverage: 1,
       auditedAdvancement: 1,
+      hierarchyAlignment: 1,
+      explorationPromotion: 1,
       deterministicTaskEvents: 1,
       contentFreeEventCheckpoint: 1,
       durableEventSpooling: 1,

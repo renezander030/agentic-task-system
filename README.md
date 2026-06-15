@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
 </p>
 
-`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task system you already use** — TickTick, Taskmaster, or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, typed task relationships, lifecycle validity, scoped access decisions, context assembly, an action ledger, and bounded task-state events. TickTick can add dense search through local Qdrant + Ollama; file adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
+`ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task system you already use** — TickTick, Taskmaster, Beads, or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, exploration-to-execution promotion, goal hierarchy, typed task relationships, lifecycle validity, scoped access decisions, context assembly, an action ledger, and bounded task-state events. TickTick can add dense search through local Qdrant + Ollama; file and repository adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
 ```mermaid
 %%{init: {"theme": "neutral", "quadrantChart": {"pointRadius": 4, "pointLabelFontSize": 14}}}%%
@@ -37,7 +37,7 @@ curated, prioritized, deduplicated context, pre-filtered by the most reliable
 ranker there is — you.
 
 ATS makes that context agent-native. **Adapter, not migration**: keep the system
-you already live in (TickTick, Taskmaster, or an Obsidian vault today) and give
+you already live in (TickTick, Taskmaster, Beads, or an Obsidian vault today) and give
 your agent a fast, structured, two-way channel into it.
 
 ```bash
@@ -101,6 +101,8 @@ This adds structure *after* semantic search: retrieval proposes candidates; link
 **4. Agents receive execution intent, current validity, and an audit trail.**
 `ats intent` captures the desired outcome, why it matters, completion conditions, authority, constraints, and approval boundary. `ats lifecycle` prevents archived, expired, future, or superseded context from silently steering current work. `ats security` marks content trust, scopes actions and resources, checks approvals, requires a reason, and audits allow/deny decisions. `ats ledger` records what an agent did, which sources and approvals it used, its output, and whether the task advanced.
 
+`ats promote` turns exploratory material into a committed goal, project, or task without copying the source body. `ats hierarchy evaluate` follows explicit parent relationships and reports whether local work still supports its parent objective, including invalid role ordering, missing outcomes, cycles, stale ancestors, and active `conflicts-with` commitments.
+
 ATS security is a decision point for cooperating clients, not an operating-system sandbox: it cannot intercept unrelated shell, filesystem, or network tools.
 
 The metadata lives in one managed JSON block inside the normal task body, so the same model works through every six-method adapter. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the complete path.
@@ -133,6 +135,7 @@ agentic-task-system/
 │   ├── adapter-ticktick/           # reference adapter (today)
 │   ├── adapter-obsidian/           # local markdown vault (shipped v0.4)
 │   ├── adapter-taskmaster/          # local tagged tasks.json + native dependencies
+│   ├── adapter-beads/               # official bd JSON CLI + native dependency graph
 │   ├── adapter-notion/             # planned
 │   ├── cli/                        # `ats` command
 │   └── mcp/                        # `@reneza/ats-mcp` — MCP server
@@ -142,6 +145,7 @@ agentic-task-system/
 │   ├── wiki-conventions.md
 │   └── retrieval.md
 └── examples/
+    ├── beads/                      # synthetic Beads adapter proof
     └── ticktick/                   # sanitized cron examples
 ```
 
@@ -180,7 +184,8 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 | --------------- | ----------------- | ------------------------------- |
 | `ticktick`      | reference         | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
 | `obsidian`      | shipped v0.4      | local markdown vault (files on disk) |
-| `taskmaster`    | available on main | local `.taskmaster/tasks/tasks.json` |
+| `taskmaster`    | shipped v0.6      | local `.taskmaster/tasks/tasks.json` |
+| `beads`         | shipped v0.6      | repository-local Beads through `bd --json` |
 | `notion`        | planned           | Notion API                      |
 | `things`        | wishlist          | Things URL scheme + AppleScript |
 | `apple-notes`   | wishlist          | AppleScript                     |
@@ -206,6 +211,18 @@ ats config use /path/to/agentic-task-system/packages/adapter-taskmaster
 ats tasks search "upload limit" --json
 ats context master master:4
 cd /path/to/agentic-task-system && npm run prove:taskmaster
+```
+
+### Beads: ATS context over the native issue graph
+
+The [Beads adapter](packages/adapter-beads/README.md) calls the official `bd --json` CLI, maps native dependencies and parent-child edges into ATS context, and leaves Beads' Dolt database authoritative:
+
+```bash
+npm install -g @reneza/ats-cli @reneza/ats-adapter-beads
+cd /path/to/beads-repository
+ats config use beads
+ats find "release blocker"
+ats context my-repo bd-a1b2
 ```
 
 Already shipped: the [Obsidian adapter](packages/adapter-obsidian/README.md) is
@@ -246,6 +263,9 @@ ats update <project> <task> [--content "..."] [--title "..."]
 
 # Agent execution context (portable across adapters)
 ats intent set <project> <task> --outcome "..." --done-when "a,b"
+ats promote <source-project> <source-task> <target-project> --outcome "..." --done-when "a,b"
+ats hierarchy set <project> <task> --kind task --parent-project <project> --parent-task <task>
+ats hierarchy evaluate <project> <task>
 ats lifecycle set <project> <task> --status active --valid-until 2026-12-31
 ats link add <src-project> <src-task> <dst-project> <dst-task> --type decision
 ats link remove <src-project> <src-task> <dst-project> <dst-task> --type decision
@@ -265,6 +285,8 @@ ats bench score                    # markdown report of hit@1 / recall@5 / MRR
 ats bench progress                 # advancement, context waste, blockers, criteria, reopen/corrections
 ats bench analyze-usage            # per-tool stats from ~/.config/ats/search-log.jsonl
 npm run prove:intent               # deterministic synthetic execution-context proof
+npm run prove:taskmaster           # repo-local Taskmaster adapter proof
+npm run prove:beads                # repo-local Beads adapter proof
 npm run prove:progress             # deterministic synthetic workflow-outcome proof
 ```
 
@@ -273,7 +295,8 @@ npm run prove:progress             # deterministic synthetic workflow-outcome pr
 [`@reneza/ats-mcp`](packages/mcp) exposes the active adapter to any MCP client
 as a tool set spanning retrieval, CRUD, and execution context: `find`,
 `get_task`, `list_projects`, `create_task`, `update_task`, `similar`, `url_for`,
-`set_task_intent`, `set_task_lifecycle`, `get_task_security`, `set_task_security`,
+`set_task_intent`, `promote_exploration`, `get_task_hierarchy`,
+`set_task_hierarchy`, `evaluate_task_hierarchy`, `set_task_lifecycle`, `get_task_security`, `set_task_security`,
 `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`,
 `context_for_task`, `record_action`, `list_actions`, `snapshot_task_events`,
 `poll_task_events`, `list_pending_task_events`, and `acknowledge_task_events`.
@@ -334,7 +357,7 @@ Agent systems fail when the harness silently re-renders state between turns. ATS
 
 ## Versioning
 
-This is `v0.5` — TickTick CLI parity through ATS, a local-first centralized-cache adapter, secure agent-trunk synchronization, and claim-checked public documentation, on top of v0.4's Obsidian adapter and publish-safety gate. See [`CHANGELOG.md`](CHANGELOG.md).
+This is `v0.6` — portable execution intent, exploration promotion, goal hierarchy and conflict evaluation, durable bounded task events, workflow-progress evaluation, and shipped Taskmaster and Beads adapters. See [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Star history
 

@@ -1,7 +1,9 @@
 
 # Changelog
 
-## Unreleased - portable agent execution context
+## 0.6.0 - Intent hierarchy and repo-local execution adapters
+
+Released 2026-06-15.
 
 - Replaced the TickTick-cache adapter's legacy CLI/MCP sync delegation with direct ATS OpenAPI cache synchronization, including Inbox preservation, field-preserving atomic replacement, fail-closed project refreshes, and ATS-native vector fallback.
 - Added portable task intent: outcome, rationale, completion conditions, authority, constraints, and approval gates stored in a managed task-body JSON block.
@@ -11,9 +13,12 @@
 - Added a deterministic, observation-only corpus-diff event stream with atomic content-free checkpoints, a durable mode-`0600` pending spool, stable event IDs, explicit consumer acknowledgement, CLI snapshot/poll/watch/pending/ack commands, and matching MCP tools.
 - Added `ats bench progress`, a disclosure-safe workflow-episode scorer for advancement, context precision/recall, irrelevant tokens, blockers removed, completion criteria, reopened tasks, and human corrections.
 - Added a local Taskmaster adapter with cross-tag and subtask search, globally unique references, native dependency context, field-preserving atomic writes, completion/deletion support, and a synthetic CLI proof.
+- Added `ats promote` / `promote_exploration` to turn exploratory material into a committed goal, project, or task with explicit outcome and completion criteria. Promotion keeps the source in place and links it as evidence instead of copying its body.
+- Added portable hierarchy roles, one explicit parent relationship, `ats hierarchy evaluate`, and MCP equivalents. Evaluation deterministically reports missing intent, invalid role ordering, unresolved parents, cycles, lifecycle failures, and active `conflicts-with` commitments.
+- Added a Beads adapter that uses the official `bd --json` CLI over Beads' Dolt-backed state, maps native dependencies into ATS context, preserves Beads as the authority for writes, and includes a synthetic CLI/conformance proof.
 - Adapter-native read-only links can now participate in Core graph, context, and event reads without being persisted into ATS-managed metadata.
-- Added CLI commands `intent`, `lifecycle`, `link`, `graph`, `context`, `ledger`, `security`, and `events`, plus matching MCP tools.
-- Expanded the deterministic synthetic proof (`npm run prove:intent`) across execution context, security, auditing, durable task-event recovery, and acknowledgement.
+- Added CLI commands `intent`, `promote`, `hierarchy`, `lifecycle`, `link`, `graph`, `context`, `ledger`, `security`, and `events`, plus matching MCP tools.
+- Expanded the deterministic synthetic proofs across promotion, hierarchy alignment, execution context, security, auditing, durable task-event recovery, acknowledgement, Taskmaster, Beads, and workflow progress.
 
 ## 0.5.0 - TickTick parity, local cache, and secure trunk sync
 

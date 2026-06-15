@@ -25,7 +25,7 @@ You'll typically pair it with a storage adapter — see [`@reneza/ats-adapter-ti
 - **Usage logger** — instrumented retrieval calls write JSONL for later analysis
 - **Bench harness** — Q/A pairs you author, scored by hit@1 / recall@5 / MRR per tag bucket
 - **Adapter interface + validator** — JSDoc types for the contract every storage adapter implements
-- **Portable execution context** — intent, lifecycle validity, typed relationships, graph traversal, and context assembly in task bodies
+- **Portable execution context** — intent, exploration promotion, hierarchy/conflict evaluation, lifecycle validity, typed relationships, graph traversal, and context assembly in task bodies
 - **Action ledger** — append-only JSONL records of agent actions, sources, approvals, output, and advancement
 - **Scoped security decisions** — default-deny trust/action/resource policy with approval checks and mandatory allow/deny auditing
 - **Task event stream** — deterministic corpus diffs with stable IDs, atomic content-free checkpoints, and no autonomous execution
@@ -41,7 +41,7 @@ validateAdapter(adapter);
 // adapter is now ready to plug into core.find / core.get / core.url
 ```
 
-See the [agent execution layer](https://github.com/renezander030/agentic-task-system/blob/main/docs/agent-layer.md). Run `npm run prove:intent` and `npm run prove:progress` in the repository for synthetic end-to-end proofs.
+See the [agent execution layer](https://github.com/renezander030/agentic-task-system/blob/main/docs/agent-layer.md). Run `npm run prove:intent`, `npm run prove:beads`, and `npm run prove:progress` in the repository for synthetic end-to-end proofs.
 
 ## Adapter contract (six methods, three optional)
 

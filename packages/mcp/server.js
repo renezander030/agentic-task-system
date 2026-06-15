@@ -26,13 +26,17 @@ import {
   similar as coreSimilar,
   logUsage,
   parseTaskMetadata,
+  taskMetadataForRead,
   setTaskIntent,
   setTaskLifecycle,
   setTaskSecurity,
+  setTaskHierarchy,
+  promoteExploration,
   checkTaskAccess,
   addTaskLink,
   removeTaskLink,
   buildTaskGraph,
+  evaluateTaskHierarchy,
   contextForTask,
   recordAction,
   listActions,
@@ -254,6 +258,114 @@ export function createServer(adapter) {
   );
 
   server.tool(
+    'promote_exploration',
+    'WRITE. Creates a committed execution item from exploratory material. The source body is not copied; the new item receives explicit outcome/completion metadata and an evidence link back to the source.',
+    {
+      sourceProjectId: z.string(),
+      sourceTaskId: z.string(),
+      targetProjectId: z.string(),
+      title: z.string().optional(),
+      content: z.string().optional(),
+      kind: z.enum(['goal', 'project', 'task']).optional(),
+      outcome: z.string(),
+      why: z.string().optional(),
+      doneWhen: z.array(z.string()).min(1),
+      authority: z.array(z.string()).optional(),
+      constraints: z.array(z.string()).optional(),
+      approvalRequired: z.boolean().optional(),
+      parentProjectId: z.string().optional(),
+      parentTaskId: z.string().optional(),
+      tags: z.array(z.string()).optional(),
+      dueDate: z.string().optional(),
+      priority: z.string().optional(),
+      agent: z.string().optional(),
+    },
+    async ({ sourceProjectId, sourceTaskId, targetProjectId, parentProjectId, parentTaskId, agent, ...input }) => {
+      try {
+        if (Boolean(parentProjectId) !== Boolean(parentTaskId)) throw new Error('parentProjectId and parentTaskId must be provided together.');
+        const result = await promoteExploration(adapter, { projectId: sourceProjectId, taskId: sourceTaskId }, {
+          ...input,
+          projectId: targetProjectId,
+          ...(parentProjectId ? { parent: { projectId: parentProjectId, taskId: parentTaskId } } : {}),
+        });
+        auditWrite('task.promoted', result, { projectId: result.task.projectId, taskId: result.task.id }, agent, {
+          source: result.source,
+          kind: result.metadata.hierarchy.kind,
+        });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'get_task_hierarchy',
+    'Read-only. Returns the item role and its explicit parent relationship. Roles are exploration, goal, project, task, or unspecified.',
+    { projectId: z.string(), taskId: z.string() },
+    async ({ projectId, taskId }) => {
+      try {
+        const task = await adapter.getTask(projectId, taskId);
+        const metadata = taskMetadataForRead(task);
+        return ok({
+          task: { projectId: task.projectId, taskId: task.id, title: task.title },
+          hierarchy: metadata.hierarchy,
+          parent: metadata.links.find((link) => link.type === 'parent') || null,
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'set_task_hierarchy',
+    'WRITE. Assigns an exploration/goal/project/task role and optionally replaces or clears the single explicit parent relationship.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      kind: z.enum(['exploration', 'goal', 'project', 'task']).optional(),
+      parentProjectId: z.string().optional(),
+      parentTaskId: z.string().optional(),
+      clearParent: z.boolean().optional(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, kind, parentProjectId, parentTaskId, clearParent, agent }) => {
+      try {
+        if (clearParent && (parentProjectId || parentTaskId)) throw new Error('clearParent cannot be combined with parent fields.');
+        if (Boolean(parentProjectId) !== Boolean(parentTaskId)) throw new Error('parentProjectId and parentTaskId must be provided together.');
+        const patch = {};
+        if (kind !== undefined) patch.kind = kind;
+        if (clearParent) patch.parent = null;
+        else if (parentProjectId) patch.parent = { projectId: parentProjectId, taskId: parentTaskId };
+        if (Object.keys(patch).length === 0) throw new Error('A hierarchy field is required.');
+        const result = await setTaskHierarchy(adapter, projectId, taskId, patch);
+        auditWrite('task.hierarchy.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'evaluate_task_hierarchy',
+    'Read-only. Deterministically checks whether a task still supports its parent objective and reports invalid role ordering, missing intent, cycles, invalid lifecycle state, and active explicit conflicts.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      maxDepth: z.number().int().min(1).max(100).optional(),
+    },
+    async ({ projectId, taskId, maxDepth }) => {
+      try {
+        return ok(await evaluateTaskHierarchy(adapter, { projectId, taskId }, { maxDepth: maxDepth ?? 12 }));
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
     'get_task_security',
     'Read-only. Returns the portable trust, action, resource, denial, approval, and approver policy for one task. Unconfigured tasks default to untrusted content and no granted access.',
     {
@@ -324,7 +436,7 @@ export function createServer(adapter) {
       sourceTaskId: z.string(),
       targetProjectId: z.string(),
       targetTaskId: z.string(),
-      type: z.enum(['blocks', 'depends-on', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']),
+      type: z.enum(['blocks', 'depends-on', 'parent', 'conflicts-with', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']),
       agent: z.string().optional(),
     },
     async ({ sourceProjectId, sourceTaskId, targetProjectId, targetTaskId, type, agent }) => {
@@ -354,7 +466,7 @@ export function createServer(adapter) {
       sourceTaskId: z.string(),
       targetProjectId: z.string(),
       targetTaskId: z.string(),
-      type: z.enum(['blocks', 'depends-on', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']),
+      type: z.enum(['blocks', 'depends-on', 'parent', 'conflicts-with', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']),
       agent: z.string().optional(),
     },
     async ({ sourceProjectId, sourceTaskId, targetProjectId, targetTaskId, type, agent }) => {

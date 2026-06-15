@@ -4,10 +4,13 @@ import {
   addTaskLink,
   buildTaskGraph,
   contextForTask,
+  evaluateTaskHierarchy,
   evaluateLifecycle,
   parseTaskMetadata,
+  promoteExploration,
   removeTaskLink,
   setTaskIntent,
+  setTaskHierarchy,
   setTaskLifecycle,
   writeTaskMetadata,
 } from '../task-context.js';
@@ -28,7 +31,19 @@ function fakeAdapter() {
       if (!task) throw new Error('not found');
       return task;
     },
-    createTask: async (input) => input,
+    createTask: async (input) => {
+      const task = {
+        id: `created-${tasks.length + 1}`,
+        projectId: input.projectId || 'demo',
+        title: input.title,
+        content: input.content || '',
+        tags: input.tags || [],
+        modifiedTime: '2026-01-02T00:00:00Z',
+        ...input,
+      };
+      tasks.push(task);
+      return task;
+    },
     updateTask: async (projectId, taskId, patch) => {
       const index = tasks.findIndex((item) => item.projectId === projectId && item.id === taskId);
       tasks[index] = { ...tasks[index], ...patch, modifiedTime: '2026-01-02T00:00:00Z' };
@@ -133,4 +148,62 @@ test('adapter-native links participate in graph and context reads but are not pe
   await setTaskIntent(adapter, 'demo', 'plan', { outcome: 'Use native dependency context' });
   const metadata = parseTaskMetadata((await adapter.getTask('demo', 'plan')).content);
   assert.deepEqual(metadata.links, []);
+});
+
+test('exploration promotion creates scoped execution context without copying the source body', async () => {
+  const adapter = fakeAdapter();
+  await setTaskHierarchy(adapter, 'demo', 'noise', { kind: 'exploration' });
+  const result = await promoteExploration(adapter, { projectId: 'demo', taskId: 'noise' }, {
+    projectId: 'demo',
+    title: 'Order launch materials',
+    outcome: 'Have approved launch materials ready',
+    doneWhen: ['Final quantities are approved'],
+    why: 'Support the launch event',
+  });
+  assert.equal(result.task.title, 'Order launch materials');
+  assert.doesNotMatch(result.task.content, /Banners and snacks/);
+  const metadata = parseTaskMetadata(result.task.content);
+  assert.equal(metadata.hierarchy.kind, 'task');
+  assert.equal(metadata.intent.outcome, 'Have approved launch materials ready');
+  assert.deepEqual(metadata.links.map((link) => [link.type, link.taskId]), [['evidence', 'noise']]);
+});
+
+test('hierarchy evaluation proves parent support and reports active explicit conflicts', async () => {
+  const adapter = fakeAdapter();
+  adapter.tasks.push(
+    { id: 'goal', projectId: 'demo', title: 'Reliable launch', content: '', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
+    { id: 'project', projectId: 'demo', title: 'Staged rollout', content: '', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
+    { id: 'conflict', projectId: 'demo', title: 'Immediate global launch', content: '', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
+  );
+  await setTaskIntent(adapter, 'demo', 'goal', { outcome: 'Launch without avoidable incidents', doneWhen: ['Launch remains within error budget'] });
+  await setTaskHierarchy(adapter, 'demo', 'goal', { kind: 'goal' });
+  await setTaskIntent(adapter, 'demo', 'project', { outcome: 'Roll out through controlled stages', doneWhen: ['Every stage is verified'] });
+  await setTaskHierarchy(adapter, 'demo', 'project', { kind: 'project', parent: { projectId: 'demo', taskId: 'goal' } });
+  await setTaskIntent(adapter, 'demo', 'plan', { outcome: 'Prepare the staged launch', doneWhen: ['Plan is approved'] });
+  await setTaskHierarchy(adapter, 'demo', 'plan', { kind: 'task', parent: { projectId: 'demo', taskId: 'project' } });
+  await setTaskIntent(adapter, 'demo', 'conflict', { outcome: 'Launch to every user immediately' });
+  await setTaskHierarchy(adapter, 'demo', 'conflict', { kind: 'goal' });
+  await setTaskLifecycle(adapter, 'demo', 'conflict', { validUntil: '2026-12-31' });
+  await addTaskLink(adapter, { projectId: 'demo', taskId: 'goal' }, { projectId: 'demo', taskId: 'conflict' }, 'conflicts-with');
+
+  const conflicted = await evaluateTaskHierarchy(adapter, { projectId: 'demo', taskId: 'plan' }, {
+    cache: false,
+    now: '2026-06-15T00:00:00.000Z',
+  });
+  assert.deepEqual(conflicted.chain.map((node) => node.kind), ['task', 'project', 'goal']);
+  assert.equal(conflicted.supportsParent, true);
+  assert.equal(conflicted.aligned, false);
+  assert.equal(conflicted.conflicts[0].taskId, 'conflict');
+
+  const expiredConflict = await evaluateTaskHierarchy(adapter, { projectId: 'demo', taskId: 'plan' }, {
+    cache: false,
+    now: '2027-01-01T00:00:00.000Z',
+  });
+  assert.deepEqual(expiredConflict.conflicts, []);
+  assert.ok(expiredConflict.issues.every((issue) => issue.code !== 'active-conflicts'));
+
+  await removeTaskLink(adapter, { projectId: 'demo', taskId: 'goal' }, { projectId: 'demo', taskId: 'conflict' }, 'conflicts-with');
+  const aligned = await evaluateTaskHierarchy(adapter, { projectId: 'demo', taskId: 'plan' }, { cache: false });
+  assert.equal(aligned.aligned, true);
+  assert.deepEqual(aligned.issues, []);
 });

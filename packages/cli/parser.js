@@ -399,6 +399,8 @@ Commands:
   hybrid <query> Dense+sparse retrieval (embedder-backed adapters)
   similar <id>   Find related items (embedder-backed adapters)
   intent         Read or set an item's outcome, constraints, and authority
+  promote        Convert exploratory material into a scoped execution item
+  hierarchy      Set goal/project/task role and evaluate parent alignment
   lifecycle      Manage validity windows and active/archived/superseded state
   link           Add or list typed relationships between tasks
   graph          Traverse the typed task graph around an item
@@ -477,9 +479,46 @@ Usage:
   ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE
   ats link list PROJECT_ID TASK_ID
 
-Types: blocks, depends-on, supports, evidence, decision, output, supersedes, related
+Types: blocks, depends-on, parent, conflicts-with, supports, evidence, decision, output, supersedes, related
 
 ${common}`,
+    promote: `ats promote - Convert exploration into scoped execution
+
+Usage:
+  ats promote SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT --outcome TEXT --done-when a,b [options]
+
+Options:
+  --title <text>                 New execution item title (defaults to source title)
+  --content <text>               Human-authored body; source content is not copied
+  --kind <goal|project|task>     Execution role (default task)
+  --why <text>                   Why the commitment matters
+  --authority <a,b>              Authoritative sources or decisions
+  --constraints <a,b>            Boundaries the agent must respect
+  --approval-required <bool>     Whether execution needs human approval
+  --parent-project <id>          Optional parent project id
+  --parent-task <id>             Optional parent task id
+  --tags <a,b>                   Target labels
+  --due <ISO-8601>               Target due date
+  --priority <level>             Adapter-supported priority
+
+The new item links to the source as evidence, so exploratory content remains in
+place and context is assembled through provenance instead of duplication.`,
+    hierarchy: `ats hierarchy - Goal/project/task hierarchy and conflict evaluation
+
+Usage:
+  ats hierarchy get PROJECT_ID TASK_ID
+  ats hierarchy set PROJECT_ID TASK_ID --kind KIND [options]
+  ats hierarchy evaluate PROJECT_ID TASK_ID [--max-depth N]
+
+Set options:
+  --kind <exploration|goal|project|task>
+  --parent-project <id>          Parent reference (use with --parent-task)
+  --parent-task <id>
+  --clear-parent                 Remove the current parent
+
+Use 'ats link add ... --type conflicts-with' for explicit conflicts. Evaluation
+checks the parent chain, lifecycle validity, missing outcomes, task completion
+criteria, cycles, invalid role ordering, and active conflicts.`,
     graph: `ats graph - Traverse typed task relationships
 
 Usage:

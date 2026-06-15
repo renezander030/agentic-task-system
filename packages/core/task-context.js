@@ -5,6 +5,8 @@ export const TASK_CONTEXT_VERSION = 1;
 export const LINK_TYPES = Object.freeze([
   'blocks',
   'depends-on',
+  'parent',
+  'conflicts-with',
   'supports',
   'evidence',
   'decision',
@@ -14,6 +16,7 @@ export const LINK_TYPES = Object.freeze([
 ]);
 export const LIFECYCLE_STATUSES = Object.freeze(['active', 'archived', 'superseded']);
 export const CONTENT_TRUST_LEVELS = Object.freeze(['trusted', 'untrusted', 'mixed']);
+export const HIERARCHY_KINDS = Object.freeze(['unspecified', 'exploration', 'goal', 'project', 'task']);
 
 const BLOCK_START = '<!-- ats:context -->';
 const BLOCK_END = '<!-- /ats:context -->';
@@ -30,6 +33,7 @@ const emptyMetadata = () => ({
     approvalRequired: false,
   },
   lifecycle: { status: 'active' },
+  hierarchy: { kind: 'unspecified' },
   security: {
     contentTrust: 'untrusted',
     allowedActions: [],
@@ -120,9 +124,11 @@ export function normalizeTaskMetadata(value = {}) {
   const intent = value.intent || {};
   const lifecycle = value.lifecycle || {};
   const security = value.security || {};
+  const hierarchy = value.hierarchy || {};
   if (typeof intent !== 'object' || Array.isArray(intent)) throw new Error('ATS metadata field "intent" must be an object.');
   if (typeof lifecycle !== 'object' || Array.isArray(lifecycle)) throw new Error('ATS metadata field "lifecycle" must be an object.');
   if (typeof security !== 'object' || Array.isArray(security)) throw new Error('ATS metadata field "security" must be an object.');
+  if (typeof hierarchy !== 'object' || Array.isArray(hierarchy)) throw new Error('ATS metadata field "hierarchy" must be an object.');
   const status = lifecycle.status || 'active';
   if (!LIFECYCLE_STATUSES.includes(status)) {
     throw new Error(`ATS lifecycle status must be one of: ${LIFECYCLE_STATUSES.join(', ')}.`);
@@ -136,6 +142,10 @@ export function normalizeTaskMetadata(value = {}) {
   const contentTrust = security.contentTrust || base.security.contentTrust;
   if (!CONTENT_TRUST_LEVELS.includes(contentTrust)) {
     throw new Error(`ATS content trust must be one of: ${CONTENT_TRUST_LEVELS.join(', ')}.`);
+  }
+  const hierarchyKind = hierarchy.kind || base.hierarchy.kind;
+  if (!HIERARCHY_KINDS.includes(hierarchyKind)) {
+    throw new Error(`ATS hierarchy kind must be one of: ${HIERARCHY_KINDS.join(', ')}.`);
   }
   return {
     version: TASK_CONTEXT_VERSION,
@@ -152,6 +162,7 @@ export function normalizeTaskMetadata(value = {}) {
       ...(isoDate(lifecycle.validFrom, 'lifecycle.validFrom') ? { validFrom: lifecycle.validFrom } : {}),
       ...(isoDate(lifecycle.validUntil, 'lifecycle.validUntil') ? { validUntil: lifecycle.validUntil } : {}),
     },
+    hierarchy: { kind: hierarchyKind },
     security: {
       contentTrust,
       allowedActions: actionNames(security.allowedActions, 'security.allowedActions'),
@@ -274,6 +285,98 @@ export async function setTaskSecurity(adapter, projectId, taskId, patch) {
     ...metadata,
     security: { ...metadata.security, ...patch },
   }));
+}
+
+function taskRef(value, field) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${field} must be a task reference.`);
+  }
+  const projectId = optionalString(value.projectId, `${field}.projectId`);
+  const taskId = optionalString(value.taskId, `${field}.taskId`);
+  if (!projectId || !taskId) throw new Error(`${field} needs projectId and taskId.`);
+  return { projectId, taskId };
+}
+
+function linkedRef(adapter, target, type, targetTask, createdAt = new Date().toISOString()) {
+  return {
+    type,
+    projectId: target.projectId,
+    taskId: target.taskId,
+    title: targetTask.title,
+    url: adapter.urlFor(target),
+    createdAt,
+  };
+}
+
+export async function setTaskHierarchy(adapter, projectId, taskId, patch = {}) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Hierarchy patch must be an object.');
+  const kind = patch.kind === undefined ? undefined : optionalString(patch.kind, 'hierarchy.kind');
+  if (kind !== undefined && !HIERARCHY_KINDS.includes(kind)) {
+    throw new Error(`ATS hierarchy kind must be one of: ${HIERARCHY_KINDS.join(', ')}.`);
+  }
+  const parent = patch.parent === undefined || patch.parent === null ? patch.parent : taskRef(patch.parent, 'hierarchy.parent');
+  let parentTask;
+  if (parent) {
+    if (parent.projectId === projectId && parent.taskId === taskId) throw new Error('A task cannot be its own parent.');
+    parentTask = await adapter.getTask(parent.projectId, parent.taskId);
+  }
+  return updateMetadata(adapter, projectId, taskId, (metadata) => {
+    let links = metadata.links;
+    if (patch.parent !== undefined) {
+      links = links.filter((link) => link.type !== 'parent');
+      if (parent) links = [...links, linkedRef(adapter, parent, 'parent', parentTask)];
+    }
+    return {
+      ...metadata,
+      hierarchy: { kind: kind ?? metadata.hierarchy.kind },
+      links,
+    };
+  });
+}
+
+export async function promoteExploration(adapter, source, input = {}) {
+  const sourceRef = taskRef(source, 'promotion.source');
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Promotion input must be an object.');
+  const sourceTask = await adapter.getTask(sourceRef.projectId, sourceRef.taskId);
+  const projectId = optionalString(input.projectId, 'promotion.projectId') || sourceRef.projectId;
+  const outcome = optionalString(input.outcome, 'promotion.outcome');
+  if (!outcome) throw new Error('Promotion requires an explicit outcome.');
+  const doneWhen = stringArray(input.doneWhen, 'promotion.doneWhen');
+  if (doneWhen.length === 0) throw new Error('Promotion requires at least one completion condition.');
+  const kind = optionalString(input.kind, 'promotion.kind') || 'task';
+  if (!['goal', 'project', 'task'].includes(kind)) throw new Error('Promotion kind must be goal, project, or task.');
+  const parent = input.parent === undefined || input.parent === null ? null : taskRef(input.parent, 'promotion.parent');
+  let parentTask;
+  if (parent) parentTask = await adapter.getTask(parent.projectId, parent.taskId);
+  const createdAt = new Date().toISOString();
+  const metadata = normalizeTaskMetadata({
+    hierarchy: { kind },
+    intent: {
+      outcome,
+      why: optionalString(input.why, 'promotion.why') || '',
+      doneWhen,
+      authority: stringArray(input.authority, 'promotion.authority'),
+      constraints: stringArray(input.constraints, 'promotion.constraints'),
+      approvalRequired: input.approvalRequired ?? false,
+    },
+    links: [
+      linkedRef(adapter, sourceRef, 'evidence', sourceTask, createdAt),
+      ...(parent ? [linkedRef(adapter, parent, 'parent', parentTask, createdAt)] : []),
+    ],
+  });
+  const task = await adapter.createTask({
+    projectId,
+    title: optionalString(input.title, 'promotion.title') || sourceTask.title,
+    content: writeTaskMetadata(optionalString(input.content, 'promotion.content') || '', metadata),
+    ...(input.tags === undefined ? {} : { tags: stringArray(input.tags, 'promotion.tags') }),
+    ...(input.dueDate === undefined ? {} : { dueDate: input.dueDate }),
+    ...(input.priority === undefined ? {} : { priority: input.priority }),
+  });
+  return {
+    source: { projectId: sourceTask.projectId, taskId: sourceTask.id, title: sourceTask.title },
+    task,
+    metadata,
+  };
 }
 
 function matchesPattern(pattern, value) {
@@ -475,6 +578,7 @@ function graphNode(key, state, fallback) {
     title: task?.title || fallback?.title || '(unresolved task)',
     missing: !task,
     intent: metadata.intent,
+    hierarchy: metadata.hierarchy,
     security: { ...metadata.security, contentHandling: contentHandling(metadata.security.contentTrust) },
     lifecycle: lifecycleForKey(key, state),
   };
@@ -524,6 +628,142 @@ export async function buildTaskGraph(adapter, root, { depth = 2, cache = false }
     nodes: [...nodes.values()],
     edges: [...edges.values()],
     metadataErrors: state.errors,
+  };
+}
+
+const VALID_PARENT_KINDS = Object.freeze({
+  task: new Set(['project', 'goal']),
+  project: new Set(['goal']),
+  goal: new Set(['goal']),
+  exploration: new Set(),
+  unspecified: new Set(),
+});
+
+function hierarchyIssue(code, key, detail = {}) {
+  return { code, key, ...detail };
+}
+
+export async function evaluateTaskHierarchy(adapter, root, { cache = false, maxDepth = 12, now = new Date() } = {}) {
+  if (!Number.isInteger(maxDepth) || maxDepth < 1 || maxDepth > 100) throw new Error('Hierarchy maxDepth must be an integer between 1 and 100.');
+  const corpusInfo = await loadCorpus(adapter, { cache });
+  const state = inspectCorpus(corpusInfo.corpus);
+  const rootKey = refKey(root.projectId, root.taskId);
+  if (!state.tasks.has(rootKey)) {
+    const task = await adapter.getTask(root.projectId, root.taskId);
+    state.tasks.set(rootKey, task);
+    state.metadata.set(rootKey, metadataForTask(task));
+  }
+
+  const chain = [];
+  const issues = [];
+  const visited = new Set();
+  let currentKey = rootKey;
+  for (let level = 0; currentKey && level < maxDepth; level++) {
+    if (visited.has(currentKey)) {
+      issues.push(hierarchyIssue('cycle', currentKey));
+      break;
+    }
+    visited.add(currentKey);
+    const task = state.tasks.get(currentKey);
+    if (!task) {
+      issues.push(hierarchyIssue('missing-node', currentKey));
+      break;
+    }
+    const metadata = state.metadata.get(currentKey) || emptyMetadata();
+    const lifecycle = evaluateLifecycle(metadata, { now, supersededBy: state.supersededBy.get(currentKey) || [] });
+    const parents = metadata.links.filter((link) => link.type === 'parent');
+    chain.push({
+      key: currentKey,
+      projectId: task.projectId,
+      taskId: task.id,
+      title: task.title,
+      kind: metadata.hierarchy.kind,
+      intent: metadata.intent,
+      lifecycle,
+      parent: parents[0] || null,
+    });
+    if (metadata.hierarchy.kind === 'unspecified') issues.push(hierarchyIssue('kind-unspecified', currentKey));
+    if (metadata.hierarchy.kind === 'exploration') issues.push(hierarchyIssue('not-execution-context', currentKey));
+    if (!metadata.intent.outcome) issues.push(hierarchyIssue('outcome-missing', currentKey));
+    if (metadata.hierarchy.kind === 'task' && metadata.intent.doneWhen.length === 0) {
+      issues.push(hierarchyIssue('completion-criteria-missing', currentKey));
+    }
+    if (!lifecycle.valid) issues.push(hierarchyIssue('lifecycle-invalid', currentKey, { reasons: lifecycle.reasons }));
+    if (parents.length > 1) issues.push(hierarchyIssue('multiple-parents', currentKey, { count: parents.length }));
+    if (parents.length === 0) {
+      if (['task', 'project'].includes(metadata.hierarchy.kind)) issues.push(hierarchyIssue('parent-missing', currentKey));
+      currentKey = null;
+      break;
+    }
+    const parent = parents[0];
+    const parentKey = refKey(parent.projectId, parent.taskId);
+    const parentTask = state.tasks.get(parentKey);
+    if (!parentTask) {
+      issues.push(hierarchyIssue('parent-unresolved', currentKey, { parentKey }));
+      break;
+    }
+    const parentMetadata = state.metadata.get(parentKey) || emptyMetadata();
+    if (!VALID_PARENT_KINDS[metadata.hierarchy.kind].has(parentMetadata.hierarchy.kind)) {
+      issues.push(hierarchyIssue('invalid-parent-kind', currentKey, {
+        childKind: metadata.hierarchy.kind,
+        parentKind: parentMetadata.hierarchy.kind,
+        parentKey,
+      }));
+    }
+    currentKey = parentKey;
+  }
+  if (currentKey && chain.length >= maxDepth) issues.push(hierarchyIssue('max-depth-exceeded', currentKey, { maxDepth }));
+
+  const chainKeys = new Set(chain.map((node) => node.key));
+  const conflicts = new Map();
+  for (const node of chain) {
+    const metadata = state.metadata.get(node.key) || emptyMetadata();
+    const outgoing = metadata.links
+      .filter((link) => link.type === 'conflicts-with')
+      .map((link) => ({ sourceKey: node.key, targetKey: refKey(link.projectId, link.taskId), direction: 'outgoing' }));
+    const incoming = (state.incoming.get(node.key) || [])
+      .filter((edge) => edge.type === 'conflicts-with')
+      .map((edge) => ({ sourceKey: edge.sourceKey, targetKey: node.key, direction: 'incoming' }));
+    for (const edge of [...outgoing, ...incoming]) {
+      const otherKey = edge.sourceKey === node.key ? edge.targetKey : edge.sourceKey;
+      if (chainKeys.has(otherKey)) continue;
+      const otherTask = state.tasks.get(otherKey);
+      if (!otherTask) {
+        issues.push(hierarchyIssue('conflict-unresolved', node.key, { conflictKey: otherKey }));
+        continue;
+      }
+      const lifecycle = evaluateLifecycle(state.metadata.get(otherKey) || emptyMetadata(), {
+        now,
+        supersededBy: state.supersededBy.get(otherKey) || [],
+      });
+      if (!lifecycle.valid) continue;
+      conflicts.set(`${node.key}|${otherKey}`, {
+        nodeKey: node.key,
+        conflictKey: otherKey,
+        projectId: otherTask.projectId,
+        taskId: otherTask.id,
+        title: otherTask.title,
+        kind: state.metadata.get(otherKey)?.hierarchy.kind || 'unspecified',
+        direction: edge.direction,
+        lifecycle,
+      });
+    }
+  }
+  if (conflicts.size > 0) issues.push(hierarchyIssue('active-conflicts', rootKey, { count: conflicts.size }));
+
+  const rootNode = chain[0];
+  const supportsParent = Boolean(rootNode?.parent)
+    && !issues.some((issue) => ['cycle', 'multiple-parents', 'parent-unresolved', 'invalid-parent-kind', 'outcome-missing', 'lifecycle-invalid'].includes(issue.code));
+  const isTopLevelGoal = rootNode?.kind === 'goal' && !rootNode.parent;
+  return {
+    task: rootNode || { key: rootKey, projectId: root.projectId, taskId: root.taskId },
+    aligned: Boolean((supportsParent || isTopLevelGoal) && issues.length === 0),
+    supportsParent,
+    chain,
+    conflicts: [...conflicts.values()],
+    issues,
+    corpus: { size: corpusInfo.corpus.length, fromCache: corpusInfo.fromCache, ageMs: corpusInfo.ageMs },
+    evaluatedAt: (now instanceof Date ? now : new Date(now)).toISOString(),
   };
 }
 
@@ -612,6 +852,7 @@ export async function contextForTask(adapter, root, { limit = 8, semanticLimit =
   return {
     task,
     intent: rootMetadata.intent,
+    hierarchy: rootMetadata.hierarchy,
     security: { ...rootMetadata.security, contentHandling: contentHandling(rootMetadata.security.contentTrust) },
     lifecycle: lifecycleForKey(rootKey, state),
     context: ordered,

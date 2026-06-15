@@ -1,6 +1,6 @@
 {
   "name": "agentic-task-system",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "Your task manager is the best agent memory you're not using. Agent-native context layer over your existing task app, with hybrid retrieval (RRF) and pluggable storage adapters.",
@@ -15,9 +15,10 @@
     "check:publish": "node scripts/check-no-pii.mjs --npm",
     "prove:intent": "node examples/intent-layer/prove.mjs",
     "prove:taskmaster": "node examples/taskmaster/prove.mjs --json",
+    "prove:beads": "node examples/beads/prove.mjs --json",
     "prove:progress": "node packages/core/bench/progress.js --episodes=packages/core/bench/data/progress-episodes.jsonl --format=json",
-    "test:fast": "node --test --test-timeout=10000 packages/core/test/*.test.js packages/mcp/test/*.test.js packages/cli/test/*.test.js packages/adapter-obsidian/test/*.test.js packages/adapter-taskmaster/test/*.test.js packages/adapter-ticktick/test/*.test.js packages/adapter-ticktick-cache/test/*.test.js",
-    "test": "npm run lint && npm run check:pii && npm run check:claims && npm run test:fast && npm run prove:intent -- --json && npm run prove:taskmaster && npm run prove:progress"
+    "test:fast": "node --test --test-timeout=10000 packages/core/test/*.test.js packages/mcp/test/*.test.js packages/cli/test/*.test.js packages/adapter-obsidian/test/*.test.js packages/adapter-taskmaster/test/*.test.js packages/adapter-beads/test/*.test.js packages/adapter-ticktick/test/*.test.js packages/adapter-ticktick-cache/test/*.test.js",
+    "test": "npm run lint && npm run check:pii && npm run check:claims && npm run test:fast && npm run prove:intent -- --json && npm run prove:taskmaster && npm run prove:beads && npm run prove:progress"
   },
   "license": "MIT",
   "repository": {

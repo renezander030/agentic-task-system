@@ -414,14 +414,14 @@ test('completion generators expose the full top-level command surface', () => {
   for (const shell of ['bash', 'zsh', 'fish']) {
     const proc = runProcess('completion', shell);
     assert.equal(proc.status, 0, proc.stderr);
-    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes', 'intent', 'context', 'ledger', 'security', 'events']) {
+    for (const command of ['find', 'create', 'bench', 'sync', 'adapter', 'notes', 'intent', 'promote', 'hierarchy', 'context', 'ledger', 'security', 'events']) {
       assert.match(proc.stdout, new RegExp(`\\b${command}\\b`));
     }
   }
 });
 
 test('documents help for every top-level operational group', () => {
-  for (const command of ['config', 'cache', 'bench', 'completion', 'intent', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security', 'events']) {
+  for (const command of ['config', 'cache', 'bench', 'completion', 'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security', 'events']) {
     const proc = runProcess(command, '--help');
     assert.equal(proc.status, 0, proc.stderr);
     assert.match(proc.stdout, new RegExp(`ats ${command}`));

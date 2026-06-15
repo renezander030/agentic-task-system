@@ -44,6 +44,7 @@ export {
   LINK_TYPES,
   LIFECYCLE_STATUSES,
   CONTENT_TRUST_LEVELS,
+  HIERARCHY_KINDS,
   normalizeTaskMetadata,
   parseTaskMetadata,
   taskMetadataForRead,
@@ -52,15 +53,18 @@ export {
   setTaskIntent,
   setTaskLifecycle,
   setTaskSecurity,
+  setTaskHierarchy,
+  promoteExploration,
   evaluateTaskAccess,
   checkTaskAccess,
   addTaskLink,
   removeTaskLink,
   listTaskLinks,
   buildTaskGraph,
+  evaluateTaskHierarchy,
   contextForTask,
 } from './task-context.js';
-export type { LinkType, LifecycleStatus, ContentTrust, TaskIntent, TaskLifecycle, TaskSecurity, TaskAccessRequest, TaskAccessDecision, TaskLink, TaskMetadata } from './task-context.js';
+export type { LinkType, LifecycleStatus, ContentTrust, HierarchyKind, TaskIntent, TaskLifecycle, TaskHierarchy, TaskSecurity, TaskAccessRequest, TaskAccessDecision, TaskLink, TaskMetadata } from './task-context.js';
 
 export { actionLogPath, recordAction, listActions } from './action-ledger.js';
 export type { ActionLedgerEntry, ActionLedgerRecord } from './action-ledger.js';

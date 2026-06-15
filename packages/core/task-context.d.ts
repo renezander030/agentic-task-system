@@ -1,8 +1,9 @@
 import type { Adapter, Task } from './adapter-interface.js';
 
-export type LinkType = 'blocks' | 'depends-on' | 'supports' | 'evidence' | 'decision' | 'output' | 'supersedes' | 'related';
+export type LinkType = 'blocks' | 'depends-on' | 'parent' | 'conflicts-with' | 'supports' | 'evidence' | 'decision' | 'output' | 'supersedes' | 'related';
 export type LifecycleStatus = 'active' | 'archived' | 'superseded';
 export type ContentTrust = 'trusted' | 'untrusted' | 'mixed';
+export type HierarchyKind = 'unspecified' | 'exploration' | 'goal' | 'project' | 'task';
 
 export interface TaskIntent {
   outcome: string;
@@ -17,6 +18,10 @@ export interface TaskLifecycle {
   status: LifecycleStatus;
   validFrom?: string;
   validUntil?: string;
+}
+
+export interface TaskHierarchy {
+  kind: HierarchyKind;
 }
 
 export interface TaskLink {
@@ -63,6 +68,7 @@ export interface TaskMetadata {
   version: 1;
   intent: TaskIntent;
   lifecycle: TaskLifecycle;
+  hierarchy: TaskHierarchy;
   security: TaskSecurity;
   links: TaskLink[];
 }
@@ -71,6 +77,7 @@ export const TASK_CONTEXT_VERSION: 1;
 export const LINK_TYPES: readonly LinkType[];
 export const LIFECYCLE_STATUSES: readonly LifecycleStatus[];
 export const CONTENT_TRUST_LEVELS: readonly ContentTrust[];
+export const HIERARCHY_KINDS: readonly HierarchyKind[];
 export function normalizeTaskMetadata(value?: Partial<TaskMetadata>): TaskMetadata;
 export function parseTaskMetadata(content?: string): TaskMetadata;
 export function taskMetadataForRead(task: { content?: string; links?: TaskLink[] }): TaskMetadata;
@@ -79,10 +86,28 @@ export function evaluateLifecycle(metadata: Partial<TaskMetadata>, options?: { n
 export function setTaskIntent(adapter: Adapter, projectId: string, taskId: string, patch: Partial<TaskIntent>): Promise<{ task: Task; metadata: TaskMetadata }>;
 export function setTaskLifecycle(adapter: Adapter, projectId: string, taskId: string, patch: Partial<TaskLifecycle>): Promise<{ task: Task; metadata: TaskMetadata }>;
 export function setTaskSecurity(adapter: Adapter, projectId: string, taskId: string, patch: Partial<TaskSecurity>): Promise<{ task: Task; metadata: TaskMetadata }>;
+export function setTaskHierarchy(adapter: Adapter, projectId: string, taskId: string, patch: { kind?: HierarchyKind; parent?: { projectId: string; taskId: string } | null }): Promise<{ task: Task; metadata: TaskMetadata }>;
+export function promoteExploration(adapter: Adapter, source: { projectId: string; taskId: string }, input: {
+  projectId?: string;
+  title?: string;
+  content?: string;
+  kind?: 'goal' | 'project' | 'task';
+  outcome: string;
+  why?: string;
+  doneWhen: string[];
+  authority?: string[];
+  constraints?: string[];
+  approvalRequired?: boolean;
+  parent?: { projectId: string; taskId: string } | null;
+  tags?: string[];
+  dueDate?: string;
+  priority?: string;
+}): Promise<{ source: { projectId: string; taskId: string; title: string }; task: Task; metadata: TaskMetadata }>;
 export function evaluateTaskAccess(metadata: Partial<TaskMetadata>, request: Partial<TaskAccessRequest>, options?: { now?: Date | string }): TaskAccessDecision;
 export function checkTaskAccess(adapter: Adapter, projectId: string, taskId: string, request: TaskAccessRequest, options?: { now?: Date | string; agent?: string; logPath?: string }): Promise<{ task: { projectId: string; taskId: string; title: string }; policy: TaskSecurity; decision: TaskAccessDecision; audit: unknown }>;
 export function addTaskLink(adapter: Adapter, source: { projectId: string; taskId: string }, target: { projectId: string; taskId: string }, type: LinkType): Promise<{ task: Task; metadata: TaskMetadata }>;
 export function removeTaskLink(adapter: Adapter, source: { projectId: string; taskId: string }, target: { projectId: string; taskId: string }, type: LinkType): Promise<{ task: Task; metadata: TaskMetadata; removed: boolean }>;
 export function listTaskLinks(adapter: Adapter, projectId: string, taskId: string): Promise<{ task: { id: string; projectId: string; title: string }; links: TaskLink[] }>;
 export function buildTaskGraph(adapter: Adapter, root: { projectId: string; taskId: string }, options?: { depth?: number; cache?: boolean }): Promise<Record<string, unknown>>;
+export function evaluateTaskHierarchy(adapter: Adapter, root: { projectId: string; taskId: string }, options?: { cache?: boolean; maxDepth?: number; now?: Date | string }): Promise<Record<string, unknown>>;
 export function contextForTask(adapter: Adapter, root: { projectId: string; taskId: string }, options?: { limit?: number; semanticLimit?: number; cache?: boolean }): Promise<Record<string, unknown>>;

@@ -13,6 +13,7 @@ export {
   LINK_TYPES,
   LIFECYCLE_STATUSES,
   CONTENT_TRUST_LEVELS,
+  HIERARCHY_KINDS,
   normalizeTaskMetadata,
   parseTaskMetadata,
   taskMetadataForRead,
@@ -21,12 +22,15 @@ export {
   setTaskIntent,
   setTaskLifecycle,
   setTaskSecurity,
+  setTaskHierarchy,
+  promoteExploration,
   evaluateTaskAccess,
   checkTaskAccess,
   addTaskLink,
   removeTaskLink,
   listTaskLinks,
   buildTaskGraph,
+  evaluateTaskHierarchy,
   contextForTask,
 } from './task-context.js';
 export { actionLogPath, recordAction, listActions } from './action-ledger.js';

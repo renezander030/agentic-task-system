@@ -21,6 +21,9 @@ ATS stores one managed JSON block at the end of the normal task body. The human-
     "status": "active",
     "validUntil": "2026-12-31T23:59:59Z"
   },
+  "hierarchy": {
+    "kind": "task"
+  },
   "security": {
     "contentTrust": "untrusted",
     "allowedActions": ["read", "write"],
@@ -45,6 +48,9 @@ Malformed managed blocks fail closed: ATS refuses to overwrite them until they a
 
 ```bash
 ats intent set PROJECT TASK --outcome "..." --done-when "a,b" --approval-required true
+ats promote SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT --outcome "..." --done-when "a,b"
+ats hierarchy set PROJECT TASK --kind task --parent-project PROJECT --parent-task PARENT
+ats hierarchy evaluate PROJECT TASK
 ats lifecycle set PROJECT TASK --status active --valid-until 2026-12-31
 ats link add PROJECT TASK OTHER_PROJECT OTHER_TASK --type decision
 ats link remove PROJECT TASK OTHER_PROJECT OTHER_TASK --type decision
@@ -57,7 +63,13 @@ ats security set PROJECT TASK --trust untrusted --allow-actions read,write --all
 ats security check PROJECT TASK --action write --resource repo://sample-release/CHANGELOG.md --reason "Record the approved result" --approvals sample-release-owner
 ```
 
-Link types are `blocks`, `depends-on`, `supports`, `evidence`, `decision`, `output`, `supersedes`, and `related`.
+Link types are `blocks`, `depends-on`, `parent`, `conflicts-with`, `supports`, `evidence`, `decision`, `output`, `supersedes`, and `related`.
+
+## Exploration promotion and hierarchy
+
+`ats promote` creates a new committed execution item with an explicit outcome and at least one completion condition. It does not copy the exploratory source body. Instead, the new item receives an `evidence` link to the source, so normal context assembly can retrieve it with provenance.
+
+Hierarchy roles are `exploration`, `goal`, `project`, and `task`; unconfigured items read as `unspecified`. A task may parent directly to a project or goal, a project parents to a goal, and a goal may parent to another goal. `ats hierarchy evaluate` is deterministic: it does not infer semantic contradictions from prose. It checks declared structure, lifecycle validity, required task completion criteria, cycles, and explicit `conflicts-with` links to active commitments.
 
 `ats context` returns typed relationships first, then retrieval discoveries. It excludes archived, expired, not-yet-valid, and superseded tasks and reports the exclusion reason. Every included task carries provenance.
 
@@ -73,7 +85,7 @@ This is an authorization decision point for clients that cooperate with ATS. It 
 
 ## MCP
 
-The same layer is available through `set_task_intent`, `set_task_lifecycle`, `get_task_security`, `set_task_security`, `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`, `context_for_task`, `record_action`, and `list_actions`. Normal `create_task` and `update_task` calls also emit best-effort audit entries after a successful write.
+The same layer is available through `set_task_intent`, `promote_exploration`, `get_task_hierarchy`, `set_task_hierarchy`, `evaluate_task_hierarchy`, `set_task_lifecycle`, `get_task_security`, `set_task_security`, `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`, `context_for_task`, `record_action`, and `list_actions`. Normal `create_task` and `update_task` calls also emit best-effort audit entries after a successful write.
 
 ## Observation-only event stream
 
@@ -127,4 +139,4 @@ Run:
 npm run prove:intent
 ```
 
-The proofs use only synthetic tasks. `npm run prove:intent` covers retrieval versus authority, typed context, lifecycle exclusion, provenance, body preservation, intent, scoped security, access and advancement auditing, deterministic task events, content-free checkpoints and spools, durable staging before checkpoint advancement, pending-event recovery, and explicit acknowledgement. `npm run prove:progress` exercises all workflow-progress metrics, including a stalled and reopened episode.
+The proofs use only synthetic tasks. `npm run prove:intent` covers retrieval versus authority, typed context, exploration promotion, hierarchy alignment, lifecycle exclusion, provenance, body preservation, intent, scoped security, access and advancement auditing, deterministic task events, content-free checkpoints and spools, durable staging before checkpoint advancement, pending-event recovery, and explicit acknowledgement. `npm run prove:taskmaster` and `npm run prove:beads` exercise the repo-local adapters. `npm run prove:progress` exercises all workflow-progress metrics, including a stalled and reopened episode.

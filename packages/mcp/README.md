@@ -16,6 +16,9 @@ It exposes **the task app you already use** to any MCP client (Claude Desktop, C
 | `similar` | Semantically similar items (embedder-backed adapters). |
 | `url_for` | Paste-ready deep link back to the item in its native app. |
 | `set_task_intent` | Store outcome, completion conditions, authority, constraints, and approval requirement. |
+| `promote_exploration` | Create a committed execution item and link the source as evidence without copying its body. |
+| `get_task_hierarchy` / `set_task_hierarchy` | Read or assign exploration/goal/project/task role and one explicit parent. |
+| `evaluate_task_hierarchy` | Check parent support, role ordering, cycles, lifecycle validity, and active explicit conflicts. |
 | `set_task_lifecycle` | Set active/archived/superseded state and validity windows. |
 | `get_task_security` / `set_task_security` | Read or define task content trust, action/resource scope, denials, and approval boundaries. |
 | `check_task_access` | Require a reason, evaluate one scoped request, and append an allow/deny audit record. |

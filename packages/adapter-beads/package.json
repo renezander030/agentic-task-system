@@ -1,11 +1,12 @@
 {
-  "name": "@reneza/ats-adapter-obsidian",
+  "name": "@reneza/ats-adapter-beads",
   "version": "0.6.0",
-  "description": "Obsidian vault adapter for Agentic Task System. Hybrid + RRF retrieval, the wiki layer, and the MCP server over the folder of markdown you already keep in Obsidian — adapter, not migration.",
+  "description": "Beads adapter for Agentic Task System using the official bd JSON CLI over repository-local Dolt state.",
   "type": "module",
   "main": "index.js",
   "files": [
-    "*.js"
+    "index.js",
+    "README.md"
   ],
   "license": "MIT",
   "scripts": {
@@ -14,32 +15,23 @@
   "peerDependencies": {
     "@reneza/ats-core": "^0.6.0"
   },
-  "dependencies": {},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/renezander030/agentic-task-system.git",
-    "directory": "packages/adapter-obsidian"
+    "directory": "packages/adapter-beads"
   },
   "homepage": "https://github.com/renezander030/agentic-task-system#readme",
   "bugs": {
     "url": "https://github.com/renezander030/agentic-task-system/issues"
   },
-  "author": "René Zander",
+  "author": "Rene Zander",
   "keywords": [
-    "obsidian",
-    "obsidian-md",
-    "markdown",
-    "markdown-vault",
-    "note-taking",
-    "second-brain",
-    "zettelkasten",
-    "agent-memory",
+    "beads",
+    "bd",
+    "agent-tasks",
+    "dependency-graph",
     "agent-context",
     "context-engineering",
-    "agentic",
-    "claude",
-    "mcp",
-    "rrf",
-    "hybrid-search"
+    "mcp"
   ]
 }

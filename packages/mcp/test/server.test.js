@@ -101,15 +101,19 @@ test('registers the full ATS tool set', async () => {
     'check_task_access',
     'context_for_task',
     'create_task',
+    'evaluate_task_hierarchy',
     'find',
     'get_task',
+    'get_task_hierarchy',
     'get_task_security',
     'list_actions',
     'list_pending_task_events',
     'list_projects',
     'poll_task_events',
+    'promote_exploration',
     'record_action',
     'remove_task_link',
+    'set_task_hierarchy',
     'set_task_intent',
     'set_task_lifecycle',
     'set_task_security',
@@ -309,6 +313,51 @@ test('intent, lifecycle, links, graph, context, and ledger work through MCP', as
     arguments: { agent: 'demo-mcp-agent', action: 'demo.verified' },
   })));
   assert.equal(actions.length, 1);
+});
+
+test('promotion and hierarchy tools create and evaluate an explicit commitment chain', async () => {
+  const adapter = fakeAdapter();
+  const { client } = await connect(adapter);
+  await client.callTool({
+    name: 'set_task_intent',
+    arguments: { projectId: 'p2', taskId: 't3', outcome: 'Complete the migration roadmap', doneWhen: ['Roadmap accepted'] },
+  });
+  await client.callTool({
+    name: 'set_task_hierarchy',
+    arguments: { projectId: 'p2', taskId: 't3', kind: 'goal' },
+  });
+  await client.callTool({
+    name: 'set_task_hierarchy',
+    arguments: { projectId: 'p1', taskId: 't2', kind: 'exploration' },
+  });
+  const promoted = JSON.parse(textOf(await client.callTool({
+    name: 'promote_exploration',
+    arguments: {
+      sourceProjectId: 'p1',
+      sourceTaskId: 't2',
+      targetProjectId: 'p1',
+      title: 'Choose migration supplies',
+      outcome: 'Select the required migration materials',
+      doneWhen: ['List approved'],
+      parentProjectId: 'p2',
+      parentTaskId: 't3',
+    },
+  })));
+  assert.equal(promoted.metadata.hierarchy.kind, 'task');
+  assert.doesNotMatch(promoted.task.content, /Milk, eggs/);
+
+  const hierarchy = JSON.parse(textOf(await client.callTool({
+    name: 'get_task_hierarchy',
+    arguments: { projectId: promoted.task.projectId, taskId: promoted.task.id },
+  })));
+  assert.equal(hierarchy.parent.taskId, 't3');
+
+  const evaluation = JSON.parse(textOf(await client.callTool({
+    name: 'evaluate_task_hierarchy',
+    arguments: { projectId: promoted.task.projectId, taskId: promoted.task.id },
+  })));
+  assert.equal(evaluation.aligned, true);
+  assert.deepEqual(evaluation.chain.map((node) => node.kind), ['task', 'goal']);
 });
 
 test('url_for returns a deep link', async () => {
