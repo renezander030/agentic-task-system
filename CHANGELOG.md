@@ -3,6 +3,7 @@
 
 ## Unreleased - portable agent execution context
 
+- Replaced the TickTick-cache adapter's legacy CLI/MCP sync delegation with direct ATS OpenAPI cache synchronization, including Inbox preservation, field-preserving atomic replacement, fail-closed project refreshes, and ATS-native vector fallback.
 - Added portable task intent: outcome, rationale, completion conditions, authority, constraints, and approval gates stored in a managed task-body JSON block.
 - Added typed task relationship add/remove, incoming/outgoing graph traversal, lifecycle validity, supersession handling, and provenance-preserving context assembly.
 - Added an append-only action ledger with automatic CLI/MCP write auditing and explicit outcome records.

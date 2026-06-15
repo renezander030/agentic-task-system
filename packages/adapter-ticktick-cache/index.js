@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import remoteAdapter from '../adapter-ticktick/index.js';
 import * as embedding from '../adapter-ticktick/embedding.js';
-import { parseReminder } from '../adapter-ticktick/api.js';
+import { apiRequest as tickTickApiRequest, parseReminder } from '../adapter-ticktick/api.js';
 
 const DEFAULT_CACHE_FILE = path.join(os.homedir(), 'ticktick-mcp', '.ticktick-cache.json');
 
@@ -35,6 +35,116 @@ function updateCache(cacheFile, mutate) {
   mutate(cache);
   saveCache(cacheFile, cache);
   return cache;
+}
+
+function inboxProjectId(cache) {
+  return cache.inboxProjectId || cache.tasks.find((task) => task.projectId === 'inbox')?.rawProjectId || null;
+}
+
+function priorityName(value) {
+  if (typeof value === 'string') return value;
+  return { 0: 'none', 1: 'low', 3: 'medium', 5: 'high' }[value] || 'none';
+}
+
+function overdueFields(dueDate, status, now) {
+  const due = dueDate ? new Date(dueDate).getTime() : NaN;
+  const completed = status === 2 || status === 'completed';
+  if (!Number.isFinite(due) || completed) {
+    return { daysSinceDue: null, isOverdue: false, overdueCategory: null };
+  }
+  const days = Math.floor((now - due) / 86400000);
+  if (days < 0) return { daysSinceDue: days, isOverdue: false, overdueCategory: null };
+  return {
+    daysSinceDue: days,
+    isOverdue: true,
+    overdueCategory: days === 0 ? 'today' : days <= 7 ? 'week' : 'older',
+  };
+}
+
+function cacheTaskFromRemote(task, project, existing, now) {
+  const rawProjectId = task.projectId || project.id;
+  const status = task.status ?? 0;
+  const priority = priorityName(task.priority);
+  return {
+    ...existing,
+    ...task,
+    id: task.id,
+    title: task.title || '',
+    content: task.content || '',
+    projectId: String(rawProjectId).startsWith('inbox') ? 'inbox' : rawProjectId,
+    rawProjectId,
+    projectName: project.name || existing?.projectName || 'Inbox',
+    priority,
+    priorityNum: priorityNumber(priority),
+    status,
+    dueDate: task.dueDate || null,
+    startDate: task.startDate || null,
+    tags: task.tags || [],
+    reminders: task.reminders || [],
+    parentId: task.parentId || null,
+    repeatFlag: task.repeatFlag || null,
+    items: task.items || [],
+    attachments: task.attachments || [],
+    completedTime: task.completedTime || null,
+    createdTime: task.createdTime || null,
+    modifiedTime: task.modifiedTime || null,
+    ...overdueFields(task.dueDate, status, now),
+  };
+}
+
+async function syncCacheFromOpenApi(cacheFile, apiRequest) {
+  const previous = readCache(cacheFile);
+  const remoteProjects = await apiRequest('GET', '/project');
+  const inboxId = inboxProjectId(previous);
+  const sources = remoteProjects.map((project) => ({
+    id: project.id,
+    project,
+    inbox: project.id === inboxId || String(project.id).startsWith('inbox'),
+  }));
+  if (inboxId && !sources.some((source) => source.id === inboxId)) {
+    sources.unshift({ id: inboxId, project: { id: inboxId, name: 'Inbox', kind: 'TASK' }, inbox: true });
+  }
+
+  const existingProjects = new Map(previous.projects.map((project) => [project.id, project]));
+  const existingTasks = new Map(previous.tasks.map((task) => [task.id, task]));
+  const projects = [];
+  const tasks = [];
+  const now = Date.now();
+
+  for (const source of sources) {
+    const data = await apiRequest('GET', `/project/${encodeURIComponent(source.id)}/data`);
+    const project = {
+      ...existingProjects.get(source.id),
+      ...source.project,
+      ...data.project,
+      id: source.id,
+      name: data.project?.name || source.project.name || (source.inbox ? 'Inbox' : source.id),
+    };
+    if (!source.inbox) projects.push(project);
+    for (const task of data.tasks || []) {
+      tasks.push(cacheTaskFromRemote(task, project, existingTasks.get(task.id), now));
+    }
+  }
+
+  const projectMap = Object.fromEntries(projects.map((project) => [project.id, project.name]));
+  const next = {
+    ...previous,
+    projects,
+    projectMap,
+    tasks,
+    inboxProjectId: inboxId,
+    lastSync: Date.now(),
+    syncMethod: 'openapi',
+    projectsFailed: 0,
+  };
+  saveCache(cacheFile, next);
+  return {
+    success: true,
+    method: 'openapi',
+    projects: projects.length,
+    tasks: tasks.length,
+    inboxIncluded: !!inboxId,
+  };
 }
 
 function projectMatches(project, ref) {
@@ -165,7 +275,7 @@ export function createTickTickCacheAdapter(options = {}) {
   const remote = options.remote || remoteAdapter;
   const operations = options.operations || remoteAdapter.__ext;
   const embedder = options.embedding || embedding;
-  const syncCli = options.syncCli || process.env.ATS_TICKTICK_SYNC_CLI || path.join(os.homedir(), 'ticktick-mcp', 'ticktick-cli.js');
+  const syncApiRequest = options.syncApiRequest || tickTickApiRequest;
   const vectorMetaFile = options.vectorMetaFile || process.env.ATS_TICKTICK_VECTOR_META || path.join(os.homedir(), 'ticktick-mcp', '.vector-index-meta.json');
   const vectorSyncScript = options.vectorSyncScript || process.env.ATS_TICKTICK_VECTOR_SYNC;
   const localDetailsOnly = options.localDetailsOnly ?? process.env.ATS_TICKTICK_LOCAL_DETAILS_ONLY === '1';
@@ -408,24 +518,12 @@ export function createTickTickCacheAdapter(options = {}) {
     };
   }
 
-  function callMcpTool(tool, args) {
-    const output = execFileSync(process.execPath, [syncCli, 'call', tool, JSON.stringify(args)], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    try {
-      return JSON.parse(output);
-    } catch {
-      return { success: true, message: output.trim() };
-    }
-  }
-
-  function syncCache() {
-    const result = callMcpTool('sync', { force: true });
+  async function syncCache() {
+    const result = await syncCacheFromOpenApi(cacheFile, syncApiRequest);
     return { ...result, cache: cacheStatus() };
   }
 
-  function syncVectors(opts = {}) {
+  async function syncVectors(opts = {}) {
     if (vectorSyncScript) {
       const output = execFileSync(process.execPath, [vectorSyncScript, JSON.stringify({
         forceFull: !!opts.forceFull,
@@ -437,10 +535,10 @@ export function createTickTickCacheAdapter(options = {}) {
       });
       return JSON.parse(output);
     }
-    if (opts.maxEmbeddings && Number(opts.maxEmbeddings) !== 200) {
-      throw new Error('vector-sync --max requires ATS_TICKTICK_VECTOR_SYNC to be configured');
+    if (typeof operations.tasks.vectorSync !== 'function') {
+      throw new Error('The active TickTick adapter does not provide vector synchronization');
     }
-    return callMcpTool('sync_vector_index', { force_full: !!opts.forceFull });
+    return operations.tasks.vectorSync(opts);
   }
 
   let adapter;

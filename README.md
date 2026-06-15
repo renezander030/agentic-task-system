@@ -316,6 +316,11 @@ ats sync vector
 ats find "ffmpeg commands"
 ```
 
+The local-first TickTick cache adapter refreshes its centralized JSON directly
+through TickTick OpenAPI. `ats cache sync` preserves Inbox addressing and the
+last good file on any project failure; it does not invoke a legacy TickTick CLI
+or MCP server.
+
 ## Conventions
 
 - **Pick a wiki project.** A designated project (default: `Permanent Notes`) holds your durable knowledge. Other projects hold ephemeral tasks.

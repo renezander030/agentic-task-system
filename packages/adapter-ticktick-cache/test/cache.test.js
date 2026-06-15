@@ -65,6 +65,45 @@ function remote(onUpdate) {
   };
 }
 
+function syncApi({ failProject = null } = {}) {
+  const projects = [
+    { id: 'project123456789', name: 'Work', color: '#abc', customProjectField: 'remote' },
+    { id: 'newproject123456789', name: 'New project', kind: 'TASK' },
+  ];
+  const data = {
+    project123456789: {
+      project: projects[0],
+      tasks: [{
+        id: 'task123456789', title: 'Deploy service refreshed', content: 'Fresh body',
+        projectId: 'project123456789', priority: 3, status: 0, tags: ['fresh'],
+        dueDate: null, modifiedTime: '2026-06-15T05:00:00.000Z', customTaskField: 'remote',
+      }],
+    },
+    newproject123456789: {
+      project: projects[1],
+      tasks: [{
+        id: 'newremote123456789', title: 'Remote project task', content: '',
+        projectId: 'newproject123456789', priority: 0, status: 0, tags: [],
+      }],
+    },
+    inbox127571151: {
+      project: { id: 'inbox127571151', name: 'Inbox' },
+      tasks: [{
+        id: 'inboxtask123456789', title: 'Inbox refreshed', content: '',
+        projectId: 'inbox127571151', priority: 0, status: 0, tags: [],
+      }],
+    },
+  };
+  return async (method, endpoint) => {
+    assert.equal(method, 'GET');
+    if (endpoint === '/project') return projects;
+    const match = endpoint.match(/^\/project\/([^/]+)\/data$/);
+    const projectId = match && decodeURIComponent(match[1]);
+    if (!projectId || projectId === failProject) throw new Error(`sync failed for ${projectId}`);
+    return data[projectId];
+  };
+}
+
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -155,6 +194,83 @@ test('completed tasks fall back to the centralized JSON when the API is unavaila
   assert.equal(result.count, 1);
   assert.equal(result.tasks[0].fullId, 'completedtask123456789');
   assert.equal(result.tasks[0].completedTime, '2026-06-10T12:00:00.000Z');
+});
+
+test('cache sync uses OpenAPI directly, preserves Inbox and unknown fields, and removes stale tasks', async () => {
+  const cacheFile = fixture();
+  const before = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+  before.projects[0].localProjectField = 'preserve';
+  before.tasks[0].localTaskField = 'preserve';
+  fs.writeFileSync(cacheFile, JSON.stringify(before));
+  const adapter = createTickTickCacheAdapter({
+    cacheFile,
+    remote: remote(),
+    embedding: {},
+    syncApiRequest: syncApi(),
+  });
+
+  const result = await adapter.__ext.cache.sync();
+  const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+  assert.equal(result.success, true);
+  assert.equal(result.method, 'openapi');
+  assert.equal(result.inboxIncluded, true);
+  assert.equal(cache.syncMethod, 'openapi');
+  assert.equal(cache.inboxProjectId, 'inbox127571151');
+  assert.ok(Date.now() - cache.lastSync < 1000);
+  assert.equal(cache.projects.length, 2);
+  assert.equal(cache.tasks.length, 3);
+  assert.equal(cache.tasks.some((task) => task.id === 'bbbbbbbbbbbbbbbbbbbbbbbb'), false);
+  const work = cache.projects.find((project) => project.id === 'project123456789');
+  assert.equal(work.localProjectField, 'preserve');
+  assert.equal(work.customProjectField, 'remote');
+  const task = cache.tasks.find((item) => item.id === 'task123456789');
+  assert.equal(task.title, 'Deploy service refreshed');
+  assert.equal(task.priority, 'medium');
+  assert.equal(task.localTaskField, 'preserve');
+  assert.equal(task.customTaskField, 'remote');
+  const inbox = cache.tasks.find((item) => item.id === 'inboxtask123456789');
+  assert.equal(inbox.projectId, 'inbox');
+  assert.equal(inbox.rawProjectId, 'inbox127571151');
+
+  cache.tasks = cache.tasks.filter((item) => item.projectId !== 'inbox');
+  fs.writeFileSync(cacheFile, JSON.stringify(cache));
+  await adapter.__ext.cache.sync();
+  const resynced = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+  assert.equal(resynced.inboxProjectId, 'inbox127571151');
+  assert.equal(resynced.tasks.some((item) => item.projectId === 'inbox'), true);
+});
+
+test('cache sync leaves the last good centralized JSON untouched when any project fails', async () => {
+  const cacheFile = fixture();
+  const before = fs.readFileSync(cacheFile, 'utf8');
+  const adapter = createTickTickCacheAdapter({
+    cacheFile,
+    remote: remote(),
+    embedding: {},
+    syncApiRequest: syncApi({ failProject: 'newproject123456789' }),
+  });
+
+  await assert.rejects(adapter.__ext.cache.sync(), /sync failed/);
+  assert.equal(fs.readFileSync(cacheFile, 'utf8'), before);
+});
+
+test('vector sync fallback delegates to the ATS TickTick adapter without a legacy CLI', async () => {
+  const cacheFile = fixture();
+  const operations = remote().__ext;
+  operations.tasks.vectorSync = async (opts) => ({ success: true, opts, source: 'ats-adapter' });
+  const adapter = createTickTickCacheAdapter({
+    cacheFile,
+    remote: remote(),
+    operations,
+    embedding: {},
+    vectorSyncScript: '',
+  });
+  const result = await adapter.__ext.tasks.vectorSync({ forceFull: true, maxEmbeddings: 7 });
+  assert.deepEqual(result, {
+    success: true,
+    opts: { forceFull: true, maxEmbeddings: 7 },
+    source: 'ats-adapter',
+  });
 });
 
 test('central vector helper receives --full and --max options', async () => {
