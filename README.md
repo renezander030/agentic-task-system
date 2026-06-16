@@ -37,7 +37,7 @@ curated, prioritized, deduplicated context, pre-filtered by the most reliable
 ranker there is — you.
 
 ATS makes that context agent-native. **Adapter, not migration**: keep the system
-you already live in (TickTick, Taskmaster, Beads, or an Obsidian vault today) and give
+you already live in (TickTick, Taskmaster, Beads, Obsidian, or OKF bundles today) and give
 your agent a fast, structured, two-way channel into it.
 
 ```bash
@@ -134,6 +134,7 @@ agentic-task-system/
 │   │   └── adapter-interface.md
 │   ├── adapter-ticktick/           # reference adapter (today)
 │   ├── adapter-obsidian/           # local markdown vault (shipped v0.4)
+│   ├── adapter-okf/                # Open Knowledge Format markdown bundles
 │   ├── adapter-taskmaster/          # local tagged tasks.json + native dependencies
 │   ├── adapter-beads/               # official bd JSON CLI + native dependency graph
 │   ├── adapter-notion/             # planned
@@ -184,6 +185,7 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 | --------------- | ----------------- | ------------------------------- |
 | `ticktick`      | reference         | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
 | `obsidian`      | shipped v0.4      | local markdown vault (files on disk) |
+| `okf`           | shipped v0.6      | Open Knowledge Format markdown bundle |
 | `taskmaster`    | shipped v0.6      | local `.taskmaster/tasks/tasks.json` |
 | `beads`         | shipped v0.6      | repository-local Beads through `bd --json` |
 | `notion`        | planned           | Notion API                      |
@@ -228,6 +230,11 @@ ats context my-repo bd-a1b2
 Already shipped: the [Obsidian adapter](packages/adapter-obsidian/README.md) is
 a worked example of the contract over plain markdown — point ATS at a vault with
 `ATS_OBSIDIAN_VAULT` and `ats find` / `ats open` / `ats links` just work.
+
+The [OKF adapter](packages/adapter-okf/README.md) exposes Open Knowledge Format
+bundles as ATS projects and concept documents. Point it at a bundle with
+`ATS_OKF_BUNDLE` to query vendor-neutral markdown/frontmatter knowledge catalogs
+through the same retrieval, graph, and MCP surface.
 
 The scaffold + conformance kit + interface doc make it a couple-hundred-line job for most well-behaved APIs.
 

@@ -17,7 +17,7 @@
     "prove:taskmaster": "node examples/taskmaster/prove.mjs --json",
     "prove:beads": "node examples/beads/prove.mjs --json",
     "prove:progress": "node packages/core/bench/progress.js --episodes=packages/core/bench/data/progress-episodes.jsonl --format=json",
-    "test:fast": "node --test --test-timeout=10000 packages/core/test/*.test.js packages/mcp/test/*.test.js packages/cli/test/*.test.js packages/adapter-obsidian/test/*.test.js packages/adapter-taskmaster/test/*.test.js packages/adapter-beads/test/*.test.js packages/adapter-ticktick/test/*.test.js packages/adapter-ticktick-cache/test/*.test.js",
+    "test:fast": "node --test --test-timeout=10000 packages/core/test/*.test.js packages/mcp/test/*.test.js packages/cli/test/*.test.js packages/adapter-obsidian/test/*.test.js packages/adapter-okf/test/*.test.js packages/adapter-taskmaster/test/*.test.js packages/adapter-beads/test/*.test.js packages/adapter-ticktick/test/*.test.js packages/adapter-ticktick-cache/test/*.test.js",
     "test": "npm run lint && npm run check:pii && npm run check:claims && npm run test:fast && npm run prove:intent -- --json && npm run prove:taskmaster && npm run prove:beads && npm run prove:progress"
   },
   "license": "MIT",

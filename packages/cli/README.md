@@ -29,6 +29,15 @@ export ATS_OBSIDIAN_VAULT="$HOME/Documents/MyVault"
 ats find "deployment runbook"
 ```
 
+Using an OKF knowledge bundle:
+
+```bash
+npm install -g @reneza/ats-cli @reneza/ats-adapter-okf
+ats config use okf
+export ATS_OKF_BUNDLE="$HOME/knowledge/ga4"
+ats find "event count"
+```
+
 Other stores (Notion / Things) are roadmap.
 
 Using Beads in a code repository:
