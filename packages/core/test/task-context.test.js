@@ -70,6 +70,52 @@ test('metadata block round-trips without changing the human-authored body', () =
   assert.equal(parseTaskMetadata(rewritten).intent.why, 'Reduce release risk');
 });
 
+test('links render as a human-readable Related deep-link section, not JSON', () => {
+  const content = writeTaskMetadata('Body paragraph.', {
+    intent: { outcome: 'Ship it' },
+    links: [{
+      type: 'depends-on',
+      projectId: 'p1',
+      taskId: 't1',
+      title: 'Auth spec',
+      url: 'https://ticktick.com/webapp/#p/p1/tasks/t1',
+    }],
+  });
+  // Human-readable Related section, with the deep link clickable.
+  assert.match(content, /## Related\n- depends-on: \[Auth spec\]\(https:\/\/ticktick\.com\/webapp\/#p\/p1\/tasks\/t1\)/);
+  // The machine block no longer carries the link IDs.
+  const block = content.match(/```ats\n([\s\S]*?)\n```/)[1];
+  assert.equal(JSON.parse(block).links, undefined);
+  assert.doesNotMatch(block, /t1/);
+  // Round-trips back into the in-memory link model.
+  const links = parseTaskMetadata(content).links;
+  assert.equal(links.length, 1);
+  assert.deepEqual(
+    [links[0].type, links[0].projectId, links[0].taskId, links[0].title],
+    ['depends-on', 'p1', 't1', 'Auth spec'],
+  );
+});
+
+test('legacy links inside the machine block are read and migrate to Related on write', () => {
+  const legacy = `Body.\n\n<!-- ats:context -->\n\`\`\`ats\n${JSON.stringify({
+    version: 1,
+    intent: { outcome: '', why: '', doneWhen: [], authority: [], constraints: [], approvalRequired: false },
+    lifecycle: { status: 'active' },
+    hierarchy: { kind: 'unspecified' },
+    security: { contentTrust: 'untrusted', allowedActions: [], allowedResources: [], deniedResources: [], approvalRequiredFor: [], approvers: [] },
+    links: [{ type: 'supports', projectId: 'p2', taskId: 't2', title: 'Old plan', url: 'demo://p2/t2' }],
+  }, null, 2)}\n\`\`\`\n<!-- /ats:context -->`;
+  // Back-compat read: legacy block links are still surfaced.
+  const before = parseTaskMetadata(legacy);
+  assert.deepEqual(before.links.map((l) => [l.type, l.projectId, l.taskId]), [['supports', 'p2', 't2']]);
+  // Migrate on write: link moves to Related, machine block drops it.
+  const migrated = writeTaskMetadata(legacy, before);
+  assert.match(migrated, /## Related\n- supports: \[Old plan\]\(demo:\/\/p2\/t2\)/);
+  const block = migrated.match(/```ats\n([\s\S]*?)\n```/)[1];
+  assert.doesNotMatch(block, /t2/);
+  assert.deepEqual(parseTaskMetadata(migrated).links.map((l) => [l.type, l.taskId]), [['supports', 't2']]);
+});
+
 test('malformed managed blocks fail closed', () => {
   assert.throws(
     () => parseTaskMetadata('<!-- ats:context -->\n```ats\n{bad}\n```\n<!-- /ats:context -->'),
