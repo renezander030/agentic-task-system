@@ -121,7 +121,12 @@ function scoreTask(task, query) {
 }
 
 function firstDescription(content, title) {
-  const plain = String(content || '').split('<!-- ats:context -->')[0].trim();
+  // Strip ATS metadata before reading the first human line: leading YAML
+  // frontmatter (current format) and the legacy `<!-- ats:context -->` block.
+  const plain = String(content || '')
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
+    .split('<!-- ats:context -->')[0]
+    .trim();
   return plain.split(/\n\s*\n|\n/).map((line) => line.trim()).find(Boolean) || title;
 }
 

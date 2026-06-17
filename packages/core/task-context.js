@@ -256,50 +256,199 @@ function mergeLinks(primary, secondary) {
   return merged;
 }
 
+// --- YAML frontmatter machine block (OKF-style) ------------------------------
+// The machine metadata (intent/lifecycle/security/hierarchy) lives in a YAML
+// frontmatter block at the top of the body, namespaced under an `ats:` key so it
+// coexists with any other frontmatter (e.g. an OKF bundle's title/tags). A
+// zero-dependency emitter/parser covers exactly the shapes ATS writes: nested
+// maps, block sequences of string scalars, booleans, and numbers.
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+
+function needsYamlQuote(s) {
+  return s === ''
+    || /^\s|\s$/.test(s)
+    || /^[-?:,[\]{}#&*!|>'"%@`]/.test(s)
+    || /:\s|\s#/.test(s)
+    || /[:#]$/.test(s)
+    || /[\n\r\t]/.test(s)
+    || /^(true|false|null|yes|no|on|off|~)$/i.test(s)
+    || /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s);
+}
+
+function emitYamlScalar(value) {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return String(value);
+  const s = String(value);
+  if (!needsYamlQuote(s)) return s;
+  const escaped = s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+  return `"${escaped}"`;
+}
+
+function emitYaml(value, indent) {
+  const pad = '  '.repeat(indent);
+  const out = [];
+  for (const [key, v] of Object.entries(value)) {
+    if (Array.isArray(v)) {
+      if (v.length === 0) { out.push(`${pad}${key}: []`); continue; }
+      out.push(`${pad}${key}:`);
+      const itemPad = '  '.repeat(indent + 1);
+      for (const item of v) out.push(`${itemPad}- ${emitYamlScalar(item)}`);
+    } else if (v && typeof v === 'object') {
+      out.push(`${pad}${key}:`);
+      out.push(emitYaml(v, indent + 1));
+    } else {
+      out.push(`${pad}${key}: ${emitYamlScalar(v)}`);
+    }
+  }
+  return out.join('\n');
+}
+
+function parseYamlScalar(raw) {
+  const s = raw.trim();
+  if (s === '') return '';
+  if (s === '[]') return [];
+  if (s === '{}') return {};
+  if (s.length >= 2 && s[0] === '"' && s[s.length - 1] === '"') {
+    return s.slice(1, -1).replace(/\\(.)/g, (_, c) => ({ n: '\n', r: '\r', t: '\t', '"': '"', '\\': '\\' }[c] ?? c));
+  }
+  if (s === 'true') return true;
+  if (s === 'false') return false;
+  if (s === 'null' || s === '~') return null;
+  if (/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return Number(s);
+  return s;
+}
+
+// Parse the controlled YAML subset ATS emits into a JS value.
+function parseYaml(text) {
+  const lines = String(text || '').split('\n').filter((l) => l.trim() !== '' && !/^\s*#/.test(l));
+  let idx = 0;
+  const indentOf = (l) => l.match(/^ */)[0].length;
+  function parseSeq(indent) {
+    const arr = [];
+    while (idx < lines.length) {
+      const line = lines[idx];
+      if (indentOf(line) < indent || !line.trim().startsWith('- ')) break;
+      arr.push(parseYamlScalar(line.trim().slice(2)));
+      idx++;
+    }
+    return arr;
+  }
+  function parseMap(indent) {
+    const obj = {};
+    while (idx < lines.length) {
+      const line = lines[idx];
+      const ind = indentOf(line);
+      if (ind < indent) break;
+      if (ind > indent || line.trim().startsWith('- ')) { idx++; continue; }
+      const m = line.trim().match(/^([^:]+):(?:\s+(.*))?$/);
+      if (!m) { idx++; continue; }
+      const key = m[1].trim();
+      const rest = (m[2] ?? '').trim();
+      idx++;
+      if (rest === '') {
+        const next = lines[idx];
+        if (next && indentOf(next) > indent) {
+          obj[key] = next.trim().startsWith('- ') ? parseSeq(indentOf(next)) : parseMap(indentOf(next));
+        } else {
+          obj[key] = null;
+        }
+      } else {
+        obj[key] = parseYamlScalar(rest);
+      }
+    }
+    return obj;
+  }
+  if (lines.length === 0) return {};
+  return parseMap(indentOf(lines[0]));
+}
+
+// Split frontmatter inner text into ordered top-level key segments (raw lines)
+// so foreign keys are preserved verbatim and only `ats:` is rewritten.
+function splitFrontmatterSegments(inner) {
+  const order = [];
+  const segments = {};
+  let current = null;
+  for (const line of inner.split('\n')) {
+    if (/^[^\s#][^:]*:/.test(line)) {
+      current = line.match(/^([^:]+):/)[1].trim();
+      order.push(current);
+      segments[current] = [line];
+    } else if (current) {
+      segments[current].push(line);
+    }
+  }
+  return { order, segments };
+}
+
 export function parseTaskMetadata(content = '') {
   const text = String(content || '');
-  const matches = [...text.matchAll(BLOCK_RE)];
-  const markerCount = text.split(BLOCK_START).length - 1;
-  const endCount = text.split(BLOCK_END).length - 1;
-  let parsed = {};
-  if (markerCount !== 0 || endCount !== 0) {
-    if (markerCount !== 1 || endCount !== 1 || matches.length !== 1) {
-      throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
-    }
-    try {
-      parsed = JSON.parse(matches[0][1]);
-    } catch (err) {
-      throw new Error(`Malformed ATS context JSON: ${err.message}`, { cause: err });
+  let machine = null;
+  let legacyLinks = [];
+
+  // Current format: YAML frontmatter, machine data under the `ats:` key.
+  const fm = text.match(FRONTMATTER_RE);
+  if (fm) {
+    const { segments } = splitFrontmatterSegments(fm[1]);
+    if (segments.ats) machine = parseYaml(segments.ats.slice(1).join('\n'));
+  }
+
+  // Back-compat: legacy `<!-- ats:context -->` JSON block.
+  if (machine === null) {
+    const matches = [...text.matchAll(BLOCK_RE)];
+    const markerCount = text.split(BLOCK_START).length - 1;
+    const endCount = text.split(BLOCK_END).length - 1;
+    if (markerCount !== 0 || endCount !== 0) {
+      if (markerCount !== 1 || endCount !== 1 || matches.length !== 1) {
+        throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
+      }
+      try {
+        machine = JSON.parse(matches[0][1]);
+      } catch (err) {
+        throw new Error(`Malformed ATS context JSON: ${err.message}`, { cause: err });
+      }
+      if (machine && typeof machine === 'object' && !Array.isArray(machine)) {
+        legacyLinks = Array.isArray(machine.links) ? machine.links : [];
+      }
     }
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return normalizeTaskMetadata(parsed);
-  }
-  // Links now live in the "## Related" section. Legacy links still inside the
-  // machine block are read for back-compat and migrate to Related on next write.
-  const legacyLinks = Array.isArray(parsed.links) ? parsed.links : [];
+
+  // Links live in the "## Related" section; legacy block links migrate on write.
   const relatedLinks = parseRelatedSection(text);
-  return normalizeTaskMetadata({ ...parsed, links: mergeLinks(relatedLinks, legacyLinks) });
+  if (machine !== null && (typeof machine !== 'object' || Array.isArray(machine))) {
+    return normalizeTaskMetadata(machine);
+  }
+  return normalizeTaskMetadata({ ...(machine || {}), links: mergeLinks(relatedLinks, legacyLinks) });
 }
 
 export function writeTaskMetadata(content = '', metadata = {}) {
   const text = String(content || '');
-  const current = [...text.matchAll(BLOCK_RE)];
+  // Guard a corrupted legacy block so we never silently overwrite it.
   const markerCount = text.split(BLOCK_START).length - 1;
   const endCount = text.split(BLOCK_END).length - 1;
-  if ((markerCount > 0 || endCount > 0) && (markerCount !== 1 || endCount !== 1 || current.length !== 1)) {
+  const blockMatches = [...text.matchAll(BLOCK_RE)];
+  if ((markerCount > 0 || endCount > 0) && (markerCount !== 1 || endCount !== 1 || blockMatches.length !== 1)) {
     throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
   }
   const normalized = normalizeTaskMetadata(metadata);
   const { links, ...machine } = normalized;
+
+  // Strip the legacy block, any existing frontmatter (preserving foreign keys),
+  // and the Related section, then rebuild: frontmatter, body, Related.
   let body = text.replace(BLOCK_RE, '');
+  const foreign = [];
+  const fm = body.match(FRONTMATTER_RE);
+  if (fm) {
+    const { order, segments } = splitFrontmatterSegments(fm[1]);
+    for (const key of order) if (key !== 'ats') foreign.push(segments[key].join('\n'));
+    body = body.slice(fm[0].length);
+  }
   body = stripRelatedSection(body).trimEnd();
-  const block = `${BLOCK_START}\n\`\`\`ats\n${JSON.stringify(machine, null, 2)}\n\`\`\`\n${BLOCK_END}`;
+
+  const frontmatter = `---\n${[...foreign, `ats:\n${emitYaml(machine, 1)}`].join('\n')}\n---`;
   const related = renderRelatedSection(links);
-  const parts = [];
+  const parts = [frontmatter];
   if (body) parts.push(body);
   if (related) parts.push(related);
-  parts.push(block);
   return parts.join('\n\n');
 }
 
