@@ -149,10 +149,10 @@ test('legacy links inside the machine block are read and migrate to Related on w
   assert.deepEqual(before.links.map((l) => [l.type, l.projectId, l.taskId]), [['supports', 'p2', 't2']]);
   // Migrate on write: link moves to Related, machine block drops it.
   const migrated = writeTaskMetadata(legacy, before);
-  assert.match(migrated, /^---\nats:\n/);
+  // Link-only metadata carries nothing non-default, so no frontmatter is written;
+  // the legacy JSON block is gone and the link lives in the Related section.
+  assert.doesNotMatch(migrated, /<!-- ats:context -->/);
   assert.match(migrated, /## Related\n- supports: \[Old plan\]\(demo:\/\/p2\/t2\)/);
-  const fmInner = migrated.match(/^---\n([\s\S]*?)\n---/)[1];
-  assert.doesNotMatch(fmInner, /t2/);
   assert.deepEqual(parseTaskMetadata(migrated).links.map((l) => [l.type, l.taskId]), [['supports', 't2']]);
 });
 
