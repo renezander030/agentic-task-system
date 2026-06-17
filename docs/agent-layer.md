@@ -4,40 +4,48 @@ Retrieval answers: "what looks relevant?" ATS's execution layer adds the informa
 
 ## Portable task metadata
 
-ATS stores one managed JSON block at the end of the normal task body, holding intent, lifecycle, hierarchy, and security. The human-authored markdown remains untouched. Because the block travels through the existing `content` field, every adapter that implements the six-method contract supports it without a backend migration.
+ATS stores its machine metadata — intent, lifecycle, hierarchy, and security — as YAML frontmatter at the top of the task body, namespaced under an `ats:` key so it coexists with any other frontmatter (e.g. an OKF bundle's `title`/`tags`, which ATS preserves verbatim). The human-authored markdown remains untouched. Because the frontmatter travels through the existing `content` field, every adapter that implements the six-method contract supports it without a backend migration.
 
 Typed cross-task links live separately, in a human-readable `## Related` section near the bottom of the body, so a person reading the task in their storage app sees clickable deep links instead of opaque IDs (and the agent reads the same lines).
 
-```json
-{
-  "version": 1,
-  "intent": {
-    "outcome": "Publish a verified release",
-    "why": "Reduce rollout risk",
-    "doneWhen": ["Checks pass", "Rollback is rehearsed"],
-    "authority": ["Approved decision record"],
-    "constraints": ["No production credentials in examples"],
-    "approvalRequired": true
-  },
-  "lifecycle": {
-    "status": "active",
-    "validUntil": "2026-12-31T23:59:59Z"
-  },
-  "hierarchy": {
-    "kind": "task"
-  },
-  "security": {
-    "contentTrust": "untrusted",
-    "allowedActions": ["read", "write"],
-    "allowedResources": ["repo://sample-release/*"],
-    "deniedResources": ["repo://sample-release/private/*"],
-    "approvalRequiredFor": ["write"],
-    "approvers": ["sample-release-owner"]
-  }
-}
+```markdown
+---
+ats:
+  version: 1
+  intent:
+    outcome: Publish a verified release
+    why: Reduce rollout risk
+    doneWhen:
+      - Checks pass
+      - Rollback is rehearsed
+    authority:
+      - Approved decision record
+    constraints:
+      - No production credentials in examples
+    approvalRequired: true
+  lifecycle:
+    status: active
+    validUntil: 2026-12-31T23:59:59Z
+  hierarchy:
+    kind: task
+  security:
+    contentTrust: untrusted
+    allowedActions:
+      - read
+      - write
+    allowedResources:
+      - repo://sample-release/*
+    deniedResources:
+      - repo://sample-release/private/*
+    approvalRequiredFor:
+      - write
+    approvers:
+      - sample-release-owner
+---
+Human-authored task body.
 ```
 
-Malformed managed blocks fail closed: ATS refuses to overwrite them until they are repaired.
+Metadata written in the earlier `<!-- ats:context -->` JSON block is still read for backward compatibility and migrates to frontmatter on the next write. A malformed legacy block fails closed: ATS refuses to overwrite it until it is repaired.
 
 Typed links render in the `## Related` section as `- <type>: [<title>](<deep-link>)`, one bullet per link:
 

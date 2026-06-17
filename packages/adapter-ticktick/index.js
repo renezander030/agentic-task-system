@@ -52,8 +52,12 @@ export default {
   updateTask: async (projectId, taskId, patch) =>
     contractTask((await tasks.update(projectId, taskId, patch)).task, { ...patch, projectId }),
 
-  urlFor: ({ projectId, taskId }) =>
-    `https://ticktick.com/webapp/#p/${projectId}/tasks/${taskId}`,
+  urlFor: ({ projectId, taskId }) => {
+    // The Inbox routes under the literal `inbox` slug in the web app, not its
+    // API id ("inbox<userid>"). Task ids must be the full 24-hex form to resolve.
+    const project = /^inbox/i.test(String(projectId)) ? 'inbox' : projectId;
+    return `https://ticktick.com/webapp/#p/${project}/tasks/${taskId}`;
+  },
 
   // --- Optional ---
   searchByQuery: async (query) => (await tasks.search(query)).tasks.map((task) => contractTask(task)),

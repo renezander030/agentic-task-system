@@ -442,7 +442,7 @@ Write an adapter for any store:
 }
 
 export function getAgentLayerHelp(command) {
-  const common = `Portable metadata is stored in a managed JSON block inside the task body,
+  const common = `Portable metadata is stored as YAML frontmatter (under an "ats:" key) at the top of the task body,
 so these commands work through every conforming ATS adapter.`;
   const help = {
     intent: `ats intent - Read or set task intent

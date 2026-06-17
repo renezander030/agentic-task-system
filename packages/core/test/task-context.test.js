@@ -59,7 +59,8 @@ test('metadata block round-trips without changing the human-authored body', () =
   const content = writeTaskMetadata('Keep this paragraph.\n', {
     intent: { outcome: 'Ship a verified release', doneWhen: ['Smoke test passes'] },
   });
-  assert.match(content, /^Keep this paragraph\.\n\n<!-- ats:context -->/);
+  assert.match(content, /^---\nats:\n/);
+  assert.match(content, /\n---\n\nKeep this paragraph\./);
   const metadata = parseTaskMetadata(content);
   assert.equal(metadata.intent.outcome, 'Ship a verified release');
   assert.deepEqual(metadata.intent.doneWhen, ['Smoke test passes']);
@@ -83,10 +84,10 @@ test('links render as a human-readable Related deep-link section, not JSON', () 
   });
   // Human-readable Related section, with the deep link clickable.
   assert.match(content, /## Related\n- depends-on: \[Auth spec\]\(https:\/\/ticktick\.com\/webapp\/#p\/p1\/tasks\/t1\)/);
-  // The machine block no longer carries the link IDs.
-  const block = content.match(/```ats\n([\s\S]*?)\n```/)[1];
-  assert.equal(JSON.parse(block).links, undefined);
-  assert.doesNotMatch(block, /t1/);
+  // The YAML frontmatter machine block carries no link IDs.
+  const fmInner = content.match(/^---\n([\s\S]*?)\n---/)[1];
+  assert.match(fmInner, /ats:/);
+  assert.doesNotMatch(fmInner, /t1/);
   // Round-trips back into the in-memory link model.
   const links = parseTaskMetadata(content).links;
   assert.equal(links.length, 1);
@@ -94,6 +95,24 @@ test('links render as a human-readable Related deep-link section, not JSON', () 
     [links[0].type, links[0].projectId, links[0].taskId, links[0].title],
     ['depends-on', 'p1', 't1', 'Auth spec'],
   );
+});
+
+test('a link uses the target\'s full ids and the adapter deep-link form', async () => {
+  const store = {
+    src: { id: 'srcfull0000000000000000', projectId: 'inbox127571151', title: 'Source', content: '' },
+    tgt: { id: '6a3278c68f0825a68248863f', projectId: 'inbox127571151', title: 'Target', content: '' },
+  };
+  const adapter = {
+    getTask: async (_p, t) => store[t],
+    updateTask: async (_p, t, patch) => { store[t] = { ...store[t], ...patch }; return store[t]; },
+    urlFor: ({ projectId, taskId }) =>
+      `https://ticktick.com/webapp/#p/${/^inbox/i.test(projectId) ? 'inbox' : projectId}/tasks/${taskId}`,
+  };
+  // Add the link using a SHORT target id; it must store the full id + inbox slug.
+  await addTaskLink(adapter, { projectId: 'inbox127571151', taskId: 'src' }, { projectId: 'inbox127571151', taskId: 'tgt' }, 'depends-on');
+  const link = parseTaskMetadata(store.src.content).links[0];
+  assert.equal(link.taskId, '6a3278c68f0825a68248863f');
+  assert.equal(link.url, 'https://ticktick.com/webapp/#p/inbox/tasks/6a3278c68f0825a68248863f');
 });
 
 test('a link title containing brackets stays well-formed and round-trips', () => {
@@ -130,10 +149,56 @@ test('legacy links inside the machine block are read and migrate to Related on w
   assert.deepEqual(before.links.map((l) => [l.type, l.projectId, l.taskId]), [['supports', 'p2', 't2']]);
   // Migrate on write: link moves to Related, machine block drops it.
   const migrated = writeTaskMetadata(legacy, before);
+  assert.match(migrated, /^---\nats:\n/);
   assert.match(migrated, /## Related\n- supports: \[Old plan\]\(demo:\/\/p2\/t2\)/);
-  const block = migrated.match(/```ats\n([\s\S]*?)\n```/)[1];
-  assert.doesNotMatch(block, /t2/);
+  const fmInner = migrated.match(/^---\n([\s\S]*?)\n---/)[1];
+  assert.doesNotMatch(fmInner, /t2/);
   assert.deepEqual(parseTaskMetadata(migrated).links.map((l) => [l.type, l.taskId]), [['supports', 't2']]);
+});
+
+test('the YAML frontmatter machine block round-trips structured fields and special characters', () => {
+  const content = writeTaskMetadata('Body.', {
+    intent: {
+      outcome: 'Ship: a verified release',
+      why: 'Reduce "rollout" risk',
+      doneWhen: ['Checks pass', 'Rollback rehearsed'],
+      authority: ['Approved decision'],
+      constraints: ['No prod creds'],
+      approvalRequired: true,
+    },
+    lifecycle: { status: 'active', validUntil: '2026-12-31' },
+    hierarchy: { kind: 'task' },
+    security: {
+      contentTrust: 'mixed',
+      allowedActions: ['read', 'write'],
+      allowedResources: ['repo://demo/*'],
+      deniedResources: ['repo://demo/private/*'],
+      approvalRequiredFor: ['write'],
+      approvers: ['owner@example.com'],
+    },
+  });
+  assert.match(content, /^---\nats:\n/);
+  const back = parseTaskMetadata(content);
+  assert.equal(back.intent.outcome, 'Ship: a verified release');
+  assert.equal(back.intent.why, 'Reduce "rollout" risk');
+  assert.deepEqual(back.intent.doneWhen, ['Checks pass', 'Rollback rehearsed']);
+  assert.equal(back.intent.approvalRequired, true);
+  assert.equal(back.lifecycle.validUntil, '2026-12-31');
+  assert.equal(back.hierarchy.kind, 'task');
+  assert.equal(back.security.contentTrust, 'mixed');
+  assert.deepEqual(back.security.allowedResources, ['repo://demo/*']);
+  assert.deepEqual(back.security.deniedResources, ['repo://demo/private/*']);
+  assert.deepEqual(back.security.approvers, ['owner@example.com']);
+});
+
+test('foreign frontmatter keys are preserved when ATS rewrites its block', () => {
+  const content = '---\ntitle: My Note\ntags:\n  - alpha\n  - beta\n---\nBody text.';
+  const out = writeTaskMetadata(content, { intent: { outcome: 'Do the thing' } });
+  assert.match(out, /title: My Note/);
+  assert.match(out, /- alpha/);
+  assert.match(out, /\nats:\n/);
+  assert.match(out, /Body text\./);
+  assert.equal(parseTaskMetadata(out).intent.outcome, 'Do the thing');
 });
 
 test('malformed managed blocks fail closed', () => {
