@@ -22,6 +22,17 @@ const BLOCK_START = '<!-- ats:context -->';
 const BLOCK_END = '<!-- /ats:context -->';
 const BLOCK_RE = /<!-- ats:context -->\r?\n```ats\r?\n([\s\S]*?)\r?\n```\r?\n<!-- \/ats:context -->/g;
 
+// Typed cross-task links live in a human-readable "## Related" section near the
+// bottom of the task body — one bullet per link, `- <type>: [<title>](<url>)` —
+// instead of inside the machine block. The link text and deep-link URL serve a
+// human reader (and Obsidian-style backlink navigation); the agent reads the
+// same lines. projectId/taskId are recovered from the URL, so the in-memory
+// link model and everything downstream (graph/context/hierarchy) is unchanged.
+// The machine block keeps only intent/lifecycle/security/hierarchy.
+const RELATED_HEADING = '## Related';
+const RELATED_SECTION_RE = /(?:^|\n)##\s+Related[ \t]*\n([\s\S]*?)(?=\n#{1,6}\s|\n<!-- ats:context -->|$)/;
+const RELATED_LINE_RE = /^-\s+([a-z][a-z-]*):\s*\[([^\]]*)\]\(([^)]+)\)\s*$/;
+
 const emptyMetadata = () => ({
   version: TASK_CONTEXT_VERSION,
   intent: {
@@ -175,22 +186,94 @@ export function normalizeTaskMetadata(value = {}) {
   };
 }
 
+// Recover { projectId, taskId } from a link URL. Handles the TickTick native
+// deep link (…/#p/<proj>/tasks/<task>) and the generic <scheme>://<proj>/<task>
+// form adapters emit from urlFor(). Returns null when neither matches — such a
+// link stays visible to a human but is not added to the typed-link model.
+function parseRef(url) {
+  if (typeof url !== 'string' || !url) return null;
+  // TickTick native deep link: …/#p/<projectId>/tasks/<taskId>
+  let m = url.match(/#p\/([^/\s]+)\/tasks\/([^/?#\s)]+)/);
+  if (m) return { projectId: m[1], taskId: m[2] };
+  // Generic adapter deep link ending in …/<projectId>/<taskId>.
+  m = url.match(/^[a-z][a-z0-9+.-]*:\/\/(.+)$/i);
+  if (!m) return null;
+  const segments = m[1].split(/[?#]/)[0].split('/').map((s) => s.trim()).filter(Boolean);
+  if (segments.length < 2) return null;
+  return { projectId: segments[segments.length - 2], taskId: segments[segments.length - 1] };
+}
+
+function parseRelatedSection(text) {
+  const section = String(text || '').match(RELATED_SECTION_RE);
+  if (!section) return [];
+  const links = [];
+  for (const raw of section[1].split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(RELATED_LINE_RE);
+    if (!m) continue;
+    const [, type, title, url] = m;
+    if (!LINK_TYPES.includes(type)) continue;
+    const ref = parseRef(url);
+    if (!ref) continue;
+    links.push({ type, projectId: ref.projectId, taskId: ref.taskId, title: title.trim(), url: url.trim() });
+  }
+  return links;
+}
+
+function renderRelatedSection(links) {
+  if (!links || links.length === 0) return '';
+  const lines = links.map((link) => {
+    // Prefer the adapter's real deep link; fall back to a parseable ref so a
+    // link added without a url (e.g. a direct writeTaskMetadata call) still
+    // round-trips its projectId/taskId.
+    const href = link.url || `ats://task/${link.projectId}/${link.taskId}`;
+    return `- ${link.type}: [${link.title || link.taskId}](${href})`;
+  });
+  return `${RELATED_HEADING}\n${lines.join('\n')}`;
+}
+
+function stripRelatedSection(text) {
+  return String(text || '').replace(RELATED_SECTION_RE, (match) => (match.startsWith('\n') ? '\n' : ''));
+}
+
+function mergeLinks(primary, secondary) {
+  const merged = [];
+  const seen = new Set();
+  for (const link of [...primary, ...secondary]) {
+    if (!link || typeof link !== 'object') continue;
+    const key = `${link.type}|${link.projectId}|${link.taskId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(link);
+  }
+  return merged;
+}
+
 export function parseTaskMetadata(content = '') {
   const text = String(content || '');
   const matches = [...text.matchAll(BLOCK_RE)];
   const markerCount = text.split(BLOCK_START).length - 1;
   const endCount = text.split(BLOCK_END).length - 1;
-  if (markerCount === 0 && endCount === 0) return emptyMetadata();
-  if (markerCount !== 1 || endCount !== 1 || matches.length !== 1) {
-    throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
+  let parsed = {};
+  if (markerCount !== 0 || endCount !== 0) {
+    if (markerCount !== 1 || endCount !== 1 || matches.length !== 1) {
+      throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
+    }
+    try {
+      parsed = JSON.parse(matches[0][1]);
+    } catch (err) {
+      throw new Error(`Malformed ATS context JSON: ${err.message}`, { cause: err });
+    }
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(matches[0][1]);
-  } catch (err) {
-    throw new Error(`Malformed ATS context JSON: ${err.message}`, { cause: err });
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return normalizeTaskMetadata(parsed);
   }
-  return normalizeTaskMetadata(parsed);
+  // Links now live in the "## Related" section. Legacy links still inside the
+  // machine block are read for back-compat and migrate to Related on next write.
+  const legacyLinks = Array.isArray(parsed.links) ? parsed.links : [];
+  const relatedLinks = parseRelatedSection(text);
+  return normalizeTaskMetadata({ ...parsed, links: mergeLinks(relatedLinks, legacyLinks) });
 }
 
 export function writeTaskMetadata(content = '', metadata = {}) {
@@ -202,9 +285,16 @@ export function writeTaskMetadata(content = '', metadata = {}) {
     throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
   }
   const normalized = normalizeTaskMetadata(metadata);
-  const body = text.replace(BLOCK_RE, '').trimEnd();
-  const block = `${BLOCK_START}\n\`\`\`ats\n${JSON.stringify(normalized, null, 2)}\n\`\`\`\n${BLOCK_END}`;
-  return body ? `${body}\n\n${block}` : block;
+  const { links, ...machine } = normalized;
+  let body = text.replace(BLOCK_RE, '');
+  body = stripRelatedSection(body).trimEnd();
+  const block = `${BLOCK_START}\n\`\`\`ats\n${JSON.stringify(machine, null, 2)}\n\`\`\`\n${BLOCK_END}`;
+  const related = renderRelatedSection(links);
+  const parts = [];
+  if (body) parts.push(body);
+  if (related) parts.push(related);
+  parts.push(block);
+  return parts.join('\n\n');
 }
 
 export function evaluateLifecycle(metadata, { now = new Date(), supersededBy = [] } = {}) {

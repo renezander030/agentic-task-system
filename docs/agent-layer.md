@@ -4,7 +4,9 @@ Retrieval answers: "what looks relevant?" ATS's execution layer adds the informa
 
 ## Portable task metadata
 
-ATS stores one managed JSON block at the end of the normal task body. The human-authored markdown remains untouched. Because the block travels through the existing `content` field, every adapter that implements the six-method contract supports it without a backend migration.
+ATS stores one managed JSON block at the end of the normal task body, holding intent, lifecycle, hierarchy, and security. The human-authored markdown remains untouched. Because the block travels through the existing `content` field, every adapter that implements the six-method contract supports it without a backend migration.
+
+Typed cross-task links live separately, in a human-readable `## Related` section near the bottom of the body, so a person reading the task in their storage app sees clickable deep links instead of opaque IDs (and the agent reads the same lines).
 
 ```json
 {
@@ -31,18 +33,21 @@ ATS stores one managed JSON block at the end of the normal task body. The human-
     "deniedResources": ["repo://sample-release/private/*"],
     "approvalRequiredFor": ["write"],
     "approvers": ["sample-release-owner"]
-  },
-  "links": [
-    {
-      "type": "decision",
-      "projectId": "demo",
-      "taskId": "decision-17"
-    }
-  ]
+  }
 }
 ```
 
 Malformed managed blocks fail closed: ATS refuses to overwrite them until they are repaired.
+
+Typed links render in the `## Related` section as `- <type>: [<title>](<deep-link>)`, one bullet per link:
+
+```markdown
+## Related
+- decision: [Approved release decision](https://ticktick.com/webapp/#p/demo/tasks/decision-17)
+- depends-on: [Auth spec](https://ticktick.com/webapp/#p/demo/tasks/auth-spec)
+```
+
+ATS reconstructs each link's `projectId`/`taskId` from the deep-link URL, so `ats link`, `ats graph`, and `ats context` are unchanged. Links written before this format are read from the legacy JSON block for backward compatibility and migrate to the `## Related` section on the next write.
 
 ## CLI
 
