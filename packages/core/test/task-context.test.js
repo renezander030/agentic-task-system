@@ -96,6 +96,24 @@ test('links render as a human-readable Related deep-link section, not JSON', () 
   );
 });
 
+test('a link uses the target\'s full ids and the adapter deep-link form', async () => {
+  const store = {
+    src: { id: 'srcfull0000000000000000', projectId: 'inbox127571151', title: 'Source', content: '' },
+    tgt: { id: '6a3278c68f0825a68248863f', projectId: 'inbox127571151', title: 'Target', content: '' },
+  };
+  const adapter = {
+    getTask: async (_p, t) => store[t],
+    updateTask: async (_p, t, patch) => { store[t] = { ...store[t], ...patch }; return store[t]; },
+    urlFor: ({ projectId, taskId }) =>
+      `https://ticktick.com/webapp/#p/${/^inbox/i.test(projectId) ? 'inbox' : projectId}/tasks/${taskId}`,
+  };
+  // Add the link using a SHORT target id; it must store the full id + inbox slug.
+  await addTaskLink(adapter, { projectId: 'inbox127571151', taskId: 'src' }, { projectId: 'inbox127571151', taskId: 'tgt' }, 'depends-on');
+  const link = parseTaskMetadata(store.src.content).links[0];
+  assert.equal(link.taskId, '6a3278c68f0825a68248863f');
+  assert.equal(link.url, 'https://ticktick.com/webapp/#p/inbox/tasks/6a3278c68f0825a68248863f');
+});
+
 test('a link title containing brackets stays well-formed and round-trips', () => {
   const content = writeTaskMetadata('Body.', {
     links: [{

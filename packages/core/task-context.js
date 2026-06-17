@@ -394,12 +394,17 @@ function taskRef(value, field) {
 }
 
 function linkedRef(adapter, target, type, targetTask, createdAt = new Date().toISOString()) {
+  // Use the resolved task's canonical ids (the adapter contract returns full
+  // ids), not the raw input ref which may be a short id — the deep link must
+  // carry full ids to resolve in the storage app.
+  const projectId = targetTask.projectId || target.projectId;
+  const taskId = targetTask.id || target.taskId;
   return {
     type,
-    projectId: target.projectId,
-    taskId: target.taskId,
+    projectId,
+    taskId,
     title: targetTask.title,
-    url: adapter.urlFor(target),
+    url: adapter.urlFor({ projectId, taskId }),
     createdAt,
   };
 }
@@ -579,35 +584,35 @@ export async function checkTaskAccess(adapter, projectId, taskId, request, optio
 export async function addTaskLink(adapter, source, target, type) {
   if (!LINK_TYPES.includes(type)) throw new Error(`Link type must be one of: ${LINK_TYPES.join(', ')}.`);
   const targetTask = await adapter.getTask(target.projectId, target.taskId);
+  const ref = linkedRef(adapter, target, type, targetTask);
   return updateMetadata(adapter, source.projectId, source.taskId, (metadata) => {
     const duplicate = metadata.links.some((link) =>
-      link.type === type && link.projectId === target.projectId && link.taskId === target.taskId
+      link.type === ref.type && link.projectId === ref.projectId && link.taskId === ref.taskId
     );
     if (duplicate) return metadata;
-    return {
-      ...metadata,
-      links: [
-        ...metadata.links,
-        {
-          type,
-          projectId: target.projectId,
-          taskId: target.taskId,
-          title: targetTask.title,
-          url: adapter.urlFor(target),
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    };
+    return { ...metadata, links: [...metadata.links, ref] };
   });
 }
 
 export async function removeTaskLink(adapter, source, target, type) {
   if (!LINK_TYPES.includes(type)) throw new Error(`Link type must be one of: ${LINK_TYPES.join(', ')}.`);
+  // Resolve the target to its canonical full ids so a short-id argument still
+  // matches links stored with full ids. Fall back to the raw ref if the target
+  // can no longer be fetched (e.g. it was deleted).
+  let projectId = target.projectId;
+  let taskId = target.taskId;
+  try {
+    const targetTask = await adapter.getTask(target.projectId, target.taskId);
+    projectId = targetTask.projectId || projectId;
+    taskId = targetTask.id || taskId;
+  } catch {
+    // keep the ids as given
+  }
   let removed = false;
   const result = await updateMetadata(adapter, source.projectId, source.taskId, (metadata) => ({
     ...metadata,
     links: metadata.links.filter((link) => {
-      const matches = link.type === type && link.projectId === target.projectId && link.taskId === target.taskId;
+      const matches = link.type === type && link.projectId === projectId && link.taskId === taskId;
       if (matches) removed = true;
       return !matches;
     }),
