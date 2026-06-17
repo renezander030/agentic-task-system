@@ -31,7 +31,9 @@ const BLOCK_RE = /<!-- ats:context -->\r?\n```ats\r?\n([\s\S]*?)\r?\n```\r?\n<!-
 // The machine block keeps only intent/lifecycle/security/hierarchy.
 const RELATED_HEADING = '## Related';
 const RELATED_SECTION_RE = /(?:^|\n)##\s+Related[ \t]*\n([\s\S]*?)(?=\n#{1,6}\s|\n<!-- ats:context -->|$)/;
-const RELATED_LINE_RE = /^-\s+([a-z][a-z-]*):\s*\[([^\]]*)\]\(([^)]+)\)\s*$/;
+// Title capture is greedy so a label containing `]` (e.g. a task titled
+// "Spec [draft]") still round-trips by backtracking to the final `](url)`.
+const RELATED_LINE_RE = /^-\s+([a-z][a-z-]*):\s*\[(.*)\]\(([^)\s]+)\)\s*$/;
 
 const emptyMetadata = () => ({
   version: TASK_CONTEXT_VERSION,
@@ -228,7 +230,11 @@ function renderRelatedSection(links) {
     // link added without a url (e.g. a direct writeTaskMetadata call) still
     // round-trips its projectId/taskId.
     const href = link.url || `ats://task/${link.projectId}/${link.taskId}`;
-    return `- ${link.type}: [${link.title || link.taskId}](${href})`;
+    // Bracket chars in the label would break the markdown link, so soften them
+    // to parens — keeps the link well-formed and clickable. The URL carries the
+    // canonical id, so the display label can be lossy.
+    const label = String(link.title || link.taskId).replace(/[[\]]/g, (ch) => (ch === '[' ? '(' : ')'));
+    return `- ${link.type}: [${label}](${href})`;
   });
   return `${RELATED_HEADING}\n${lines.join('\n')}`;
 }

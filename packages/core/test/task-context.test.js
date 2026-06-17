@@ -96,6 +96,26 @@ test('links render as a human-readable Related deep-link section, not JSON', () 
   );
 });
 
+test('a link title containing brackets stays well-formed and round-trips', () => {
+  const content = writeTaskMetadata('Body.', {
+    links: [{
+      type: 'depends-on',
+      projectId: 'p1',
+      taskId: 't1',
+      title: 'Spec [draft]',
+      url: 'https://ticktick.com/webapp/#p/p1/tasks/t1',
+    }],
+  });
+  // Bracket chars in the label are softened so the markdown link is well-formed.
+  assert.match(content, /## Related\n- depends-on: \[Spec \(draft\)\]\(https:\/\/ticktick\.com\/webapp\/#p\/p1\/tasks\/t1\)/);
+  // And it still round-trips into the typed-link model.
+  const links = parseTaskMetadata(content).links;
+  assert.deepEqual(links.map((l) => [l.type, l.projectId, l.taskId]), [['depends-on', 'p1', 't1']]);
+  // Greedy parse also recovers a label that already contains a stray `]`.
+  const recovered = parseTaskMetadata('## Related\n- supports: [Old [v2]](demo://p2/t2)');
+  assert.deepEqual(recovered.links.map((l) => [l.type, l.taskId]), [['supports', 't2']]);
+});
+
 test('legacy links inside the machine block are read and migrate to Related on write', () => {
   const legacy = `Body.\n\n<!-- ats:context -->\n\`\`\`ats\n${JSON.stringify({
     version: 1,
