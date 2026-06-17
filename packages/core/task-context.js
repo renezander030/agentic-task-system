@@ -380,6 +380,40 @@ function splitFrontmatterSegments(inner) {
   return { order, segments };
 }
 
+// Reduce normalized metadata to only the fields that differ from their
+// defaults, so the frontmatter stays small. Returns {} when nothing meaningful
+// is set — the caller then omits the `ats:` block (and frontmatter) entirely.
+function minimalMachine(m) {
+  const intent = {};
+  if (m.intent.outcome) intent.outcome = m.intent.outcome;
+  if (m.intent.why) intent.why = m.intent.why;
+  if (m.intent.doneWhen.length) intent.doneWhen = m.intent.doneWhen;
+  if (m.intent.authority.length) intent.authority = m.intent.authority;
+  if (m.intent.constraints.length) intent.constraints = m.intent.constraints;
+  if (m.intent.approvalRequired) intent.approvalRequired = true;
+
+  const lifecycle = {};
+  if (m.lifecycle.status && m.lifecycle.status !== 'active') lifecycle.status = m.lifecycle.status;
+  if (m.lifecycle.validFrom) lifecycle.validFrom = m.lifecycle.validFrom;
+  if (m.lifecycle.validUntil) lifecycle.validUntil = m.lifecycle.validUntil;
+
+  const security = {};
+  if (m.security.contentTrust && m.security.contentTrust !== 'untrusted') security.contentTrust = m.security.contentTrust;
+  if (m.security.allowedActions.length) security.allowedActions = m.security.allowedActions;
+  if (m.security.allowedResources.length) security.allowedResources = m.security.allowedResources;
+  if (m.security.deniedResources.length) security.deniedResources = m.security.deniedResources;
+  if (m.security.approvalRequiredFor.length) security.approvalRequiredFor = m.security.approvalRequiredFor;
+  if (m.security.approvers.length) security.approvers = m.security.approvers;
+
+  const out = {};
+  if (Object.keys(intent).length) out.intent = intent;
+  if (Object.keys(lifecycle).length) out.lifecycle = lifecycle;
+  if (m.hierarchy.kind && m.hierarchy.kind !== 'unspecified') out.hierarchy = { kind: m.hierarchy.kind };
+  if (Object.keys(security).length) out.security = security;
+  if (Object.keys(out).length === 0) return {};
+  return { version: TASK_CONTEXT_VERSION, ...out };
+}
+
 export function parseTaskMetadata(content = '') {
   const text = String(content || '');
   let machine = null;
@@ -430,7 +464,8 @@ export function writeTaskMetadata(content = '', metadata = {}) {
     throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
   }
   const normalized = normalizeTaskMetadata(metadata);
-  const { links, ...machine } = normalized;
+  const { links } = normalized;
+  const minimal = minimalMachine(normalized);
 
   // Strip the legacy block, any existing frontmatter (preserving foreign keys),
   // and the Related section, then rebuild: frontmatter, body, Related.
@@ -444,9 +479,14 @@ export function writeTaskMetadata(content = '', metadata = {}) {
   }
   body = stripRelatedSection(body).trimEnd();
 
-  const frontmatter = `---\n${[...foreign, `ats:\n${emitYaml(machine, 1)}`].join('\n')}\n---`;
+  // Only emit frontmatter when there is foreign frontmatter to preserve or
+  // non-default ATS metadata to record. A link-only task carries none.
+  const fmParts = [...foreign];
+  if (Object.keys(minimal).length) fmParts.push(`ats:\n${emitYaml(minimal, 1)}`);
+  const frontmatter = fmParts.length ? `---\n${fmParts.join('\n')}\n---` : '';
   const related = renderRelatedSection(links);
-  const parts = [frontmatter];
+  const parts = [];
+  if (frontmatter) parts.push(frontmatter);
   if (body) parts.push(body);
   if (related) parts.push(related);
   return parts.join('\n\n');

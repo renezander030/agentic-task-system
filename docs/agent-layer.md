@@ -45,6 +45,8 @@ ats:
 Human-authored task body.
 ```
 
+Only fields that differ from their defaults are written, so the block stays small. Empty lists, `status: active`, `kind: unspecified`, `contentTrust: untrusted`, and `approvalRequired: false` are omitted; a task with no ATS metadata and only links carries no frontmatter at all — just its body and `## Related` section.
+
 Metadata written in the earlier `<!-- ats:context -->` JSON block is still read for backward compatibility and migrates to frontmatter on the next write. A malformed legacy block fails closed: ATS refuses to overwrite it until it is repaired.
 
 Typed links render in the `## Related` section as `- <type>: [<title>](<deep-link>)`, one bullet per link:
