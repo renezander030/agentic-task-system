@@ -1,6 +1,13 @@
 
 # Changelog
 
+## 0.8.0 - Correct deep links and YAML frontmatter metadata
+
+Released 2026-06-17.
+
+- Fixed Related deep links that used a short task id and the Inbox's API id, so they did not resolve in the web app. Links are now built from the target task's canonical full ids, and the Inbox routes under its literal `inbox` slug. `removeTaskLink` resolves a short-id argument to full ids so it still matches stored links.
+- Replaced the `<!-- ats:context -->` JSON machine block with OKF-style YAML frontmatter at the top of the task body, namespaced under an `ats:` key so it coexists with any other frontmatter (an OKF bundle's `title`/`tags` are preserved verbatim). A zero-dependency emitter/parser covers the shapes ATS writes. Metadata written in the previous JSON block is still read for backward compatibility and migrates to frontmatter on the next write.
+
 ## 0.7.1 - Bracket-safe Related links
 
 Released 2026-06-17.
