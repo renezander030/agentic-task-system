@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-adapter-beads",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Beads adapter for Agentic Task System using the official bd JSON CLI over repository-local Dolt state.",
   "type": "module",
   "main": "index.js",
@@ -13,7 +13,7 @@
     "prepublishOnly": "node ../../scripts/check-no-pii.mjs --self"
   },
   "peerDependencies": {
-    "@reneza/ats-core": "^0.8.0"
+    "@reneza/ats-core": "^0.8.1"
   },
   "repository": {
     "type": "git",

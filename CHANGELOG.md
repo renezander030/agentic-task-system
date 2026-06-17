@@ -1,6 +1,12 @@
 
 # Changelog
 
+## 0.8.1 - Minimal frontmatter
+
+Released 2026-06-17.
+
+- The `ats:` frontmatter now writes only fields that differ from their defaults; empty lists, `status: active`, `kind: unspecified`, `contentTrust: untrusted`, and `approvalRequired: false` are omitted. A task with no ATS metadata and only links carries no frontmatter at all — just its body and `## Related` section. Round-trip is unchanged (missing fields fill from defaults on read).
+
 ## 0.8.0 - Correct deep links and YAML frontmatter metadata
 
 Released 2026-06-17.
