@@ -1,6 +1,12 @@
 
 # Changelog
 
+## 0.7.1 - Bracket-safe Related links
+
+Released 2026-06-17.
+
+- Fixed a link whose target title contains brackets (e.g. `Spec [draft]`) rendering as a malformed `## Related` markdown link and silently dropping from the typed-link model. Bracket chars in the display label are softened to parens, and the parser recovers labels that already contain a stray bracket.
+
 ## 0.7.0 - Local-first trunks and human-readable task links
 
 Released 2026-06-17.
