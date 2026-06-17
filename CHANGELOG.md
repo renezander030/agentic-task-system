@@ -1,6 +1,14 @@
 
 # Changelog
 
+## 0.7.0 - Local-first trunks and human-readable task links
+
+Released 2026-06-17.
+
+- Capture-time trunk enrichment now reads the Trunk Catalog from the synced on-disk corpus cache first and only falls back to a live fetch when the cache is missing, stale, or does not yet contain the catalog. The common path makes no network round-trip and the canonical note remains the source of truth.
+- Moved typed cross-task links out of the managed JSON block into a human-readable `## Related` deep-link section near the bottom of the task body. A person reading the task sees clickable deep links instead of opaque IDs, and the agent reads the same lines. `projectId`/`taskId` are recovered from the link URL, so the in-memory link model, graph, context, hierarchy, and event reads are unchanged. The machine block now carries only intent, lifecycle, security, and hierarchy.
+- Links written in the previous format are read for backward compatibility and migrate to the `## Related` section on the next write.
+
 ## 0.6.0 - Intent hierarchy and repo-local execution adapters
 
 Released 2026-06-15.
