@@ -1,8 +1,12 @@
 # Operator deck — human-in-the-loop approvals
 
 A mobile-first card deck for reviewing the agent's suggested next actions on your
-task system. Swipe **right to approve**, **left to reject**, tap a card to flip it
-for context. Approving performs the real ATS action; rejecting is remembered.
+task system. Each card shows the referenced items with the **adapter they came
+from** (the agent cycles adapters on its cadence wakeups and links across systems
+with semantic search) and one **verb-led GTD action**. Swipe **right to approve**,
+**left to reject**, **up to modify** (hands the card back to the agent to refine —
+it returns to the stack later), or tap to flip it for the reasoning. Approving
+performs the real ATS action; rejecting is remembered.
 
 ![Operator deck demo](../../docs/images/operator-deck.gif)
 

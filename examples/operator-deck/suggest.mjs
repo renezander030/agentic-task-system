@@ -68,7 +68,8 @@ export async function buildSuggestions(adapter, { dismissed = new Set() } = {}) 
         id,
         kind: 'relate',
         score: sim,
-        front: { badge: 'Relate', title: a.title, subtitle: `↔ ${b.title}` },
+        items: [{ adapter: 'ticktick', title: a.title }, { adapter: 'ticktick', title: b.title }],
+        action: 'Link these two tasks',
         back: { heading: 'Why', body: `These two share ${Math.round(sim * 100)}% of their wording but have no link. Approving adds a Related link — ATS auto-routes it (active task → Related, note → References).` },
         exec: { type: 'relate', source: { projectId: a.projectId, taskId: a.id }, target: { projectId: b.projectId, taskId: b.id } },
       });
@@ -87,7 +88,8 @@ export async function buildSuggestions(adapter, { dismissed = new Set() } = {}) 
       id,
       kind: 'archive',
       score: Math.min(1, days / 180),
-      front: { badge: 'Archive', title: t.title, subtitle: `Overdue ${days} days` },
+      items: [{ adapter: 'ticktick', title: t.title }],
+      action: 'Archive this stale task',
       back: { heading: 'Why', body: `No movement for ${days} days. Approving sets lifecycle: archived (reversible) so ATS stops surfacing it as live context.` },
       exec: { type: 'archive', source: { projectId: t.projectId, taskId: t.id } },
     });

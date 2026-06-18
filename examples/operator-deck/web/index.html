@@ -37,19 +37,26 @@
   .badge { align-self: flex-start; font: 600 11px/1 Inter; letter-spacing: .08em; text-transform: uppercase;
     color: var(--teal); background: var(--teal-soft); padding: 7px 11px; border-radius: 999px; }
   .badge.archive { color: #9A6A1E; background: #F3E9D6; }
-  .title { font-family: Fraunces, serif; font-weight: 600; font-size: 25px; line-height: 1.18; letter-spacing: -.01em; margin: 18px 0 10px; }
-  .subtitle { color: var(--muted); font-size: 15px; line-height: 1.45; }
+  .items { display: flex; flex-direction: column; gap: 13px; margin-top: 6px; }
+  .srow { display: flex; align-items: center; gap: 11px; }
+  .logo { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; font: 700 14px/1 Inter; flex: none; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .logo svg { width: 17px; height: 17px; }
+  .srow-title { font-family: Fraunces, serif; font-weight: 500; font-size: 16.5px; line-height: 1.25; }
+  .srow-sys { font: 500 10px/1 "JetBrains Mono", monospace; color: var(--muted); letter-spacing: .04em; margin-top: 3px; text-transform: lowercase; }
+  .action { font-family: Fraunces, serif; font-weight: 600; font-size: 27px; line-height: 1.16; letter-spacing: -.01em; margin: 24px 0 0; }
   .fliphint { margin-top: auto; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   .back-head { font: 600 11px/1 Inter; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
   .back-body { font-size: 15.5px; line-height: 1.55; color: var(--ink); }
   .stamp { position: absolute; top: 22px; font: 700 22px/1 Inter; letter-spacing: .06em; padding: 8px 12px; border-radius: 10px; border: 2.5px solid; }
   .stamp.yes { left: 22px; color: var(--teal); border-color: var(--teal); transform: rotate(-12deg); }
   .stamp.no { right: 22px; color: var(--red); border-color: var(--red); transform: rotate(12deg); }
+  .stamp.mod { left: 50%; margin-left: -54px; color: #9A6A1E; border-color: #9A6A1E; }
   .controls { display: flex; align-items: center; justify-content: center; gap: 22px; padding: 22px 0 26px; }
   .btn { width: 60px; height: 60px; border-radius: 50%; border: 1px solid var(--line); background: var(--paper);
     display: grid; place-items: center; cursor: pointer; box-shadow: 0 8px 18px -12px rgba(40,36,28,.5); transition: transform .12s; }
   .btn:active { transform: scale(.92); }
   .btn.no { color: var(--red); } .btn.yes { color: var(--teal); width: 68px; height: 68px; }
+  .btn.mod { color: #9A6A1E; width: 52px; height: 52px; }
   .btn.flip { width: 50px; height: 50px; color: var(--muted); }
   .btn svg { width: 26px; height: 26px; } .btn.yes svg { width: 30px; height: 30px; }
   .empty { flex: 1; display: grid; place-content: center; text-align: center; gap: 10px; color: var(--muted); padding: 40px; }
@@ -75,29 +82,53 @@ const buzz = (ms) => { try { navigator.vibrate?.(ms); } catch {} };
 const Icon = ({ d, ...p }) => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" ...${p}><path d=${d} /></svg>`;
 const X = (p) => html`<${Icon} d="M6 6l12 12M18 6L6 18" ...${p} />`;
 const Check = (p) => html`<${Icon} d="M5 13l4 4L19 7" ...${p} />`;
+const Up = (p) => html`<${Icon} d="M12 19V5M5 12l7-7 7 7" ...${p} />`;
 const Info = (p) => html`<${Icon} d="M12 11v6M12 7h.01M12 21a9 9 0 100-18 9 9 0 000 18z" ...${p} />`;
+
+// Adapter marks — the system each referenced item comes from. An action can mix
+// systems (the agent cycles adapters on its cadence wakeups and links across them).
+const TickMark = html`<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>`;
+const ADAPTERS = {
+  ticktick:   { bg: '#4772FA', fg: '#fff', glyph: TickMark },
+  notion:     { bg: '#fff', fg: '#111', border: '1px solid #111', glyph: 'N' },
+  confluence: { bg: '#1868DB', fg: '#fff', glyph: 'C' },
+  slack:      { bg: '#611F69', fg: '#fff', glyph: '#' },
+  github:     { bg: '#111', fg: '#fff', glyph: 'gh' },
+  obsidian:   { bg: '#6E56CF', fg: '#fff', glyph: 'O' },
+};
+const Logo = ({ a }) => {
+  const d = ADAPTERS[a] || { bg: '#D9D5C8', fg: '#333', glyph: '?' };
+  return html`<span class="logo" style=${{ background: d.bg, color: d.fg, border: d.border || 'none' }}>${d.glyph}</span>`;
+};
 
 function Card({ card, top, onDecide }) {
   const x = useMotionValue(0);
+  const y = useMotionValue(0);
   const rotate = useTransform(x, [-260, 260], [-16, 16]);
   const yesOp = useTransform(x, [20, 130], [0, 1]);
   const noOp = useTransform(x, [-130, -20], [1, 0]);
+  const modOp = useTransform(y, [-130, -20], [1, 0]);
   const [flipped, setFlipped] = useState(false);
 
   const end = (_e, info) => {
-    if (info.offset.x > THRESHOLD) { buzz(18); onDecide(card, 'approve', 1); }
+    const ax = Math.abs(info.offset.x), ay = Math.abs(info.offset.y);
+    if (ay > ax && info.offset.y < -THRESHOLD) { buzz(22); onDecide(card, 'modify', 0); }
+    else if (info.offset.x > THRESHOLD) { buzz(18); onDecide(card, 'approve', 1); }
     else if (info.offset.x < -THRESHOLD) { buzz(18); onDecide(card, 'reject', -1); }
   };
 
+  const style = top ? { x, y, rotate, zIndex: 2 } : { zIndex: 1, scale: 0.955, y: 14, pointerEvents: 'none' };
+  const items = card.items || [];
+
   return html`
-    <${M.div} class="card"
-      style=${{ x, rotate, zIndex: top ? 2 : 1, scale: top ? 1 : 0.955, y: top ? 0 : 14, pointerEvents: top ? 'auto' : 'none' }}
-      drag=${top ? 'x' : false} dragSnapToOrigin dragElastic=${0.5} onDragEnd=${end}
+    <${M.div} class="card" style=${style}
+      drag=${top} dragSnapToOrigin dragElastic=${0.55} onDragEnd=${end}
       onTap=${() => top && setFlipped((f) => !f)}
-      initial=${{ scale: 0.955, y: 14, opacity: 0.0 }} animate=${{ opacity: 1 }}
-      exit=${{ x: (card.__dir || 1) * 460, opacity: 0, transition: { duration: 0.28 } }}>
+      initial=${{ opacity: 0 }} animate=${{ opacity: 1 }}
+      exit=${{ ...(card.__exit === 'up' ? { y: -780 } : { x: (card.__dir || 1) * 480 }), opacity: 0, transition: { duration: 0.3 } }}>
       <${M.div} class=${'stamp yes'} style=${{ opacity: yesOp }}>APPROVE<//>
       <${M.div} class=${'stamp no'} style=${{ opacity: noOp }}>REJECT<//>
+      <${M.div} class=${'stamp mod'} style=${{ opacity: modOp }}>MODIFY<//>
       ${flipped
         ? html`<div style=${{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div class="back-head">${card.back.heading}</div>
@@ -105,10 +136,14 @@ function Card({ card, top, onDecide }) {
             <div class="fliphint" style=${{ marginTop: 'auto' }}><${Info} style=${{ width: 15, height: 15 }} /> tap to flip back</div>
           </div>`
         : html`<${React.Fragment}>
-            <span class=${'badge ' + card.kind}>${card.front.badge}</span>
-            <div class="title">${card.front.title}</div>
-            <div class="subtitle">${card.front.subtitle}</div>
-            <div class="fliphint"><${Info} style=${{ width: 15, height: 15 }} /> tap for context · swipe to decide</div>
+            <div class="items">
+              ${items.map((it, i) => html`<div class="srow" key=${i}>
+                <${Logo} a=${it.adapter} />
+                <div><div class="srow-title">${it.title}</div><div class="srow-sys">${it.adapter}</div></div>
+              </div>`)}
+            </div>
+            <div class="action">${card.action}</div>
+            <div class="fliphint"><${Info} style=${{ width: 15, height: 15 }} /> → approve · ← reject · ↑ modify · tap for why</div>
           </${React.Fragment}>`}
     </${M.div}>`;
 }
@@ -129,7 +164,15 @@ function App() {
 
   const decide = useCallback((card, action, dir) => {
     card.__dir = dir;
+    card.__exit = action === 'modify' ? 'up' : 'x';
     setCards((cur) => cur.filter((c) => c.id !== card.id));
+    if (action === 'modify') {
+      // Hand the card back to the agent to refine; it returns to the stack later.
+      flash('Sent back to the agent · returns later');
+      fetch(`${API}/api/suggestions/${encodeURIComponent(card.id)}/modify`, { method: 'POST' }).catch(() => {});
+      setTimeout(() => setCards((cur) => [...cur, { ...card, __dir: undefined, __exit: undefined }]), 1600);
+      return;
+    }
     fetch(`${API}/api/suggestions/${encodeURIComponent(card.id)}/${action}`, { method: 'POST' })
       .then((r) => r.json())
       .then((res) => flash(action === 'approve' ? (res.summary || 'Approved') : 'Dismissed'))
@@ -157,6 +200,7 @@ function App() {
         </div>`}
     ${cards.length > 0 ? html`<div class="controls">
         <button class="btn no" onClick=${() => { buzz(18); decide(top, 'reject', -1); }} aria-label="Reject"><${X} /></button>
+        <button class="btn mod" onClick=${() => { buzz(22); decide(top, 'modify', 0); }} aria-label="Modify (send back to agent)"><${Up} /></button>
         <button class="btn yes" onClick=${() => { buzz(18); decide(top, 'approve', 1); }} aria-label="Approve"><${Check} /></button>
       </div>` : null}
     ${toast ? html`<div class="toast">${toast}</div>` : null}
