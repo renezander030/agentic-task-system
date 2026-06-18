@@ -44,6 +44,12 @@ async function getAdapter() {
 
 function loadDismissed() { try { return new Set(JSON.parse(fs.readFileSync(DISMISS_FILE, 'utf-8'))); } catch { return new Set(); } }
 function saveDismissed(set) { fs.mkdirSync(path.dirname(DISMISS_FILE), { recursive: true }); fs.writeFileSync(DISMISS_FILE, JSON.stringify([...set])); }
+// Retire a card once it's been acted on (approve/reject/modify): drop it from the
+// queue AND remember the id so the cadence never re-offers it. Without the dismiss,
+// a just-approved card regenerates from the (slightly stale) corpus cache and the
+// same card reappears on the deck. `covered` in cadence keys off this set too, so
+// the task itself stops being re-picked this cycle.
+function retire(id) { const d = loadDismissed(); d.add(id); saveDismissed(d); saveQueue(loadQueue().filter((c) => c.id !== id)); }
 
 const taskOf = (card) => card?.exec?.source?.taskId || card.id;
 
@@ -117,24 +123,23 @@ const server = http.createServer(async (req, res) => {
       if (action === 'modify') {
         let note = '';
         try { note = String(JSON.parse((await readBody(req)) || '{}').note || '').slice(0, 1000); } catch { /* none */ }
-        if (!DEMO) { saveQueue(loadQueue().filter((c) => c.id !== id)); recordModify(id, note); }
+        if (!DEMO) { retire(id); recordModify(id, note); }
         return send(res, 200, { ok: true, modified: id, note }, JSONH);
       }
 
       if (action === 'reject') {
         if (!DEMO) {
-          const d = loadDismissed(); d.add(id); saveDismissed(d);
           const st = loadState(); if (card) recordSkip(st, taskOf(card)); saveState(st);
-          saveQueue(loadQueue().filter((c) => c.id !== id));
+          retire(id);
         }
         return send(res, 200, { ok: true, dismissed: id }, JSONH);
       }
 
       // approve
       if (!card) return send(res, 410, { error: 'suggestion no longer available' }, JSONH);
-      if (DRYRUN) { if (!DEMO) saveQueue(loadQueue().filter((c) => c.id !== id)); return send(res, 200, { ok: true, dryRun: true, summary: `Would ${card.kind}` }, JSONH); }
+      if (DRYRUN) { if (!DEMO) retire(id); return send(res, 200, { ok: true, dryRun: true, summary: `Would ${card.kind}` }, JSONH); }
       const result = await executeSuggestion(await getAdapter(), card);
-      saveQueue(loadQueue().filter((c) => c.id !== id));
+      retire(id);
       return send(res, 200, { ok: true, ...result }, JSONH);
     }
 
