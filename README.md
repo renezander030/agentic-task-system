@@ -14,6 +14,11 @@
 
 `ats` is an **MCP server and CLI that gives your AI agent memory and execution context from the task system you already use** — TickTick, Taskmaster, Beads, or an Obsidian vault. It combines adapter-aware retrieval fused by Reciprocal Rank Fusion (RRF) with portable intent, exploration-to-execution promotion, goal hierarchy, typed task relationships, lifecycle validity, scoped access decisions, context assembly, an action ledger, and bounded task-state events. TickTick can add dense search through local Qdrant + Ollama; file and repository adapters work without either service. ATS works with Claude Code, Claude Desktop, Cursor, and any MCP client.
 
+<p align="center">
+  <img src="docs/images/operator-deck.gif" alt="Operator deck — swipe to approve agent-suggested actions across adapters" width="300" />
+  <br><em>The <a href="examples/operator-deck/">operator deck</a>: the agent proposes the next best action across your tools — you approve, reject, or send it back, with a thumb.</em>
+</p>
+
 ```mermaid
 %%{init: {"theme": "neutral", "quadrantChart": {"pointRadius": 4, "pointLabelFontSize": 14}}}%%
 quadrantChart
@@ -123,9 +128,7 @@ _Plus the plumbing that makes it usable every turn: a disk-backed corpus cache t
 
 ## Human-in-the-loop: the operator deck
 
-The agent proposes the next best action on your task system; you approve or reject with a thumb. The [operator deck](examples/operator-deck/) is a mobile card surface that derives suggestions from live ATS state — *relate these two tasks*, *archive this stale one* — and runs the real action on approve (`relateTask`, `setTaskLifecycle`). Swipe right to approve, left to reject, tap to flip for the reasoning. Suggestions are generated on demand from the current corpus, so the deck is always current; when nothing is pending it shows **All caught up**.
-
-![Operator deck — swipe to approve agent-suggested actions](docs/images/operator-deck.gif)
+The agent proposes the next best action across your tools; you approve, reject, or send it back to refine — with a thumb (the demo up top). The [operator deck](examples/operator-deck/) is a mobile card surface that derives suggestions from live ATS state and across adapters — *link this Notion spec to its TickTick task*, *archive this stale spike* — running the real action on approve (`relateTask`, `setTaskLifecycle`). Swipe right to approve, left to reject, **up to modify** (hands it back to the agent; it returns later). Suggestions are generated on demand from the current corpus, so the deck is always current; when nothing is pending it shows **All caught up**.
 
 ## Architecture
 
