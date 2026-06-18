@@ -35,6 +35,9 @@ import {
   checkTaskAccess,
   addTaskLink,
   removeTaskLink,
+  addTaskReference,
+  removeTaskReference,
+  listTaskReferences,
   buildTaskGraph,
   evaluateTaskHierarchy,
   contextForTask,
@@ -106,7 +109,29 @@ function auditWrite(action, result, fallback, agent, metadata, advanced = false)
  */
 export function createServer(adapter) {
   const ext = adapter.__ext || {};
-  const server = new McpServer({ name: 'ats', version: VERSION });
+  const server = new McpServer({ name: 'ats', version: VERSION }, {
+    instructions: [
+      'ATS manages three regions of a task body, and you should keep them current as you work — add-only.',
+      '1) YAML frontmatter at the top: intent (outcome/why/done-when), plus lifecycle/security/hierarchy.',
+      '2) A "## Related" section: typed links to other ACTIVE or note tasks. This graph complements `find`',
+      '   (semantic/keyword search) and helps a human navigate — so populate it from what you discover.',
+      '3) A "## References" section: external URLs and reference notes the task consults.',
+      '',
+      'Default workflow when given a task to work on:',
+      '- Read first with `context_for_task` (returns intent, related links, and references).',
+      '- Refine intent with `set_task_intent`. Discover related work with `find`/`similar`, then record it:',
+      '  `add_task_link` for relationships to active tasks (use `related` for a plain/up-link, or a typed',
+      '  relation like supports/depends-on/parent), and `add_task_reference` for URLs and notes you consulted.',
+      '- These tools auto-create the sections on a new task, so the pattern grows into existing tasks over time.',
+      '',
+      'Add-only and conflict-safe — never destroy human or historical context:',
+      '- Never remove a Related link just because its target was completed; completed links stay.',
+      '- Never drop a row a human added by hand; ATS preserves rows it does not manage.',
+      '- Only remove a row on an explicit request, via `remove_task_link` / `remove_task_reference`.',
+      '- A completed task cannot be ADDED as a Related link (Related is active/note tasks only).',
+      '- Prefer these typed tools over `update_task(content=...)`, which bypasses this management and can clobber metadata.',
+    ].join('\n'),
+  });
 
   server.tool(
     'find',
@@ -483,6 +508,64 @@ export function createServer(adapter) {
           removed: result.removed,
         });
         return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'add_task_reference',
+    'WRITE. Adds a resource the task consults (an external URL or a reference note) to its "## References" section. Use this for links and supporting notes; use add_task_link for relationships to other active tasks. Re-adding the same url updates its title/desc.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      url: z.string(),
+      title: z.string().optional(),
+      desc: z.string().optional(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, url, title, desc, agent }) => {
+      try {
+        const result = await addTaskReference(adapter, { projectId, taskId }, { url, title, desc });
+        auditWrite('task.reference.added', result, { projectId, taskId }, agent, { url });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'remove_task_reference',
+    'WRITE. Removes a reference (by url) from a task\'s "## References" section. Returns removed=false when the url was already absent.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      url: z.string(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, url, agent }) => {
+      try {
+        const result = await removeTaskReference(adapter, { projectId, taskId }, url);
+        auditWrite('task.reference.removed', result, { projectId, taskId }, agent, { url, removed: result.removed });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'list_task_references',
+    'Read-only. Lists the resources (external URLs and reference notes) in a task\'s "## References" section.',
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+    },
+    async ({ projectId, taskId }) => {
+      try {
+        return ok(await listTaskReferences(adapter, projectId, taskId));
       } catch (e) {
         return fail(e);
       }
