@@ -1,7 +1,7 @@
 // Suggestion engine for the HITL operator deck. Derives "best next actions" from
 // the live ATS corpus (no external proposal queue), so every card is grounded in
 // real task state and approving it performs a real ATS mutation.
-import { loadCorpus, taskMetadataForRead, relateTask, setTaskLifecycle, recordAction } from '@reneza/ats-core';
+import { loadCorpus, taskMetadataForRead, relateTask, addTaskReference, setTaskLifecycle, recordAction } from '@reneza/ats-core';
 import { setGoal, appendLog } from './format.mjs';
 
 const STALE_DAYS = 21;
@@ -148,10 +148,20 @@ export async function executeSuggestion(adapter, s) {
   };
 
   if (e.type === 'relate') {
-    const r = await relateTask(adapter, e.source, e.target); // files ## Related / ## References
-    await logTo(`linked to "${e.targetTitle || 'related task'}"`);
-    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: e.source, sources: [], output: `relate → ${r.routedTo}`, advanced: true });
-    return { ok: true, summary: `Linked (## ${r.routedTo === 'references' ? 'References' : 'Related'})` };
+    const relType = e.relType || 'related';
+    const r = await relateTask(adapter, e.source, e.target, { type: relType, desc: e.relDesc }); // files ## Related / ## References
+    const typeNote = relType === 'related' ? '' : ` (${relType})`;
+    await logTo(`linked to "${e.targetTitle || 'related task'}"${typeNote}`);
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: e.source, sources: [], output: `relate ${relType} → ${r.routedTo}`, advanced: true });
+    return { ok: true, summary: `Linked${typeNote} (## ${r.routedTo === 'references' ? 'References' : 'Related'})` };
+  }
+  if (e.type === 'research') {
+    const refs = (e.refs || []).filter((x) => x && x.url);
+    for (const x of refs) await addTaskReference(adapter, e.source, { url: x.url, title: x.title, desc: x.desc });
+    const tail = e.nextStep ? `; next: ${e.nextStep}` : '';
+    await logTo(`researched: added ${refs.length} reference${refs.length === 1 ? '' : 's'}${tail}`);
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: e.source, sources: [], output: `research +${refs.length} refs`, advanced: true });
+    return { ok: true, summary: `Added ${refs.length} reference${refs.length === 1 ? '' : 's'}` };
   }
   if (e.type === 'intent') {
     await logTo('goal set', (c) => setGoal(c, e.goal || e.outcome || ''));

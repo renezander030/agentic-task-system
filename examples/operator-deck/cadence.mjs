@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { loadCorpus, taskMetadataForRead } from '@reneza/ats-core';
+import { loadCorpus, taskMetadataForRead, LINK_TYPES } from '@reneza/ats-core';
 import { findSimilar } from '../../packages/adapter-ticktick/embedding.js';
 import { loadState, benchReason, driftPenalty, recencyScore, impressionPenalty } from './state.mjs';
 import { hasGoal } from './format.mjs';
@@ -97,11 +97,65 @@ function draftIntents(tasks) {
   });
 }
 
+// Shared headless-Claude call; returns stdout (or '' on error). Web search is
+// available under bypassPermissions, so a prompt may instruct the model to use it.
+function callClaude(prompt, { timeout = 90000, model = MODEL } = {}) {
+  return new Promise((resolve) => {
+    const env = { ...process.env, HOME: '/home/debian' };
+    delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
+    const child = execFile('/home/debian/.local/bin/claude', ['-p', '--model', model, '--permission-mode', 'bypassPermissions'],
+      { env, cwd: '/home/debian/claude', timeout, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout) => resolve(err ? '' : String(stdout)));
+    child.stdin.end(prompt);
+  });
+}
+// Research can hallucinate URLs on a small model — default to the batch model but
+// allow bumping (OPERATOR_RESEARCH_MODEL=sonnet) for better-grounded web results.
+const RESEARCH_MODEL = process.env.OPERATOR_RESEARCH_MODEL || MODEL;
+
+// Classify each semantically-close pair into a typed ATS relationship + the move
+// to make, so a relate card says "B is a subtask of A -> link as parent" instead
+// of a bare "link these two". One bounded call for the whole batch. Fails soft.
+async function classifyRelations(pairs) {
+  if (pairs.length === 0) return {};
+  const payload = pairs.map((p) => ({ id: p.id, a: p.t.title, b: p.nt.title,
+    an: String(p.t.content || '').replace(/\s+/g, ' ').slice(0, 160), bn: String(p.nt.content || '').replace(/\s+/g, ' ').slice(0, 160) }));
+  const prompt = [
+    'For each pair of tasks A and B, decide how they relate (direction is A -> B). Pick ONE type:',
+    '- depends-on: A cannot proceed until B is done',
+    '- blocks: A must be done before B can proceed',
+    '- parent: B is a subtask / part of A',
+    '- supports: both advance the same goal, neither blocks the other',
+    '- supersedes: A and B are near-duplicates; A is the keeper, B is redundant',
+    '- related: loosely connected, just cross-link',
+    'Return ONLY a JSON array, one object per pair: {id, type, move, why}.',
+    'move = imperative <=7 words (e.g. "link as depends-on", "mark B a subtask of A"). why = <=14 words.',
+    'Pairs:', JSON.stringify(payload),
+  ].join('\n');
+  const out = {};
+  try { const m = (await callClaude(prompt, { timeout: 60000 })).match(/\[[\s\S]*\]/); for (const r of (m ? JSON.parse(m[0]) : [])) if (r && r.id) out[r.id] = r; } catch { /* fail soft */ }
+  return out;
+}
+
+// Research a task with web search; returns { refs:[{title,url}], nextStep } or null.
+// Scoped to research-y tasks and gated to the cron build (slow), never the hot path.
+async function researchTask(task) {
+  const prompt = [
+    'You research a task using web search. Find 2-3 high-quality, current references',
+    '(official docs, credible comparisons or guides) that would help do this task.',
+    `Task: ${JSON.stringify(task.title)}`,
+    `Notes: ${JSON.stringify(String(task.content || '').replace(/\s+/g, ' ').slice(0, 240))}`,
+    'Return ONLY JSON: {"refs":[{"title":"...","url":"..."}],"nextStep":"<one concrete next action, <=12 words>"}. No prose.',
+  ].join('\n');
+  try { const m = (await callClaude(prompt, { timeout: 120000, model: RESEARCH_MODEL })).match(/\{[\s\S]*\}/); const o = m ? JSON.parse(m[0]) : null; if (o && Array.isArray(o.refs)) return o; } catch { /* fail soft */ }
+  return null;
+}
+
 // Round-robin across kinds (highest-scored first within each) so a batch always
 // carries a MIX — not just goal cards. `relate` leads each round because it's the
 // underrepresented axis ("which tasks are similar, link them?"); intent/next follow.
 function pickDiverse(cards, limit) {
-  const order = ['relate', 'intent', 'next'];
+  const order = ['research', 'relate', 'intent', 'next'];
   const buckets = new Map(order.map((k) => [k, []]));
   const extra = [];
   for (const c of cards) (buckets.get(c.kind) || extra).push(c);
@@ -117,7 +171,7 @@ function pickDiverse(cards, limit) {
   return out;
 }
 
-export async function buildBatch(adapter, { existingIds = new Set(), dismissed: dismissedMap = activeDismissed(), limit = BATCH } = {}) {
+export async function buildBatch(adapter, { existingIds = new Set(), dismissed: dismissedMap = activeDismissed(), limit = BATCH, allowResearch = false } = {}) {
   const now = Date.now();
   const { corpus } = await loadCorpus(adapter, { cache: true });
   const notes = await noteProjectSet(adapter);
@@ -217,6 +271,7 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed: 
   // already full of intent/next, so a total-count cap would skip relate entirely
   // and the queue drifts to all-goal. Generate a pool; pickDiverse selects the mix.
   const pairSeen = new Set();
+  const relatePairs = [];
   let relateCount = 0;
   const relateTarget = Math.max(limit, 10);
   for (const { t, s } of ranked) {
@@ -236,26 +291,75 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed: 
       const id = `relate:${t.id}:${nid}`;
       if (!fresh(id)) continue;
       pairSeen.add(key);
-      cards.push({ id, kind: 'relate', score: s,
-        items: [{ adapter: 'ticktick', title: t.title }, { adapter: 'ticktick', title: nt.title }],
-        action: 'Link these two tasks',
-        back: { heading: 'Why', body: `Semantically close (${Math.round(sc * 100)}%) but not linked. Approving files a Related link.` },
-        exec: { type: 'relate', source: { projectId: t.projectId, taskId: t.id }, target: { projectId: nt.projectId, taskId: nid }, targetTitle: nt.title } });
+      relatePairs.push({ id, t, nt, sim: sc, s });
       relateCount += 1;
       break;
+    }
+  }
+
+  // Classify the pairs into a typed ATS relationship + the move to make, then emit
+  // the cards. One bounded LLM call for the whole batch (fails soft to 'related').
+  const relations = await classifyRelations(relatePairs);
+  const shortT = (s) => (s.length > 26 ? `${s.slice(0, 25)}…` : s);
+  const phrase = {
+    'depends-on': (b) => `Depends on “${b}”`,
+    blocks: (b) => `Blocks “${b}”`,
+    parent: (b) => `“${b}” is a subtask of this`,
+    supports: (b) => `Supports “${b}”`,
+    supersedes: (b) => `Duplicate of “${b}” — keep this`,
+    related: (b) => `Link to “${b}”`,
+  };
+  for (const p of relatePairs) {
+    const c = relations[p.id] || {};
+    const type = LINK_TYPES.includes(c.type) ? c.type : 'related';
+    const action = (phrase[type] || phrase.related)(shortT(p.nt.title));
+    cards.push({ id: p.id, kind: 'relate', score: p.s,
+      items: [{ adapter: 'ticktick', title: p.t.title }, { adapter: 'ticktick', title: p.nt.title }],
+      action,
+      back: { heading: type === 'related' ? 'Why' : `Suggested: ${type}`, body: String(c.why || '').trim() || `Semantically close (${Math.round(p.sim * 100)}%) but not linked yet.` },
+      exec: { type: 'relate', source: { projectId: p.t.projectId, taskId: p.t.id }, target: { projectId: p.nt.projectId, taskId: p.nt.id }, targetTitle: p.nt.title, relType: type, relDesc: String(c.why || '').trim() } });
+  }
+
+  // Stage 3 (cron only — slow web search): for research-y tasks with no references
+  // yet, look up a few sources and suggest adding them. Gated to keep it off the
+  // interactive refill path; bounded by OPERATOR_RESEARCH_BUDGET.
+  if (allowResearch) {
+    const RESEARCH_BUDGET = Number(process.env.OPERATOR_RESEARCH_BUDGET || 2);
+    const researchRe = /\b(evaluate|assess|compare|comparison|versus|vs|research|investigate|explore|options|alternatives|best|which|how to|how do|learn|study|benchmark|shortlist|pros and cons|decide between|tool[s]? for)\b/i;
+    const researchy = ranked
+      .filter(({ t }) => !usedTask.has(t.id) && fresh(`research:${t.id}`)
+        && researchRe.test(`${t.title} ${String(t.content || '').slice(0, 200)}`)
+        && !((meta.get(t.id)?.references || []).length))
+      .slice(0, RESEARCH_BUDGET);
+    for (const { t, s } of researchy) {
+      const r = await researchTask(t);
+      const refs = (r?.refs || []).filter((x) => x && x.url).slice(0, 3);
+      if (!refs.length) continue;
+      cards.push({ id: `research:${t.id}`, kind: 'research', score: s + 0.2,
+        items: [{ adapter: 'ticktick', title: t.title }],
+        action: r.nextStep ? `Research: ${r.nextStep}` : `Add ${refs.length} researched references`,
+        back: { heading: `Found ${refs.length} references (web)`, body: refs.map((x) => x.title).join(' · ') },
+        exec: { type: 'research', source: { projectId: t.projectId, taskId: t.id }, refs, nextStep: r.nextStep || '' } });
+      usedTask.add(t.id);
     }
   }
 
   return pickDiverse(cards, limit);
 }
 
-// CLI: top the queue up to BATCH, appending fresh cards.
+// CLI (cron): top the queue up to BATCH, and — since this is the only path that
+// runs the slow web-search stage — also inject a research card when the queue has
+// none, even if it's otherwise full. allowResearch is on here and ONLY here.
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const mod = await import(process.env.ATS_ADAPTER || '@reneza/ats-adapter-ticktick');
   const adapter = mod.default || mod;
   const queue = loadQueue();
-  if (queue.length >= BATCH) { console.log(`queue already at ${queue.length}; nothing to do`); process.exit(0); }
-  const batch = await buildBatch(adapter, { existingIds: new Set(queue.map((c) => c.id)), limit: BATCH - queue.length });
-  saveQueue([...queue, ...batch]);
-  console.log(`added ${batch.length} (${batch.map((c) => c.kind).join(',')}); queue now ${queue.length + batch.length}`);
+  const need = Math.max(0, BATCH - queue.length);
+  const hasResearch = queue.some((c) => c.kind === 'research');
+  if (need === 0 && hasResearch) { console.log(`queue at ${queue.length} with research; nothing to do`); process.exit(0); }
+  const limit = Math.max(need, hasResearch ? 0 : 3); // build a few even when full, so a research card can surface
+  const batch = await buildBatch(adapter, { existingIds: new Set(queue.map((c) => c.id)), limit, allowResearch: true });
+  const merged = [...queue, ...batch.filter((b) => !queue.some((c) => c.id === b.id))];
+  saveQueue(merged);
+  console.log(`added ${batch.length} (${batch.map((c) => c.kind).join(',')}); queue now ${merged.length}`);
 }
