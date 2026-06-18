@@ -51,6 +51,9 @@ import {
   addTaskLink,
   removeTaskLink,
   listTaskLinks,
+  addTaskReference,
+  removeTaskReference,
+  listTaskReferences,
   buildTaskGraph,
   evaluateTaskHierarchy,
   contextForTask,
@@ -237,6 +240,9 @@ async function main() {
       case 'link':
         result = await handleLink();
         break;
+      case 'reference':
+        result = await handleReference();
+        break;
       case 'graph':
         result = await handleGraph();
         break;
@@ -342,6 +348,7 @@ function helpFor(command) {
     case 'hierarchy':
     case 'lifecycle':
     case 'link':
+    case 'reference':
     case 'graph':
     case 'context':
     case 'ledger':
@@ -352,7 +359,7 @@ function helpFor(command) {
 
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
-  'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'graph', 'context', 'ledger', 'security', 'events',
+  'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'graph', 'context', 'ledger', 'security', 'events',
   'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
@@ -959,6 +966,40 @@ async function handleLink() {
     return { ...outgoing, edges: graph.edges };
   }
   console.log(getAgentLayerHelp('link'));
+}
+
+async function handleReference() {
+  const adapter = await loadAdapter();
+  if (args.subcommand === 'add') {
+    const [projectId, taskId] = args.positional;
+    if (!projectId || !taskId || !args.options.url) {
+      console.error('Usage: ats reference add PROJECT_ID TASK_ID --url URL [--title TITLE] [--desc DESC]');
+      process.exit(1);
+    }
+    const result = await addTaskReference(adapter, { projectId, taskId }, {
+      url: args.options.url,
+      title: args.options.title,
+      desc: args.options.desc,
+    });
+    auditCliWrite('task.reference.added', result, { projectId, taskId }, { url: args.options.url });
+    return result;
+  }
+  if (args.subcommand === 'remove') {
+    const [projectId, taskId] = args.positional;
+    if (!projectId || !taskId || !args.options.url) {
+      console.error('Usage: ats reference remove PROJECT_ID TASK_ID --url URL');
+      process.exit(1);
+    }
+    const result = await removeTaskReference(adapter, { projectId, taskId }, args.options.url);
+    auditCliWrite('task.reference.removed', result, { projectId, taskId }, { url: args.options.url, removed: result.removed });
+    return result;
+  }
+  if (args.subcommand === 'list') {
+    const [projectId, taskId] = args.positional;
+    if (!projectId || !taskId) { console.error('Usage: ats reference list PROJECT_ID TASK_ID'); process.exit(1); }
+    return listTaskReferences(adapter, projectId, taskId);
+  }
+  console.log(getAgentLayerHelp('reference'));
 }
 
 async function handleGraph() {

@@ -20,6 +20,9 @@ function contractTask(task, fallback = {}) {
     projectId: task.fullProjectId || fallback.projectId || task.projectId,
     tags: task.tags || fallback.tags || [],
     dueDate: task.dueDate ?? fallback.dueDate,
+    // Surface completion so the core can refuse to link completed tasks
+    // (Related points only to active or note tasks). 'active' | 'completed'.
+    status: task.status ?? fallback.status,
     modifiedTime: task.modifiedTime || new Date().toISOString(),
     raw: task,
   };

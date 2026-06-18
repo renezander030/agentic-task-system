@@ -472,7 +472,7 @@ Options:
   --valid-until <ISO-8601>
 
 ${common}`,
-    link: `ats link - Typed task relationships
+    link: `ats link - Typed relationships to other active or note tasks
 
 Usage:
   ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE
@@ -480,6 +480,27 @@ Usage:
   ats link list PROJECT_ID TASK_ID
 
 Types: blocks, depends-on, parent, conflicts-with, supports, evidence, decision, output, supersedes, related
+
+Links render in a "## Related" section at the bottom of the body. "related" is the
+generic up-link / Map-of-Content pointer and renders bare (- [Title](url)); the
+other types keep their "- type:" prefix. Completed tasks cannot be linked.
+
+${common}`,
+    reference: `ats reference - External URLs and reference notes a task consults
+
+Usage:
+  ats reference add PROJECT_ID TASK_ID --url URL [--title TITLE] [--desc DESC]
+  ats reference remove PROJECT_ID TASK_ID --url URL
+  ats reference list PROJECT_ID TASK_ID
+
+Options:
+  --url <url>      Resource URL (the key; re-adding the same url updates it)
+  --title <text>   Shortened page title shown as the link text (defaults to url)
+  --desc <text>    A couple-word description shown before the link
+
+References render in a "## References" section at the bottom of the body, one
+bullet per resource: "- <desc>: [<title>](<url>)". Unlike Related links they are
+display-only and never enter the task graph.
 
 ${common}`,
     promote: `ats promote - Convert exploration into scoped execution

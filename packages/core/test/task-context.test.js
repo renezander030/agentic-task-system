@@ -2,13 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addTaskLink,
+  addTaskReference,
   buildTaskGraph,
   contextForTask,
   evaluateTaskHierarchy,
   evaluateLifecycle,
+  listTaskReferences,
   parseTaskMetadata,
   promoteExploration,
   removeTaskLink,
+  removeTaskReference,
   setTaskIntent,
   setTaskHierarchy,
   setTaskLifecycle,
@@ -21,6 +24,7 @@ function fakeAdapter() {
     { id: 'decision', projectId: 'demo', title: 'Approved release decision', content: 'Use the staged rollout.', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
     { id: 'old', projectId: 'demo', title: 'Old launch guidance', content: 'An obsolete rollout recommendation.', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
     { id: 'noise', projectId: 'demo', title: 'Launch party supplies', content: 'Banners and snacks.', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
+    { id: 'done', projectId: 'demo', title: 'Shipped task', content: '', tags: [], status: 'completed', modifiedTime: '2026-01-01T00:00:00Z' },
   ];
   return {
     tasks,
@@ -59,7 +63,7 @@ test('metadata block round-trips without changing the human-authored body', () =
   const content = writeTaskMetadata('Keep this paragraph.\n', {
     intent: { outcome: 'Ship a verified release', doneWhen: ['Smoke test passes'] },
   });
-  assert.match(content, /^---\nats:\n/);
+  assert.match(content, /^---\nintent:\n/);
   assert.match(content, /\n---\n\nKeep this paragraph\./);
   const metadata = parseTaskMetadata(content);
   assert.equal(metadata.intent.outcome, 'Ship a verified release');
@@ -86,7 +90,7 @@ test('links render as a human-readable Related deep-link section, not JSON', () 
   assert.match(content, /## Related\n- depends-on: \[Auth spec\]\(https:\/\/ticktick\.com\/webapp\/#p\/p1\/tasks\/t1\)/);
   // The YAML frontmatter machine block carries no link IDs.
   const fmInner = content.match(/^---\n([\s\S]*?)\n---/)[1];
-  assert.match(fmInner, /ats:/);
+  assert.match(fmInner, /intent:/);
   assert.doesNotMatch(fmInner, /t1/);
   // Round-trips back into the in-memory link model.
   const links = parseTaskMetadata(content).links;
@@ -177,7 +181,7 @@ test('the YAML frontmatter machine block round-trips structured fields and speci
       approvers: ['owner@example.com'],
     },
   });
-  assert.match(content, /^---\nats:\n/);
+  assert.match(content, /^---\nintent:\n/);
   const back = parseTaskMetadata(content);
   assert.equal(back.intent.outcome, 'Ship: a verified release');
   assert.equal(back.intent.why, 'Reduce "rollout" risk');
@@ -196,7 +200,7 @@ test('foreign frontmatter keys are preserved when ATS rewrites its block', () =>
   const out = writeTaskMetadata(content, { intent: { outcome: 'Do the thing' } });
   assert.match(out, /title: My Note/);
   assert.match(out, /- alpha/);
-  assert.match(out, /\nats:\n/);
+  assert.match(out, /\nintent:\n/);
   assert.match(out, /Body text\./);
   assert.equal(parseTaskMetadata(out).intent.outcome, 'Do the thing');
 });
@@ -337,4 +341,117 @@ test('hierarchy evaluation proves parent support and reports active explicit con
   const aligned = await evaluateTaskHierarchy(adapter, { projectId: 'demo', taskId: 'plan' }, { cache: false });
   assert.equal(aligned.aligned, true);
   assert.deepEqual(aligned.issues, []);
+});
+
+test('legacy ats:-wrapped frontmatter is read and migrates to flat keys on write', () => {
+  const legacy = '---\nats:\n  intent:\n    outcome: Old style\n  hierarchy:\n    kind: task\n---\n\nBody.';
+  const back = parseTaskMetadata(legacy);
+  assert.equal(back.intent.outcome, 'Old style');
+  assert.equal(back.hierarchy.kind, 'task');
+  // Rewriting drops the `ats:` wrapper and emits flat top-level keys.
+  const migrated = writeTaskMetadata(legacy, back);
+  assert.match(migrated, /^---\nintent:\n/);
+  assert.doesNotMatch(migrated, /\bats:\n/);
+  assert.equal(parseTaskMetadata(migrated).intent.outcome, 'Old style');
+  assert.equal(parseTaskMetadata(migrated).hierarchy.kind, 'task');
+});
+
+test('the generic related link renders bare while typed links keep their prefix', () => {
+  const content = writeTaskMetadata('Body.', {
+    links: [
+      { type: 'related', projectId: 'hub', taskId: 'moc', title: 'ATS MOC', url: 'demo://hub/moc' },
+      { type: 'supports', projectId: 'p1', taskId: 't1', title: 'Bring v0.5', url: 'demo://p1/t1' },
+    ],
+  });
+  // related = bare up-link / MOC pointer; supports keeps its prefix.
+  assert.match(content, /## Related\n- \[ATS MOC\]\(demo:\/\/hub\/moc\)\n- supports: \[Bring v0.5\]\(demo:\/\/p1\/t1\)/);
+  // A bare bullet round-trips back to the `related` type.
+  assert.deepEqual(parseTaskMetadata(content).links.map((l) => [l.type, l.taskId]), [['related', 'moc'], ['supports', 't1']]);
+});
+
+test('references render in their own section and round-trip with optional desc', () => {
+  const content = writeTaskMetadata('Body.', {
+    references: [
+      { desc: 'portable knowledge format', title: 'Open Knowledge Format', url: 'https://example.test/okf' },
+      { title: 'SPEC.md', url: 'https://example.test/spec' },
+    ],
+  });
+  assert.match(content, /## References\n- portable knowledge format: \[Open Knowledge Format\]\(https:\/\/example\.test\/okf\)\n- \[SPEC\.md\]\(https:\/\/example\.test\/spec\)/);
+  const back = parseTaskMetadata(content).references;
+  assert.deepEqual(back, [
+    { desc: 'portable knowledge format', title: 'Open Knowledge Format', url: 'https://example.test/okf' },
+    { title: 'SPEC.md', url: 'https://example.test/spec' },
+  ]);
+});
+
+test('Related and References coexist and survive a metadata rewrite', () => {
+  const seed = writeTaskMetadata('Body.', {
+    links: [{ type: 'related', projectId: 'hub', taskId: 'moc', title: 'Hub', url: 'demo://hub/moc' }],
+    references: [{ title: 'Docs', url: 'https://example.test/docs' }],
+  });
+  // Re-running through the parser+writer must preserve both sections.
+  const round = writeTaskMetadata(seed, parseTaskMetadata(seed));
+  assert.match(round, /## Related\n- \[Hub\]/);
+  assert.match(round, /## References\n- \[Docs\]/);
+  assert.equal(parseTaskMetadata(round).references.length, 1);
+  assert.equal(parseTaskMetadata(round).links.length, 1);
+});
+
+test('references add, update by url, and remove through the adapter', async () => {
+  const adapter = fakeAdapter();
+  await addTaskReference(adapter, { projectId: 'demo', taskId: 'plan' }, {
+    url: 'https://example.test/a', title: 'A', desc: 'first',
+  });
+  // Re-adding the same url updates title/desc in place rather than duplicating.
+  await addTaskReference(adapter, { projectId: 'demo', taskId: 'plan' }, {
+    url: 'https://example.test/a', title: 'A2', desc: 'updated',
+  });
+  let listed = await listTaskReferences(adapter, 'demo', 'plan');
+  assert.deepEqual(listed.references, [{ desc: 'updated', title: 'A2', url: 'https://example.test/a' }]);
+  const { removed } = await removeTaskReference(adapter, { projectId: 'demo', taskId: 'plan' }, 'https://example.test/a');
+  assert.equal(removed, true);
+  listed = await listTaskReferences(adapter, 'demo', 'plan');
+  assert.deepEqual(listed.references, []);
+});
+
+test('linking a completed task is refused — Related is active/note tasks only', async () => {
+  const adapter = fakeAdapter();
+  await assert.rejects(
+    () => addTaskLink(adapter, { projectId: 'demo', taskId: 'plan' }, { projectId: 'demo', taskId: 'done' }, 'related'),
+    /completed task/
+  );
+  // An active target still links fine.
+  const ok = await addTaskLink(adapter, { projectId: 'demo', taskId: 'plan' }, { projectId: 'demo', taskId: 'decision' }, 'related');
+  assert.ok(ok.metadata.links.some((l) => l.taskId === 'decision'));
+});
+
+test('add-only: a human-authored Related/References row ATS does not manage survives a rewrite', () => {
+  const seed = [
+    '---', 'intent:', '  outcome: Ship', '---', '',
+    '## Related',
+    '- [Managed up-link](demo://p/t)',
+    '- see the launch runbook a teammate pinned',
+    '',
+    '## References',
+    '- spec: [Doc](https://x.test/d)',
+    '- ask Dana about the rollout window',
+  ].join('\n');
+  const md = parseTaskMetadata(seed);
+  // An unrelated edit (adding a why) must preserve both the managed rows and the
+  // freeform human rows in each section.
+  const out = writeTaskMetadata(seed, { ...md, intent: { ...md.intent, why: 'because' } });
+  assert.match(out, /- \[Managed up-link\]\(demo:\/\/p\/t\)/);
+  assert.match(out, /- see the launch runbook a teammate pinned/);
+  assert.match(out, /- spec: \[Doc\]\(https:\/\/x\.test\/d\)/);
+  assert.match(out, /- ask Dana about the rollout window/);
+});
+
+test('add-only: a Related link is not pruned when its target later completes', async () => {
+  const adapter = fakeAdapter();
+  await addTaskLink(adapter, { projectId: 'demo', taskId: 'plan' }, { projectId: 'demo', taskId: 'decision' }, 'related');
+  // The target completes after it was already linked.
+  adapter.tasks.find((t) => t.id === 'decision').status = 'completed';
+  // An unrelated metadata write must not drop the existing link.
+  const result = await setTaskIntent(adapter, 'demo', 'plan', { why: 'still relevant' });
+  assert.ok(result.metadata.links.some((l) => l.taskId === 'decision'));
 });

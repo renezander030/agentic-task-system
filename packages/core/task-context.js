@@ -22,18 +22,44 @@ const BLOCK_START = '<!-- ats:context -->';
 const BLOCK_END = '<!-- /ats:context -->';
 const BLOCK_RE = /<!-- ats:context -->\r?\n```ats\r?\n([\s\S]*?)\r?\n```\r?\n<!-- \/ats:context -->/g;
 
-// Typed cross-task links live in a human-readable "## Related" section near the
-// bottom of the task body — one bullet per link, `- <type>: [<title>](<url>)` —
-// instead of inside the machine block. The link text and deep-link URL serve a
-// human reader (and Obsidian-style backlink navigation); the agent reads the
-// same lines. projectId/taskId are recovered from the URL, so the in-memory
-// link model and everything downstream (graph/context/hierarchy) is unchanged.
-// The machine block keeps only intent/lifecycle/security/hierarchy.
+// Cross-task links live in a human-readable "## Related" section near the bottom
+// of the task body — the same place Zettelkasten / "Linking Your Thinking"
+// notes put their up-links and Map-of-Content (MOC) pointers: a note links
+// "up" to the broader hub note it belongs under. Here the generic `related`
+// type IS that up-link / MOC pointer, and it renders as a bare bullet
+// `- [<title>](<url>)` with no type label — the link itself is the meaning, so
+// a prefix would just be noise. The other types carry governance semantics the
+// parser must recover (parent → hierarchy, supersedes → lifecycle,
+// conflicts-with → conflict detection), so those keep their `- <type>:` prefix.
+//
+// Backlinks (who points *here*) are deliberately NOT materialized into the body.
+// They are derived on read from the link graph (see inspectCorpus/contextForTask
+// `incoming`), which is exactly where they counteract semantic search's weakness
+// — surfacing deliberate connections embeddings miss — without write-amplifying
+// every task body or adding stale link text to what gets embedded.
+//
+// projectId/taskId are recovered from the URL, so the in-memory link model and
+// everything downstream (graph/context/hierarchy) is unchanged. The machine
+// block keeps only intent/lifecycle/security/hierarchy.
 const RELATED_HEADING = '## Related';
 const RELATED_SECTION_RE = /(?:^|\n)##\s+Related[ \t]*\n([\s\S]*?)(?=\n#{1,6}\s|\n<!-- ats:context -->|$)/;
 // Title capture is greedy so a label containing `]` (e.g. a task titled
-// "Spec [draft]") still round-trips by backtracking to the final `](url)`.
-const RELATED_LINE_RE = /^-\s+([a-z][a-z-]*):\s*\[(.*)\]\(([^)\s]+)\)\s*$/;
+// "Spec [draft]") still round-trips by backtracking to the final `](url)`. The
+// `<type>:` prefix is optional — a bare `- [title](url)` line is a `related`
+// up-link / MOC pointer.
+const RELATED_LINE_RE = /^-\s+(?:([a-z][a-z-]*):\s*)?\[(.*)\]\(([^)\s]+)\)\s*$/;
+
+// Resources a task *consults* — external URLs and reference notes — live in a
+// separate "## References" section, grouped so they don't clutter the prose.
+// Each bullet is `- <brief desc>: [<short title>](<url>)`: a couple-word
+// description, then the link riding on a shortened title (TickTick renders it as
+// a hyperlink). The desc is optional, so a bare `- [title](url)` is also a valid
+// reference. Unlike Related, references are display-only — they are not typed
+// task links and never enter the link graph.
+const REFERENCES_HEADING = '## References';
+const REFERENCES_SECTION_RE = /(?:^|\n)##\s+References[ \t]*\n([\s\S]*?)(?=\n#{1,6}\s|\n<!-- ats:context -->|$)/;
+// desc is non-greedy up to the first `: [`; title is greedy to the final `](url)`.
+const REFERENCE_LINE_RE = /^-\s+(?:(.*?):\s*)?\[(.*)\]\(([^)\s]+)\)\s*$/;
 
 const emptyMetadata = () => ({
   version: TASK_CONTEXT_VERSION,
@@ -56,6 +82,7 @@ const emptyMetadata = () => ({
     approvers: [],
   },
   links: [],
+  references: [],
 });
 
 function stringArray(value, field) {
@@ -126,6 +153,17 @@ function normalizeLink(link, index) {
   };
 }
 
+function normalizeReference(ref, index) {
+  if (!ref || typeof ref !== 'object' || Array.isArray(ref)) {
+    throw new Error(`ATS reference ${index} must be an object.`);
+  }
+  const url = optionalString(ref.url, `references[${index}].url`);
+  if (!url) throw new Error(`ATS reference ${index} needs a url.`);
+  const title = optionalString(ref.title, `references[${index}].title`) || url;
+  const desc = optionalString(ref.desc, `references[${index}].desc`);
+  return { ...(desc ? { desc } : {}), title, url };
+}
+
 export function normalizeTaskMetadata(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('ATS metadata must be a JSON object.');
@@ -151,6 +189,9 @@ export function normalizeTaskMetadata(value = {}) {
   }
   if (value.links !== undefined && !Array.isArray(value.links)) {
     throw new Error('ATS metadata field "links" must be an array.');
+  }
+  if (value.references !== undefined && !Array.isArray(value.references)) {
+    throw new Error('ATS metadata field "references" must be an array.');
   }
   const contentTrust = security.contentTrust || base.security.contentTrust;
   if (!CONTENT_TRUST_LEVELS.includes(contentTrust)) {
@@ -185,6 +226,7 @@ export function normalizeTaskMetadata(value = {}) {
       approvers: stringArray(security.approvers, 'security.approvers'),
     },
     links: (value.links || []).map(normalizeLink),
+    references: (value.references || []).map(normalizeReference),
   };
 }
 
@@ -214,7 +256,8 @@ function parseRelatedSection(text) {
     if (!line) continue;
     const m = line.match(RELATED_LINE_RE);
     if (!m) continue;
-    const [, type, title, url] = m;
+    const [, rawType, title, url] = m;
+    const type = rawType || 'related'; // a bare `- [title](url)` is a related up-link
     if (!LINK_TYPES.includes(type)) continue;
     const ref = parseRef(url);
     if (!ref) continue;
@@ -223,9 +266,9 @@ function parseRelatedSection(text) {
   return links;
 }
 
-function renderRelatedSection(links) {
-  if (!links || links.length === 0) return '';
-  const lines = links.map((link) => {
+function renderRelatedSection(links, extras = []) {
+  if ((!links || links.length === 0) && extras.length === 0) return '';
+  const lines = (links || []).map((link) => {
     // Prefer the adapter's real deep link; fall back to a parseable ref so a
     // link added without a url (e.g. a direct writeTaskMetadata call) still
     // round-trips its projectId/taskId.
@@ -234,13 +277,66 @@ function renderRelatedSection(links) {
     // to parens — keeps the link well-formed and clickable. The URL carries the
     // canonical id, so the display label can be lossy.
     const label = String(link.title || link.taskId).replace(/[[\]]/g, (ch) => (ch === '[' ? '(' : ')'));
-    return `- ${link.type}: [${label}](${href})`;
+    // The generic `related` up-link / MOC pointer renders bare — the link itself
+    // is the meaning, so a label would be noise. Typed links keep their prefix so
+    // the relation (and its governance semantics) stays visible and round-trips.
+    const prefix = link.type === 'related' ? '' : `${link.type}: `;
+    return `- ${prefix}[${label}](${href})`;
   });
-  return `${RELATED_HEADING}\n${lines.join('\n')}`;
+  // Add-only: append human-authored rows ATS does not manage, verbatim.
+  return `${RELATED_HEADING}\n${[...lines, ...extras].join('\n')}`;
 }
 
 function stripRelatedSection(text) {
   return String(text || '').replace(RELATED_SECTION_RE, (match) => (match.startsWith('\n') ? '\n' : ''));
+}
+
+function parseReferencesSection(text) {
+  const section = String(text || '').match(REFERENCES_SECTION_RE);
+  if (!section) return [];
+  const refs = [];
+  for (const raw of section[1].split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(REFERENCE_LINE_RE);
+    if (!m) continue;
+    const [, desc, title, url] = m;
+    refs.push({ ...((desc || '').trim() ? { desc: desc.trim() } : {}), title: title.trim(), url: url.trim() });
+  }
+  return refs;
+}
+
+function renderReferencesSection(references, extras = []) {
+  if ((!references || references.length === 0) && extras.length === 0) return '';
+  const lines = (references || []).map((ref) => {
+    // Soften bracket chars in the title so the markdown link stays well-formed.
+    const label = String(ref.title || ref.url).replace(/[[\]]/g, (ch) => (ch === '[' ? '(' : ')'));
+    const head = ref.desc ? `${ref.desc}: ` : '';
+    return `- ${head}[${label}](${ref.url})`;
+  });
+  // Add-only: append human-authored rows ATS does not manage, verbatim.
+  return `${REFERENCES_HEADING}\n${[...lines, ...extras].join('\n')}`;
+}
+
+// Non-empty rows in a section that ATS does not recognize as a managed row —
+// i.e. lines a human added by hand. ATS is add-only: it never drops these on a
+// rewrite. Recognized rows are omitted here because they are rebuilt from the
+// structured model (and an explicit remove drops them by mutating that model).
+function unmanagedSectionLines(text, sectionRe, lineRe) {
+  const section = String(text || '').match(sectionRe);
+  if (!section) return [];
+  const extras = [];
+  for (const raw of section[1].split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (lineRe.test(line)) continue; // managed row — rebuilt from the model
+    extras.push(line);
+  }
+  return extras;
+}
+
+function stripReferencesSection(text) {
+  return String(text || '').replace(REFERENCES_SECTION_RE, (match) => (match.startsWith('\n') ? '\n' : ''));
 }
 
 function mergeLinks(primary, secondary) {
@@ -257,12 +353,16 @@ function mergeLinks(primary, secondary) {
 }
 
 // --- YAML frontmatter machine block (OKF-style) ------------------------------
-// The machine metadata (intent/lifecycle/security/hierarchy) lives in a YAML
-// frontmatter block at the top of the body, namespaced under an `ats:` key so it
-// coexists with any other frontmatter (e.g. an OKF bundle's title/tags). A
+// The machine metadata (intent/lifecycle/security/hierarchy) lives as plain YAML
+// frontmatter keys at the top of the body — no `ats:` wrapper, so it reads like
+// any OKF/Obsidian note. ATS owns the keys in ATS_FRONTMATTER_KEYS and rewrites
+// only those; every other frontmatter key (e.g. an OKF bundle's title/tags) is
+// preserved verbatim. Tasks written by older versions nested everything under an
+// `ats:` key — that legacy shape is still read and migrates to flat on write. A
 // zero-dependency emitter/parser covers exactly the shapes ATS writes: nested
 // maps, block sequences of string scalars, booleans, and numbers.
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+const ATS_FRONTMATTER_KEYS = Object.freeze(['version', 'intent', 'lifecycle', 'security', 'hierarchy']);
 
 function needsYamlQuote(s) {
   return s === ''
@@ -411,7 +511,10 @@ function minimalMachine(m) {
   if (m.hierarchy.kind && m.hierarchy.kind !== 'unspecified') out.hierarchy = { kind: m.hierarchy.kind };
   if (Object.keys(security).length) out.security = security;
   if (Object.keys(out).length === 0) return {};
-  return { version: TASK_CONTEXT_VERSION, ...out };
+  // No `version` line in the emitted frontmatter: it reads as noise to both a
+  // human and an agent. The schema version is implicit (parse fills it back in
+  // via normalizeTaskMetadata), and a future bump can be inferred from shape.
+  return out;
 }
 
 export function parseTaskMetadata(content = '') {
@@ -419,11 +522,18 @@ export function parseTaskMetadata(content = '') {
   let machine = null;
   let legacyLinks = [];
 
-  // Current format: YAML frontmatter, machine data under the `ats:` key.
+  // Current format: machine keys live at the top level of the frontmatter.
+  // Legacy: everything nested under an `ats:` key (read for back-compat).
   const fm = text.match(FRONTMATTER_RE);
   if (fm) {
     const { segments } = splitFrontmatterSegments(fm[1]);
-    if (segments.ats) machine = parseYaml(segments.ats.slice(1).join('\n'));
+    if (segments.ats) {
+      machine = parseYaml(segments.ats.slice(1).join('\n'));
+    } else {
+      const lines = [];
+      for (const key of ATS_FRONTMATTER_KEYS) if (segments[key]) lines.push(...segments[key]);
+      if (lines.length) machine = parseYaml(lines.join('\n'));
+    }
   }
 
   // Back-compat: legacy `<!-- ats:context -->` JSON block.
@@ -451,7 +561,8 @@ export function parseTaskMetadata(content = '') {
   if (machine !== null && (typeof machine !== 'object' || Array.isArray(machine))) {
     return normalizeTaskMetadata(machine);
   }
-  return normalizeTaskMetadata({ ...(machine || {}), links: mergeLinks(relatedLinks, legacyLinks) });
+  const references = parseReferencesSection(text);
+  return normalizeTaskMetadata({ ...(machine || {}), links: mergeLinks(relatedLinks, legacyLinks), references });
 }
 
 export function writeTaskMetadata(content = '', metadata = {}) {
@@ -464,31 +575,43 @@ export function writeTaskMetadata(content = '', metadata = {}) {
     throw new Error('Malformed ATS context block. Repair it before ATS writes metadata.');
   }
   const normalized = normalizeTaskMetadata(metadata);
-  const { links } = normalized;
+  const { links, references } = normalized;
   const minimal = minimalMachine(normalized);
 
   // Strip the legacy block, any existing frontmatter (preserving foreign keys),
-  // and the Related section, then rebuild: frontmatter, body, Related.
+  // and the Related/References sections, then rebuild in order:
+  // frontmatter, body, Related, References.
   let body = text.replace(BLOCK_RE, '');
   const foreign = [];
   const fm = body.match(FRONTMATTER_RE);
   if (fm) {
     const { order, segments } = splitFrontmatterSegments(fm[1]);
-    for (const key of order) if (key !== 'ats') foreign.push(segments[key].join('\n'));
+    // Drop ATS-owned keys (and the legacy `ats:` wrapper); preserve the rest.
+    for (const key of order) {
+      if (key === 'ats' || ATS_FRONTMATTER_KEYS.includes(key)) continue;
+      foreign.push(segments[key].join('\n'));
+    }
     body = body.slice(fm[0].length);
   }
-  body = stripRelatedSection(body).trimEnd();
+  body = stripReferencesSection(stripRelatedSection(body)).trimEnd();
 
   // Only emit frontmatter when there is foreign frontmatter to preserve or
-  // non-default ATS metadata to record. A link-only task carries none.
+  // non-default ATS metadata to record. A link-only task carries none. ATS keys
+  // sit flat at the top level (no `ats:` wrapper) alongside any foreign keys.
   const fmParts = [...foreign];
-  if (Object.keys(minimal).length) fmParts.push(`ats:\n${emitYaml(minimal, 1)}`);
+  if (Object.keys(minimal).length) fmParts.push(emitYaml(minimal, 0));
   const frontmatter = fmParts.length ? `---\n${fmParts.join('\n')}\n---` : '';
-  const related = renderRelatedSection(links);
+  // Add-only: carry over any human-authored rows from the existing sections that
+  // ATS does not manage, so a rewrite never drops what a person put there.
+  const relatedExtras = unmanagedSectionLines(text, RELATED_SECTION_RE, RELATED_LINE_RE);
+  const refExtras = unmanagedSectionLines(text, REFERENCES_SECTION_RE, REFERENCE_LINE_RE);
+  const related = renderRelatedSection(links, relatedExtras);
+  const refs = renderReferencesSection(references, refExtras);
   const parts = [];
   if (frontmatter) parts.push(frontmatter);
   if (body) parts.push(body);
   if (related) parts.push(related);
+  if (refs) parts.push(refs);
   return parts.join('\n\n');
 }
 
@@ -770,9 +893,21 @@ export async function checkTaskAccess(adapter, projectId, taskId, request, optio
   };
 }
 
+// Related links point only to active work or note tasks — never to a completed
+// task. Adapters report completion differently (TickTick: status 'completed' or
+// numeric 2; a generic `completed` flag), so check the shapes we may see and
+// default to "active" when no signal is present (e.g. note tasks, fake adapters).
+function isCompletedTask(task) {
+  const status = task?.status;
+  return status === 'completed' || status === 2 || status === '2' || task?.completed === true;
+}
+
 export async function addTaskLink(adapter, source, target, type) {
   if (!LINK_TYPES.includes(type)) throw new Error(`Link type must be one of: ${LINK_TYPES.join(', ')}.`);
   const targetTask = await adapter.getTask(target.projectId, target.taskId);
+  if (isCompletedTask(targetTask)) {
+    throw new Error('Cannot link a completed task; Related links point to active or note tasks only.');
+  }
   const ref = linkedRef(adapter, target, type, targetTask);
   return updateMetadata(adapter, source.projectId, source.taskId, (metadata) => {
     const duplicate = metadata.links.some((link) =>
@@ -812,6 +947,42 @@ export async function removeTaskLink(adapter, source, target, type) {
 export async function listTaskLinks(adapter, projectId, taskId) {
   const task = await adapter.getTask(projectId, taskId);
   return { task: { id: task.id, projectId: task.projectId, title: task.title }, links: metadataForTask(task).links };
+}
+
+// References are resources the task consults (external URLs or reference notes),
+// keyed by url. Adding the same url again updates its title/desc in place.
+export async function addTaskReference(adapter, source, input = {}) {
+  const url = optionalString(input.url, 'reference.url');
+  if (!url) throw new Error('A reference needs a url.');
+  const title = optionalString(input.title, 'reference.title') || url;
+  const desc = optionalString(input.desc, 'reference.desc');
+  const ref = { ...(desc ? { desc } : {}), title, url };
+  return updateMetadata(adapter, source.projectId, source.taskId, (metadata) => {
+    const exists = metadata.references.some((r) => r.url === url);
+    const references = exists
+      ? metadata.references.map((r) => (r.url === url ? ref : r))
+      : [...metadata.references, ref];
+    return { ...metadata, references };
+  });
+}
+
+export async function removeTaskReference(adapter, source, url) {
+  if (!url) throw new Error('Removing a reference needs a url.');
+  let removed = false;
+  const result = await updateMetadata(adapter, source.projectId, source.taskId, (metadata) => ({
+    ...metadata,
+    references: metadata.references.filter((r) => {
+      const matches = r.url === url;
+      if (matches) removed = true;
+      return !matches;
+    }),
+  }));
+  return { ...result, removed };
+}
+
+export async function listTaskReferences(adapter, projectId, taskId) {
+  const task = await adapter.getTask(projectId, taskId);
+  return { task: { id: task.id, projectId: task.projectId, title: task.title }, references: metadataForTask(task).references };
 }
 
 function inspectCorpus(corpus) {
