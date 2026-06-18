@@ -112,6 +112,18 @@ export async function buildSuggestions(adapter, { dismissed = new Set() } = {}) 
   return { suggestions: suggestions.slice(0, MAX_CARDS), corpus: { size: corpus.length, active: active.length, fromCache, ageMs } };
 }
 
+// Put a single "▶ Next:" line at the top of the body (under any frontmatter),
+// replacing a previous one so there's one current next action.
+export function withNextLine(content, action) {
+  const text = String(content || '');
+  const line = `**▶ Next:** ${action}`;
+  const fm = text.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  const head = fm ? fm[0] : '';
+  let body = fm ? text.slice(fm[0].length) : text;
+  body = body.replace(/^\*\*▶ Next:\*\*.*\r?\n?/m, '').replace(/^\s+/, '');
+  return (head ? `${head.replace(/\s*$/, '')}\n\n` : '') + line + (body ? `\n\n${body}` : '');
+}
+
 function audit(entry) {
   try {
     recordAction(entry);
@@ -139,9 +151,13 @@ export async function executeSuggestion(adapter, s) {
     return { ok: true, summary: 'Intent set' };
   }
   if (s.exec.type === 'next') {
-    // The operator accepts the proposed next action — record it for the agent.
-    audit({ agent: 'operator', action: 'suggestion.next-action', task: s.exec.source, sources: [], output: s.exec.nextAction || '', advanced: false });
-    return { ok: true, summary: 'Noted as next action' };
+    // Write the chosen next action to the top of the task body (just under any
+    // frontmatter), replacing a prior one. No date/priority change.
+    const { projectId, taskId } = s.exec.source;
+    const task = await adapter.getTask(projectId, taskId);
+    await adapter.updateTask(projectId, taskId, { content: withNextLine(task.content, s.exec.nextAction || '') });
+    audit({ agent: 'operator', action: 'suggestion.next-action', task: s.exec.source, sources: [], output: s.exec.nextAction || '', advanced: true });
+    return { ok: true, summary: 'Next action added' };
   }
   throw new Error(`unknown suggestion type: ${s.exec.type}`);
 }
