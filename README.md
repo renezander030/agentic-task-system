@@ -105,7 +105,11 @@ This adds structure *after* semantic search: retrieval proposes candidates; link
 
 ATS security is a decision point for cooperating clients, not an operating-system sandbox: it cannot intercept unrelated shell, filesystem, or network tools.
 
-The metadata lives in a YAML frontmatter block (namespaced under `ats:`) at the top of the normal task body, so the same model works through every six-method adapter. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the complete path.
+The metadata lives in plain YAML frontmatter at the top of the normal task body — intent, lifecycle, security, and hierarchy — with typed relationships in a `## Related` section and consulted resources (URLs and reference notes) in a `## References` section below. Writes are add-only: ATS never drops a row a human added or a link whose target later completed, so the same model works through every six-method adapter without ever clobbering your own edits. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the complete path.
+
+![A task in TickTick — "Add OAuth login (Google + GitHub)" — showing ATS's flat YAML frontmatter (intent: outcome, why, done-when; hierarchy), an untouched human paragraph, a Related section with a bare up-link plus typed supports/depends-on links, and a References section of consulted docs.](docs/images/task-body-demo.png)
+
+*A real task in TickTick: ATS keeps the flat frontmatter, the `## Related` graph (a bare up-link / Map-of-Content pointer, plus typed `supports` / `depends-on` relations), and `## References` in sync — leaving your own notes untouched.*
 
 **5. Agents can react to state changes without becoming open-ended autonomous runners.**
 `ats events snapshot` establishes a local baseline; `ats events watch --json` emits deterministic `task.created`, `task.updated`, `task.completed`, `task.removed`, `task.unblocked`, `task.validity.changed`, and `task.due.soon` envelopes as newline-delimited JSON. Before advancing the checkpoint, ATS atomically stages those content-free envelopes in a mode-`0600` local spool. `ats events pending` recovers unacknowledged observations after a consumer or output failure; `ats events ack` removes them only after explicit consumer acknowledgement. Stable event IDs deduplicate retries.
