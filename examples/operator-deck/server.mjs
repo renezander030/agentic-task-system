@@ -47,7 +47,19 @@ async function getAdapter() {
 // permanent — it expires after the cooldown (see cadence COOLDOWN_MS), so the task
 // can be reprocessed after a quiet window of ~24-48h. `covered` keys off the active
 // set too, so the task stops being re-picked only during that window.
-function retire(id) { dismiss(id); saveQueue(loadQueue().filter((c) => c.id !== id)); }
+async function retire(id, source) {
+  // Capture the task's modifiedTime NOW (after any approve write) as the re-arm
+  // baseline: a later user edit pushes modifiedTime past this and re-offers the card.
+  let mtime = null;
+  try {
+    if (source?.projectId && source?.taskId) {
+      const t = await (await getAdapter()).getTask(source.projectId, source.taskId);
+      if (t?.modifiedTime) mtime = new Date(t.modifiedTime).getTime();
+    }
+  } catch { /* mtime is optional — fall back to time-only cooldown */ }
+  dismiss(id, Date.now(), mtime);
+  saveQueue(loadQueue().filter((c) => c.id !== id));
+}
 
 const taskOf = (card) => card?.exec?.source?.taskId || card.id;
 
@@ -121,23 +133,23 @@ const server = http.createServer(async (req, res) => {
       if (action === 'modify') {
         let note = '';
         try { note = String(JSON.parse((await readBody(req)) || '{}').note || '').slice(0, 1000); } catch { /* none */ }
-        if (!DEMO) { retire(id); recordModify(id, note); }
+        if (!DEMO) { await retire(id, card?.exec?.source); recordModify(id, note); }
         return send(res, 200, { ok: true, modified: id, note }, JSONH);
       }
 
       if (action === 'reject') {
         if (!DEMO) {
           const st = loadState(); if (card) recordSkip(st, taskOf(card)); saveState(st);
-          retire(id);
+          await retire(id, card?.exec?.source);
         }
         return send(res, 200, { ok: true, dismissed: id }, JSONH);
       }
 
       // approve
       if (!card) return send(res, 410, { error: 'suggestion no longer available' }, JSONH);
-      if (DRYRUN) { if (!DEMO) retire(id); return send(res, 200, { ok: true, dryRun: true, summary: `Would ${card.kind}` }, JSONH); }
+      if (DRYRUN) { if (!DEMO) await retire(id, card?.exec?.source); return send(res, 200, { ok: true, dryRun: true, summary: `Would ${card.kind}` }, JSONH); }
       const result = await executeSuggestion(await getAdapter(), card);
-      retire(id);
+      await retire(id, card?.exec?.source);
       return send(res, 200, { ok: true, ...result }, JSONH);
     }
 

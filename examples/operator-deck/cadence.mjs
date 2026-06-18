@@ -39,10 +39,12 @@ const COOLDOWN_MS = Number(process.env.OPERATOR_COOLDOWN_HOURS || 36) * 3600 * 1
 // Returns { map: {id: dismissedAt}, migrated } — migrates the legacy array
 // (permanent set) into a timestamped map so old entries get a fresh window once.
 function loadDismissedRaw(now = Date.now()) {
+  const norm = (v) => (typeof v === 'number' ? { at: v, mtime: null } : { at: v?.at || 0, mtime: v?.mtime ?? null });
   try {
     const j = JSON.parse(fs.readFileSync(DISMISS_FILE, 'utf-8'));
-    if (Array.isArray(j)) { const map = {}; for (const id of j) map[id] = now; return { map, migrated: true }; }
-    return { map: (j && typeof j === 'object') ? j : {}, migrated: false };
+    if (Array.isArray(j)) { const map = {}; for (const id of j) map[id] = { at: now, mtime: null }; return { map, migrated: true }; }
+    if (j && typeof j === 'object') { const map = {}; for (const [id, v] of Object.entries(j)) map[id] = norm(v); return { map, migrated: false }; }
+    return { map: {}, migrated: false };
   } catch { return { map: {}, migrated: false }; }
 }
 export function saveDismissed(map) { fs.mkdirSync(path.dirname(DISMISS_FILE), { recursive: true }); fs.writeFileSync(DISMISS_FILE, JSON.stringify(map)); }
@@ -50,12 +52,12 @@ export function saveDismissed(map) { fs.mkdirSync(path.dirname(DISMISS_FILE), { 
 // are persisted away on read so timestamps don't keep getting reset.
 export function activeDismissed(now = Date.now()) {
   const { map, migrated } = loadDismissedRaw(now);
-  const live = {}; const set = new Set();
-  for (const [id, at] of Object.entries(map)) { if (now - at < COOLDOWN_MS) { live[id] = at; set.add(id); } }
+  const live = {};
+  for (const [id, info] of Object.entries(map)) if (now - info.at < COOLDOWN_MS) live[id] = info;
   if (migrated || Object.keys(live).length !== Object.keys(map).length) saveDismissed(live);
-  return set;
+  return live;
 }
-export function dismiss(id, now = Date.now()) { const { map } = loadDismissedRaw(now); map[id] = now; saveDismissed(map); }
+export function dismiss(id, now = Date.now(), mtime = null) { const { map } = loadDismissedRaw(now); map[id] = { at: now, mtime: (mtime == null ? null : Number(mtime)) }; saveDismissed(map); }
 
 async function noteProjectSet(adapter) {
   const set = new Set();
@@ -95,7 +97,7 @@ function draftIntents(tasks) {
   });
 }
 
-export async function buildBatch(adapter, { existingIds = new Set(), dismissed = activeDismissed(), limit = BATCH } = {}) {
+export async function buildBatch(adapter, { existingIds = new Set(), dismissed: dismissedMap = activeDismissed(), limit = BATCH } = {}) {
   const now = Date.now();
   const { corpus } = await loadCorpus(adapter, { cache: true });
   const notes = await noteProjectSet(adapter);
@@ -103,6 +105,18 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed =
   const active = corpus.filter((t) => !isCompleted(t));
   const meta = new Map(active.map((t) => [t.id, safeMeta(t)]));
   const state = loadState();
+
+  // Re-arm: a dismissed card is only still suppressing if the user hasn't edited
+  // the task since it was dismissed. modifiedTime now exceeding the baseline we
+  // captured (after the agent's own write) means a human edit -> offer it again.
+  const mtimeById = new Map(active.map((t) => [t.id, new Date(t.modifiedTime || 0).getTime()]));
+  const primaryTaskId = (id) => { const p = String(id).split(':'); return p[0] === 'relate' ? p[1] : p.slice(1).join(':'); };
+  const dismissed = new Set();
+  for (const [id, info] of Object.entries(dismissedMap)) {
+    const cur = mtimeById.get(primaryTaskId(id)) || 0;
+    if (info.mtime != null && cur > info.mtime) continue; // user touched the task -> re-armed
+    dismissed.add(id);
+  }
 
   // Candidate pool: active, non-note, titled, and NOT decayed out (benched).
   const candidates = active.filter((t) => !isNote(t) && (t.title || '').trim() && !benchReason(state, t, now));
