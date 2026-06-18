@@ -49,9 +49,18 @@ DECK_DRYRUN=1 node server.mjs
 DECK_DEMO=1 node server.mjs
 ```
 
-Env: `OPERATOR_PORT` (8094), `OPERATOR_TOKEN` (require `Authorization: Bearer` on
-writes), `OPERATOR_ORIGIN` (CORS allow-origin for a separately hosted deck),
-`DECK_DEMO` / `DECK_DRYRUN`.
+Env: `PORT` / `OPERATOR_PORT` (8094; Render sets `PORT`), `OPERATOR_TOKEN`
+(require `Authorization: Bearer` on writes), `OPERATOR_ORIGIN` (CORS allow-origin
+for a separately hosted deck), `DECK_DEMO` / `DECK_DRYRUN`.
+
+## Deploy
+
+- **UI** → Cloudflare Pages (static `web/` + Pages Functions). Free, always on.
+- **This backend** → any Node host. There's a one-click [Deploy to Render](../../render.yaml)
+  blueprint (root `render.yaml`); it boots in `DECK_DEMO=1` so it runs with zero
+  config. To wire your real tasks: set `DECK_DEMO=0` and authenticate the adapter
+  (TickTick token via `~/.config/ats`, or your adapter's env). Keep `DECK_DRYRUN=1`
+  while you trust it, then drop it to let approvals mutate real tasks.
 
 ## Files
 

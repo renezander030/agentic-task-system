@@ -1,0 +1,21 @@
+# Render blueprint — one-click deploy of the ATS operator-deck backend.
+# The "Deploy to Render" button in the README points here. Render reads this
+# file, builds the backend, and gives you a URL. It boots in demo mode (no
+# credentials needed); set DECK_DEMO=0 + your task-system token to go live.
+# Spec: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: ats-operator-backend
+    runtime: node
+    plan: free
+    rootDir: examples/operator-deck
+    buildCommand: npm install
+    startCommand: node server.mjs
+    healthCheckPath: /api/suggestions
+    envVars:
+      - key: DECK_DEMO
+        value: "1"        # demo mode: serves curated cards, never touches real tasks. Set to 0 to wire your own.
+      - key: OPERATOR_ORIGIN
+        value: "*"        # CORS: lets the Cloudflare-hosted deck call this backend. Lock to your deck URL later.
+      - key: OPERATOR_TOKEN
+        sync: false       # optional: set a long token to require it on writes (Authorization: Bearer ...).

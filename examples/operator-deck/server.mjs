@@ -13,7 +13,7 @@ import { buildSuggestions, executeSuggestion } from './suggest.mjs';
 import { DEMO_SUGGESTIONS } from './demo-data.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.OPERATOR_PORT || 8094);
+const PORT = Number(process.env.PORT || process.env.OPERATOR_PORT || 8094);
 const TOKEN = process.env.OPERATOR_TOKEN || ''; // when set, required as Bearer on writes
 const DEMO = process.env.DECK_DEMO === '1'; // serve curated demo cards, never touch the real corpus
 const DRYRUN = DEMO || process.env.DECK_DRYRUN === '1'; // demo always dry-runs; approve never mutates

@@ -1,0 +1,17 @@
+{
+  "name": "ats-operator-deck",
+  "version": "0.8.1",
+  "private": true,
+  "type": "module",
+  "description": "HITL operator-deck backend for ATS — serves the suggestion API the Cloudflare-hosted deck calls.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@reneza/ats-core": "^0.8.1",
+    "@reneza/ats-adapter-ticktick": "^0.8.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

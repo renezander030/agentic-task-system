@@ -130,6 +130,53 @@ _Plus the plumbing that makes it usable every turn: a disk-backed corpus cache t
 
 The agent proposes the next best action across your tools; you approve, reject, or send it back to refine — with a thumb (the demo up top). The [operator deck](examples/operator-deck/) is a mobile card surface that derives suggestions from live ATS state and across adapters — *link this Notion spec to its TickTick task*, *archive this stale spike* — running the real action on approve (`relateTask`, `setTaskLifecycle`). Swipe right to approve, left to reject, **up to modify** (hands it back to the agent; it returns later). Suggestions are generated on demand from the current corpus, so the deck is always current; when nothing is pending it shows **All caught up**.
 
+## Deploy it yourself
+
+ATS is two pieces, and each has an easy home — only the backend is yours to run.
+
+```mermaid
+flowchart TB
+  user(["📱 You"])
+
+  subgraph CF["Cloudflare Pages · free, always-on"]
+    deck["Operator deck — the swipe UI"]
+  end
+
+  subgraph HOST["VPS or Render · the part you deploy"]
+    agent["AI agent + ATS core<br/>MCP server · CLI · suggestion engine"]
+    search["Qdrant + Ollama<br/>optional semantic search"]
+  end
+
+  subgraph TASKS["Your tools · already in the cloud"]
+    tt["TickTick"]
+    nt["Notion"]
+    ob["Obsidian"]
+    gg["Gmail / Calendar"]
+  end
+
+  user --> deck
+  deck -->|"approve · reject · modify"| agent
+  agent --> tt & nt & ob & gg
+  agent -.->|"rank"| search
+```
+
+- **The operator deck (the app on your phone)** lives on **Cloudflare Pages** — free, always on, nothing to manage.
+- **The backend (the agent that reads your tasks and proposes the next action)** runs on a **VPS or Render**. This is the only part you deploy.
+- **Your task systems** (TickTick, Notion, Obsidian, Gmail/Calendar) are already in the cloud — ATS just connects to them.
+
+### Deploy the backend in one click
+
+No terminal needed:
+
+1. Click the button. It opens **Render** (a hosting service with a free tier).
+2. Sign in with GitHub and confirm — Render reads the blueprint in this repo and builds everything for you.
+3. In a few minutes you get a URL like `https://ats-operator-backend.onrender.com`. That's your backend.
+4. It starts in **demo mode** so you see it working right away. To connect your own tasks, open the service's **Environment** tab in Render, set `DECK_DEMO` to `0`, and add your task-system token (see [the operator-deck guide](examples/operator-deck/)).
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/renezander030/agentic-task-system)
+
+> Render's free tier sleeps after inactivity, so the first request after a quiet spell takes ~30s to wake. Any cheap VPS — or a paid Render instance — keeps it always on.
+
 ## Architecture
 
 ```
