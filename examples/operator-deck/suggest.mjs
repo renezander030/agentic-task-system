@@ -36,6 +36,18 @@ export async function buildSuggestions(adapter, { dismissed = new Set() } = {}) 
   const active = corpus.filter((t) => !isCompleted(t));
   const meta = new Map(active.map((t) => [t.id, safeMeta(t)]));
 
+  // Note-kind tasks (e.g. TickTick "Permanent Notes") can't carry typed task
+  // links to each other, and they belong in References, not Related. Skip them
+  // from relate pairing so we never suggest linking two notes.
+  let noteProjects = new Set();
+  try {
+    const projects = await adapter.listProjects();
+    for (const p of projects || []) {
+      if (String(p?.kind || '').toUpperCase() === 'NOTE') { if (p.fullId) noteProjects.add(p.fullId); if (p.id) noteProjects.add(p.id); }
+    }
+  } catch { /* adapters without project kinds: treat nothing as a note */ }
+  const isNote = (t) => noteProjects.has(t.projectId);
+
   const alreadyConnected = (a, b) => {
     const ma = meta.get(a.id);
     const mb = meta.get(b.id);
@@ -52,7 +64,7 @@ export async function buildSuggestions(adapter, { dismissed = new Set() } = {}) 
     const norm = [...tokens(t.title)].sort().join(' ');
     if (norm && !repByNorm.has(norm)) repByNorm.set(norm, t);
   }
-  const reps = [...repByNorm.values()].filter((t) => tokens(t.title).size >= MIN_TOKENS);
+  const reps = [...repByNorm.values()].filter((t) => tokens(t.title).size >= MIN_TOKENS && !isNote(t));
 
   // 1) Relate clearly-related-but-distinct tasks that aren't linked yet.
   for (let i = 0; i < reps.length; i += 1) {
@@ -79,6 +91,7 @@ export async function buildSuggestions(adapter, { dismissed = new Set() } = {}) 
   // 2) Archive tasks that have gone stale, so dead context stops steering work.
   const now = Date.now();
   for (const t of active) {
+    if (isNote(t)) continue; // notes don't go stale / get archived
     if (!t.dueDate) continue;
     const days = Math.round((now - new Date(t.dueDate).getTime()) / 86400000);
     if (!Number.isFinite(days) || days < STALE_DAYS) continue;
