@@ -31,7 +31,31 @@ const safeMeta = (t) => { try { return taskMetadataForRead(t); } catch { return 
 
 export function loadQueue() { try { return JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf-8')); } catch { return []; } }
 export function saveQueue(q) { fs.mkdirSync(path.dirname(QUEUE_FILE), { recursive: true }); fs.writeFileSync(QUEUE_FILE, JSON.stringify(q, null, 0)); }
-function loadDismissed() { try { return new Set(JSON.parse(fs.readFileSync(DISMISS_FILE, 'utf-8'))); } catch { return new Set(); } }
+
+// Dismissed cards aren't suppressed forever — a card acted on (approve/reject/
+// modify) goes quiet for COOLDOWN_MS, then expires so the task can be reprocessed
+// (the cadence may then offer a NEW card; the goal card stays gated by hasGoal).
+const COOLDOWN_MS = Number(process.env.OPERATOR_COOLDOWN_HOURS || 36) * 3600 * 1000;
+// Returns { map: {id: dismissedAt}, migrated } — migrates the legacy array
+// (permanent set) into a timestamped map so old entries get a fresh window once.
+function loadDismissedRaw(now = Date.now()) {
+  try {
+    const j = JSON.parse(fs.readFileSync(DISMISS_FILE, 'utf-8'));
+    if (Array.isArray(j)) { const map = {}; for (const id of j) map[id] = now; return { map, migrated: true }; }
+    return { map: (j && typeof j === 'object') ? j : {}, migrated: false };
+  } catch { return { map: {}, migrated: false }; }
+}
+export function saveDismissed(map) { fs.mkdirSync(path.dirname(DISMISS_FILE), { recursive: true }); fs.writeFileSync(DISMISS_FILE, JSON.stringify(map)); }
+// Ids still inside the quiet window. Expired entries (and the legacy array form)
+// are persisted away on read so timestamps don't keep getting reset.
+export function activeDismissed(now = Date.now()) {
+  const { map, migrated } = loadDismissedRaw(now);
+  const live = {}; const set = new Set();
+  for (const [id, at] of Object.entries(map)) { if (now - at < COOLDOWN_MS) { live[id] = at; set.add(id); } }
+  if (migrated || Object.keys(live).length !== Object.keys(map).length) saveDismissed(live);
+  return set;
+}
+export function dismiss(id, now = Date.now()) { const { map } = loadDismissedRaw(now); map[id] = now; saveDismissed(map); }
 
 async function noteProjectSet(adapter) {
   const set = new Set();
@@ -71,7 +95,7 @@ function draftIntents(tasks) {
   });
 }
 
-export async function buildBatch(adapter, { existingIds = new Set(), dismissed = loadDismissed(), limit = BATCH } = {}) {
+export async function buildBatch(adapter, { existingIds = new Set(), dismissed = activeDismissed(), limit = BATCH } = {}) {
   const now = Date.now();
   const { corpus } = await loadCorpus(adapter, { cache: true });
   const notes = await noteProjectSet(adapter);

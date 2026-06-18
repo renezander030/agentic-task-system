@@ -9,11 +9,10 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { executeSuggestion, recordModify } from './suggest.mjs';
 import { DEMO_SUGGESTIONS } from './demo-data.mjs';
-import { loadQueue, saveQueue, buildBatch, BATCH } from './cadence.mjs';
+import { loadQueue, saveQueue, buildBatch, BATCH, activeDismissed, dismiss } from './cadence.mjs';
 import { loadState, saveState, recordImpression, recordSkip } from './state.mjs';
 
 function readBody(req) {
@@ -31,7 +30,6 @@ const TOKEN = process.env.OPERATOR_TOKEN || '';
 const DEMO = process.env.DECK_DEMO === '1';
 const DRYRUN = DEMO || process.env.DECK_DRYRUN === '1';
 const ALLOW_ORIGIN = process.env.OPERATOR_ORIGIN || '*';
-const DISMISS_FILE = process.env.OPERATOR_DISMISS_FILE || path.join(os.homedir(), '.config', 'ats', 'operator-dismissed.json');
 const BUFFER = 2 * BATCH; // keep roughly two pages buffered so refill is instant
 
 let adapter;
@@ -42,14 +40,14 @@ async function getAdapter() {
   return adapter;
 }
 
-function loadDismissed() { try { return new Set(JSON.parse(fs.readFileSync(DISMISS_FILE, 'utf-8'))); } catch { return new Set(); } }
-function saveDismissed(set) { fs.mkdirSync(path.dirname(DISMISS_FILE), { recursive: true }); fs.writeFileSync(DISMISS_FILE, JSON.stringify([...set])); }
 // Retire a card once it's been acted on (approve/reject/modify): drop it from the
-// queue AND remember the id so the cadence never re-offers it. Without the dismiss,
-// a just-approved card regenerates from the (slightly stale) corpus cache and the
-// same card reappears on the deck. `covered` in cadence keys off this set too, so
-// the task itself stops being re-picked this cycle.
-function retire(id) { const d = loadDismissed(); d.add(id); saveDismissed(d); saveQueue(loadQueue().filter((c) => c.id !== id)); }
+// queue AND record a dated dismissal so the cadence doesn't immediately re-offer it.
+// Without the dismiss, a just-approved card regenerates from the (slightly stale)
+// corpus cache and the same card reappears on the deck. The dismissal is NOT
+// permanent — it expires after the cooldown (see cadence COOLDOWN_MS), so the task
+// can be reprocessed after a quiet window of ~24-48h. `covered` keys off the active
+// set too, so the task stops being re-picked only during that window.
+function retire(id) { dismiss(id); saveQueue(loadQueue().filter((c) => c.id !== id)); }
 
 const taskOf = (card) => card?.exec?.source?.taskId || card.id;
 
@@ -62,7 +60,7 @@ async function ensureBuffer({ wait = false } = {}) {
   building = true;
   try {
     const q = loadQueue();
-    const batch = await buildBatch(await getAdapter(), { existingIds: new Set(q.map((c) => c.id)), dismissed: loadDismissed(), limit: BUFFER - q.length });
+    const batch = await buildBatch(await getAdapter(), { existingIds: new Set(q.map((c) => c.id)), dismissed: activeDismissed(), limit: BUFFER - q.length });
     saveQueue([...loadQueue(), ...batch.filter((b) => !loadQueue().some((c) => c.id === b.id))]);
   } catch (e) { console.error('[cadence] buildBatch failed:', e.message); } finally { building = false; }
 }
