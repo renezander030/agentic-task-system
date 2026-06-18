@@ -25,8 +25,7 @@
   }
   #app { width: 100%; max-width: 460px; min-height: 100dvh; display: flex; flex-direction: column; }
   .topbar { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 8px; }
-  .brand { font-family: Fraunces, serif; font-weight: 600; font-size: 19px; letter-spacing: -.01em; }
-  .brand b { color: var(--teal); }
+  .brand-logo { height: 30px; width: auto; mix-blend-mode: multiply; }
   .count { font: 500 12px/1 "JetBrains Mono", monospace; color: var(--muted); background: var(--paper); border: 1px solid var(--line); padding: 6px 9px; border-radius: 999px; }
   .deck { position: relative; flex: 1; margin: 8px 18px 0; }
   .card {
@@ -39,11 +38,12 @@
   .badge.archive { color: #9A6A1E; background: #F3E9D6; }
   .items { display: flex; flex-direction: column; gap: 13px; margin-top: 6px; }
   .srow { display: flex; align-items: center; gap: 11px; }
-  .logo { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; font: 700 14px/1 Inter; flex: none; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .logo { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font: 700 15.5px/1 Inter; flex: none; box-shadow: 0 1px 2px rgba(0,0,0,.18); }
   .logo svg { width: 17px; height: 17px; }
   .srow-title { font-family: Fraunces, serif; font-weight: 500; font-size: 16.5px; line-height: 1.25; }
   .srow-sys { font: 500 10px/1 "JetBrains Mono", monospace; color: var(--muted); letter-spacing: .04em; margin-top: 3px; text-transform: lowercase; }
-  .action { font-family: Fraunces, serif; font-weight: 600; font-size: 27px; line-height: 1.16; letter-spacing: -.01em; margin: 24px 0 0; }
+  .action { font-family: Fraunces, serif; font-weight: 600; font-size: 27px; line-height: 1.16; letter-spacing: -.01em; margin: 24px 0 12px; }
+  .explain { font-size: 14.5px; line-height: 1.5; color: var(--muted); }
   .fliphint { margin-top: auto; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   .back-head { font: 600 11px/1 Inter; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
   .back-body { font-size: 15.5px; line-height: 1.55; color: var(--ink); }
@@ -90,7 +90,7 @@ const Info = (p) => html`<${Icon} d="M12 11v6M12 7h.01M12 21a9 9 0 100-18 9 9 0 
 const TickMark = html`<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>`;
 const ADAPTERS = {
   ticktick:   { bg: '#4772FA', fg: '#fff', glyph: TickMark },
-  notion:     { bg: '#fff', fg: '#111', border: '1px solid #111', glyph: 'N' },
+  notion:     { bg: '#191919', fg: '#fff', glyph: 'N' },
   confluence: { bg: '#1868DB', fg: '#fff', glyph: 'C' },
   slack:      { bg: '#611F69', fg: '#fff', glyph: '#' },
   github:     { bg: '#111', fg: '#fff', glyph: 'gh' },
@@ -108,7 +108,6 @@ function Card({ card, top, onDecide }) {
   const yesOp = useTransform(x, [20, 130], [0, 1]);
   const noOp = useTransform(x, [-130, -20], [1, 0]);
   const modOp = useTransform(y, [-130, -20], [1, 0]);
-  const [flipped, setFlipped] = useState(false);
 
   const end = (_e, info) => {
     const ax = Math.abs(info.offset.x), ay = Math.abs(info.offset.y);
@@ -123,28 +122,20 @@ function Card({ card, top, onDecide }) {
   return html`
     <${M.div} class="card" style=${style}
       drag=${top} dragSnapToOrigin dragElastic=${0.55} onDragEnd=${end}
-      onTap=${() => top && setFlipped((f) => !f)}
       initial=${{ opacity: 0 }} animate=${{ opacity: 1 }}
       exit=${{ ...(card.__exit === 'up' ? { y: -780 } : { x: (card.__dir || 1) * 480 }), opacity: 0, transition: { duration: 0.3 } }}>
       <${M.div} class=${'stamp yes'} style=${{ opacity: yesOp }}>APPROVE<//>
       <${M.div} class=${'stamp no'} style=${{ opacity: noOp }}>REJECT<//>
       <${M.div} class=${'stamp mod'} style=${{ opacity: modOp }}>MODIFY<//>
-      ${flipped
-        ? html`<div style=${{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div class="back-head">${card.back.heading}</div>
-            <div class="back-body">${card.back.body}</div>
-            <div class="fliphint" style=${{ marginTop: 'auto' }}><${Info} style=${{ width: 15, height: 15 }} /> tap to flip back</div>
-          </div>`
-        : html`<${React.Fragment}>
-            <div class="items">
-              ${items.map((it, i) => html`<div class="srow" key=${i}>
-                <${Logo} a=${it.adapter} />
-                <div><div class="srow-title">${it.title}</div><div class="srow-sys">${it.adapter}</div></div>
-              </div>`)}
-            </div>
-            <div class="action">${card.action}</div>
-            <div class="fliphint"><${Info} style=${{ width: 15, height: 15 }} /> → approve · ← reject · ↑ modify · tap for why</div>
-          </${React.Fragment}>`}
+      <div class="items">
+        ${items.map((it, i) => html`<div class="srow" key=${i}>
+          <${Logo} a=${it.adapter} />
+          <div><div class="srow-title">${it.title}</div><div class="srow-sys">${it.adapter}</div></div>
+        </div>`)}
+      </div>
+      <div class="action">${card.action}</div>
+      <div class="explain">${(card.back && card.back.body) || card.explain || ''}</div>
+      <div class="fliphint" style=${{ marginTop: 'auto' }}><${Info} style=${{ width: 15, height: 15 }} /> → approve · ← reject · ↑ modify</div>
     </${M.div}>`;
 }
 
@@ -187,7 +178,7 @@ function App() {
 
   return html`<${React.Fragment}>
     <div class="topbar">
-      <div class="brand">ats <b>·</b> operator</div>
+      <img class="brand-logo" src="logo.png" alt="ATS — Agentic Task System" />
       <div class="count">${cards.length} pending</div>
     </div>
     ${cards.length === 0

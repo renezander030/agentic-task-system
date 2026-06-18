@@ -109,7 +109,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true, dismissed: id }, { 'Content-Type': 'application/json' });
       }
       // approve
-      if (DRYRUN) return send(res, 200, { ok: true, dryRun: true, summary: `Would ${s.kind}` }, { 'Content-Type': 'application/json' });
+      if (DRYRUN) return send(res, 200, { ok: true, dryRun: true, summary: s.kind === 'archive' ? 'Archived' : 'Linked' }, { 'Content-Type': 'application/json' });
       const result = await executeSuggestion(await getAdapter(), s);
       byId.delete(id);
       return send(res, 200, { ok: true, ...result }, { 'Content-Type': 'application/json' });
