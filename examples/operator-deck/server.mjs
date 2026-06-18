@@ -9,8 +9,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { buildSuggestions, executeSuggestion } from './suggest.mjs';
+import { buildSuggestions, executeSuggestion, recordModify } from './suggest.mjs';
 import { DEMO_SUGGESTIONS } from './demo-data.mjs';
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let d = '';
+    req.on('data', (c) => { d += c; if (d.length > 1e5) req.destroy(); });
+    req.on('end', () => resolve(d));
+    req.on('error', () => resolve(''));
+  });
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || process.env.OPERATOR_PORT || 8094);
@@ -88,6 +97,17 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/suggestions') {
       return send(res, 200, await suggestionsPayload(), { 'Content-Type': 'application/json' });
+    }
+
+    const modify = url.pathname.match(/^\/api\/suggestions\/(.+)\/modify$/);
+    if (req.method === 'POST' && modify) {
+      if (!authed(req)) return send(res, 401, { error: 'unauthorized' }, { 'Content-Type': 'application/json' });
+      const id = decodeURIComponent(modify[1]);
+      let note = '';
+      try { note = String(JSON.parse((await readBody(req)) || '{}').note || '').slice(0, 1000); } catch { /* no body */ }
+      byId.delete(id);
+      if (!DEMO) recordModify(id, note);
+      return send(res, 200, { ok: true, modified: id, note }, { 'Content-Type': 'application/json' });
     }
 
     const approve = url.pathname.match(/^\/api\/suggestions\/(.+)\/approve$/);

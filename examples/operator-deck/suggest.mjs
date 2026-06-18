@@ -122,3 +122,10 @@ export async function executeSuggestion(adapter, s) {
   }
   throw new Error(`unknown suggestion type: ${s.exec.type}`);
 }
+
+// The operator swiped up / hit modify and (optionally) typed what should change.
+// Record it to the action ledger so the agent can pick the suggestion back up,
+// reshape it per the note, and re-offer it.
+export function recordModify(suggestionId, note) {
+  audit({ agent: 'operator', action: 'suggestion.modify', sources: [], output: note || '(no note)', advanced: false, metadata: { suggestionId, note: note || '' } });
+}

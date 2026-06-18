@@ -65,6 +65,15 @@
     border: 1px solid var(--line); font-size: 14.5px; font-weight: 600; padding: 11px 18px; border-radius: 999px;
     display: flex; align-items: center; gap: 8px; box-shadow: 0 12px 28px -10px rgba(40,36,28,.4); white-space: nowrap; }
   .toast::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex: none; }
+  .sheet-bg { position: fixed; inset: 0; background: rgba(32,32,28,.42); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+  .sheet { background: var(--paper); width: 100%; max-width: 460px; border-radius: 22px 22px 0 0; padding: 22px 20px calc(22px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 34px -12px rgba(40,36,28,.45); }
+  .sheet-h { font-family: Fraunces, serif; font-weight: 600; font-size: 20px; }
+  .sheet-sub { color: var(--muted); font-size: 14px; margin: 5px 0 14px; }
+  .sheet-ta { width: 100%; min-height: 96px; resize: none; border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px; font: 15px/1.5 Inter; background: var(--cream); color: var(--ink); box-sizing: border-box; }
+  .sheet-ta:focus { outline: none; border-color: var(--teal); }
+  .sheet-btns { display: flex; gap: 10px; margin-top: 14px; }
+  .sheet-cancel { padding: 13px 20px; border-radius: 999px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 600 14.5px Inter; cursor: pointer; }
+  .sheet-send { flex: 1; padding: 13px; border-radius: 999px; border: none; background: var(--teal); color: #fff; font: 600 14.5px Inter; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -149,6 +158,8 @@ function App() {
   const [corpus, setCorpus] = useState(null);
   const [toast, setToast] = useState(null);
   const [err, setErr] = useState(null);
+  const [modifying, setModifying] = useState(null); // card being modified (opens the sheet)
+  const [modText, setModText] = useState('');
 
   useEffect(() => {
     fetch(`${API}/api/suggestions`).then((r) => r.json()).then((d) => {
@@ -159,21 +170,32 @@ function App() {
   const flash = (m) => { setToast(m); setTimeout(() => setToast(null), 1600); };
 
   const decide = useCallback((card, action, dir) => {
+    if (action === 'modify') { setModifying(card); setModText(''); return; } // open the sheet
     card.__dir = dir;
-    card.__exit = action === 'modify' ? 'up' : 'x';
+    card.__exit = 'x';
     setCards((cur) => cur.filter((c) => c.id !== card.id));
-    if (action === 'modify') {
-      // Hand the card back to the agent to refine; it returns to the stack later.
-      flash('Sent back to the agent · returns later');
-      fetch(`${API}/api/suggestions/${encodeURIComponent(card.id)}/modify`, { method: 'POST' }).catch(() => {});
-      setTimeout(() => setCards((cur) => [...cur, { ...card, __dir: undefined, __exit: undefined }]), 1600);
-      return;
-    }
     fetch(`${API}/api/suggestions/${encodeURIComponent(card.id)}/${action}`, { method: 'POST' })
       .then((r) => r.json())
       .then((res) => flash(action === 'approve' ? (res.summary || 'Approved') : 'Dismissed'))
       .catch(() => flash('Saved offline'));
   }, []);
+
+  const sendModify = useCallback(() => {
+    const card = modifying;
+    if (!card) return;
+    const note = modText.trim();
+    card.__exit = 'up';
+    card.__dir = 0;
+    setModifying(null);
+    setModText('');
+    setCards((cur) => cur.filter((c) => c.id !== card.id));
+    flash(note ? 'Sent back with your note · returns later' : 'Sent back to the agent · returns later');
+    fetch(`${API}/api/suggestions/${encodeURIComponent(card.id)}/modify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note }),
+    }).catch(() => {});
+    // It returns to the stack later, now carrying the operator's note for the agent.
+    setTimeout(() => setCards((cur) => [...cur, { ...card, __dir: undefined, __exit: undefined, note }]), 1600);
+  }, [modifying, modText]);
 
   if (err) return html`<div class="empty"><div class="big">Backend unreachable</div><div>${err}</div></div>`;
   if (!cards) return html`<div class="empty"><div>Loading suggestions…</div></div>`;
@@ -198,6 +220,19 @@ function App() {
         <button class="btn no" onClick=${() => { buzz(18); decide(top, 'reject', -1); }} aria-label="Reject"><${X} /></button>
         <button class="btn mod" onClick=${() => { buzz(22); decide(top, 'modify', 0); }} aria-label="Modify (send back to agent)"><${Up} /></button>
         <button class="btn yes" onClick=${() => { buzz(18); decide(top, 'approve', 1); }} aria-label="Approve"><${Check} /></button>
+      </div>` : null}
+    ${modifying ? html`<div class="sheet-bg" onClick=${() => setModifying(null)}>
+        <${M.div} class="sheet" onClick=${(e) => e.stopPropagation()}
+          initial=${{ y: 320 }} animate=${{ y: 0 }} exit=${{ y: 320 }} transition=${{ type: 'spring', stiffness: 380, damping: 34 }}>
+          <div class="sheet-h">Modify this action</div>
+          <div class="sheet-sub">${modifying.action}</div>
+          <textarea class="sheet-ta" placeholder="What should change? e.g. use depends-on, link to the spec note instead, or revisit next week…"
+            value=${modText} onInput=${(e) => setModText(e.target.value)} autofocus></textarea>
+          <div class="sheet-btns">
+            <button class="sheet-cancel" onClick=${() => setModifying(null)}>Cancel</button>
+            <button class="sheet-send" onClick=${sendModify}>Send to agent</button>
+          </div>
+        </${M.div}>
       </div>` : null}
     ${toast ? html`<div class="toast">${toast}</div>` : null}
   </${React.Fragment}>`;
