@@ -54,6 +54,7 @@ import {
   addTaskReference,
   removeTaskReference,
   listTaskReferences,
+  relateTask,
   buildTaskGraph,
   evaluateTaskHierarchy,
   contextForTask,
@@ -243,6 +244,9 @@ async function main() {
       case 'reference':
         result = await handleReference();
         break;
+      case 'relate':
+        result = await handleRelate();
+        break;
       case 'graph':
         result = await handleGraph();
         break;
@@ -349,6 +353,7 @@ function helpFor(command) {
     case 'lifecycle':
     case 'link':
     case 'reference':
+    case 'relate':
     case 'graph':
     case 'context':
     case 'ledger':
@@ -359,7 +364,7 @@ function helpFor(command) {
 
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
-  'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'graph', 'context', 'ledger', 'security', 'events',
+  'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
   'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
@@ -1000,6 +1005,28 @@ async function handleReference() {
     return listTaskReferences(adapter, projectId, taskId);
   }
   console.log(getAgentLayerHelp('reference'));
+}
+
+async function handleRelate() {
+  // ats relate SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK [--type T] [--desc D]
+  const sourceProjectId = args.subcommand;
+  const [sourceTaskId, targetProjectId, targetTaskId] = args.positional;
+  if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId) {
+    console.error('Usage: ats relate SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK [--type TYPE] [--desc DESC]');
+    process.exit(1);
+  }
+  const adapter = await loadAdapter();
+  const result = await relateTask(
+    adapter,
+    { projectId: sourceProjectId, taskId: sourceTaskId },
+    { projectId: targetProjectId, taskId: targetTaskId },
+    { type: args.options.type || 'related', desc: args.options.desc }
+  );
+  auditCliWrite('task.related', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
+    routedTo: result.routedTo,
+    target: { projectId: targetProjectId, taskId: targetTaskId },
+  });
+  return result;
 }
 
 async function handleGraph() {

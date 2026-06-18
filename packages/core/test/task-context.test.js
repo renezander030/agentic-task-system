@@ -10,6 +10,7 @@ import {
   listTaskReferences,
   parseTaskMetadata,
   promoteExploration,
+  relateTask,
   removeTaskLink,
   removeTaskReference,
   setTaskIntent,
@@ -25,10 +26,14 @@ function fakeAdapter() {
     { id: 'old', projectId: 'demo', title: 'Old launch guidance', content: 'An obsolete rollout recommendation.', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
     { id: 'noise', projectId: 'demo', title: 'Launch party supplies', content: 'Banners and snacks.', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
     { id: 'done', projectId: 'demo', title: 'Shipped task', content: '', tags: [], status: 'completed', modifiedTime: '2026-01-01T00:00:00Z' },
+    { id: 'refnote', projectId: 'notes', title: 'A reference note', content: 'Reference material.', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
   ];
   return {
     tasks,
-    listProjects: async () => [{ id: 'demo', name: 'Demo Project' }],
+    listProjects: async () => [
+      { id: 'demo', fullId: 'demo', name: 'Demo Project', kind: 'TASK' },
+      { id: 'notes', fullId: 'notes', name: 'Permanent Notes', kind: 'NOTE' },
+    ],
     listTasksInProject: async () => tasks,
     getTask: async (projectId, taskId) => {
       const task = tasks.find((item) => item.projectId === projectId && item.id === taskId);
@@ -444,6 +449,49 @@ test('add-only: a human-authored Related/References row ATS does not manage surv
   assert.match(out, /- see the launch runbook a teammate pinned/);
   assert.match(out, /- spec: \[Doc\]\(https:\/\/x\.test\/d\)/);
   assert.match(out, /- ask Dana about the rollout window/);
+});
+
+test('auto-route: a note goes to References, an active task goes to Related, a completed task is refused', async () => {
+  const adapter = fakeAdapter();
+  // Active task -> Related.
+  const toRelated = await relateTask(adapter, { projectId: 'demo', taskId: 'plan' }, { projectId: 'demo', taskId: 'decision' });
+  assert.equal(toRelated.routedTo, 'related');
+  assert.ok(toRelated.metadata.links.some((l) => l.taskId === 'decision'));
+
+  // Note (note-kind project) -> References.
+  const toRefs = await relateTask(adapter, { projectId: 'demo', taskId: 'plan' }, { projectId: 'notes', taskId: 'refnote' }, { desc: 'reading' });
+  assert.equal(toRefs.routedTo, 'references');
+  assert.ok(toRefs.metadata.references.some((r) => r.url === 'demo://notes/refnote' && r.title === 'A reference note'));
+  // It did NOT become a Related link.
+  assert.ok(!toRefs.metadata.links.some((l) => l.taskId === 'refnote'));
+
+  // Completed task -> refused, in either section.
+  await assert.rejects(
+    () => relateTask(adapter, { projectId: 'demo', taskId: 'plan' }, { projectId: 'demo', taskId: 'done' }),
+    /completed task/
+  );
+});
+
+test('links dedup and remove correctly when urlFor rewrites the project id (e.g. TickTick inbox)', async () => {
+  // An adapter whose urlFor shortens a canonical project id the way TickTick maps
+  // its per-user inbox id down to "inbox" in deep links.
+  const tasks = [
+    { id: 'src', projectId: 'p', title: 'Source', content: '', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
+    { id: 'tgt', projectId: 'inbox127', title: 'Inbox target', content: '', tags: [], modifiedTime: '2026-01-01T00:00:00Z' },
+  ];
+  const adapter = {
+    getTask: async (_pid, tid) => tasks.find((t) => t.id === tid),
+    updateTask: async (_pid, tid, patch) => { const t = tasks.find((x) => x.id === tid); Object.assign(t, patch); return t; },
+    urlFor: ({ projectId, taskId }) => `https://tt/#p/${projectId === 'inbox127' ? 'inbox' : projectId}/tasks/${taskId}`,
+    listProjects: async () => [{ id: 'p', fullId: 'p', kind: 'TASK' }, { id: 'inbox127', fullId: 'inbox127', kind: 'TASK' }],
+  };
+  // Add via the short id, then again via the canonical id — must dedup to one.
+  await addTaskLink(adapter, { projectId: 'p', taskId: 'src' }, { projectId: 'inbox', taskId: 'tgt' }, 'related');
+  const second = await addTaskLink(adapter, { projectId: 'p', taskId: 'src' }, { projectId: 'inbox127', taskId: 'tgt' }, 'related');
+  assert.equal(second.metadata.links.filter((l) => l.taskId === 'tgt').length, 1);
+  // Remove via either id form must match the stored (url-recovered) id.
+  const { removed } = await removeTaskLink(adapter, { projectId: 'p', taskId: 'src' }, { projectId: 'inbox', taskId: 'tgt' }, 'related');
+  assert.equal(removed, true);
 });
 
 test('add-only: a Related link is not pruned when its target later completes', async () => {

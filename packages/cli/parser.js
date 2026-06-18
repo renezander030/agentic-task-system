@@ -486,6 +486,22 @@ generic up-link / Map-of-Content pointer and renders bare (- [Title](url)); the
 other types keep their "- type:" prefix. Completed tasks cannot be linked.
 
 ${common}`,
+    relate: `ats relate - Auto-route a relevant target into the right section
+
+Usage:
+  ats relate SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK [--type TYPE] [--desc DESC]
+
+ATS picks the section from what the target is, so you just say "this is relevant":
+  active task  ->  ## Related   (a typed link; default "related")
+  note         ->  ## References (a resource the task consults)
+  completed    ->  refused (Related/References hold active or note tasks only)
+
+Options:
+  --type <type>   Relation type when routed to Related (default "related")
+  --desc <text>   Description when routed to References
+Returns routedTo: "related" | "references".
+
+${common}`,
     reference: `ats reference - External URLs and reference notes a task consults
 
 Usage:

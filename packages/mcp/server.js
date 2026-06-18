@@ -38,6 +38,7 @@ import {
   addTaskReference,
   removeTaskReference,
   listTaskReferences,
+  relateTask,
   buildTaskGraph,
   evaluateTaskHierarchy,
   contextForTask,
@@ -119,9 +120,10 @@ export function createServer(adapter) {
       '',
       'Default workflow when given a task to work on:',
       '- Read first with `context_for_task` (returns intent, related links, and references).',
-      '- Refine intent with `set_task_intent`. Discover related work with `find`/`similar`, then record it:',
-      '  `add_task_link` for relationships to active tasks (use `related` for a plain/up-link, or a typed',
-      '  relation like supports/depends-on/parent), and `add_task_reference` for URLs and notes you consulted.',
+      '- Refine intent with `set_task_intent`. Discover related work with `find`/`similar`, then record it.',
+      '  Easiest: `relate_task` auto-files a target by what it is (active task -> Related, note -> References,',
+      '  completed -> refused). Or be explicit: `add_task_link` (use `related` for a plain/up-link, or a typed',
+      '  relation like supports/depends-on/parent) and `add_task_reference` for URLs and notes you consulted.',
       '- These tools auto-create the sections on a new task, so the pattern grows into existing tasks over time.',
       '',
       'Add-only and conflict-safe — never destroy human or historical context:',
@@ -506,6 +508,37 @@ export function createServer(adapter) {
           type,
           target: { projectId: targetProjectId, taskId: targetTaskId },
           removed: result.removed,
+        });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'relate_task',
+    'WRITE. Auto-routes a relevant target into the right section by what it is: an active task goes to "## Related" (a typed link), a note goes to "## References", and a completed task is refused. Prefer this when you just know a target is relevant and do not want to choose the section yourself. Returns routedTo: "related" | "references".',
+    {
+      sourceProjectId: z.string(),
+      sourceTaskId: z.string(),
+      targetProjectId: z.string(),
+      targetTaskId: z.string(),
+      type: z.enum(['blocks', 'depends-on', 'parent', 'conflicts-with', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']).optional(),
+      desc: z.string().optional(),
+      agent: z.string().optional(),
+    },
+    async ({ sourceProjectId, sourceTaskId, targetProjectId, targetTaskId, type, desc, agent }) => {
+      try {
+        const result = await relateTask(
+          adapter,
+          { projectId: sourceProjectId, taskId: sourceTaskId },
+          { projectId: targetProjectId, taskId: targetTaskId },
+          { type: type || 'related', desc }
+        );
+        auditWrite('task.related', result, { projectId: sourceProjectId, taskId: sourceTaskId }, agent, {
+          routedTo: result.routedTo,
+          target: { projectId: targetProjectId, taskId: targetTaskId },
         });
         return ok(result);
       } catch (e) {

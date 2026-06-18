@@ -705,18 +705,30 @@ function taskRef(value, field) {
   return { projectId, taskId };
 }
 
+// Build the canonical { projectId, taskId } a stored link carries: whatever
+// parseRef recovers from the link's URL. The URL is the round-trip source of
+// truth (parseRelatedSection re-derives ids from it), so storing those exact
+// ids keeps the in-memory model identical before and after a write — without
+// it, an adapter that rewrites ids in urlFor (e.g. TickTick shortens the inbox
+// project id) would make dedup and removal miss by comparing two id forms.
+function canonicalRef(adapter, projectId, taskId) {
+  const url = adapter.urlFor({ projectId, taskId });
+  const ref = parseRef(url);
+  return { projectId: ref?.projectId ?? projectId, taskId: ref?.taskId ?? taskId, url };
+}
+
 function linkedRef(adapter, target, type, targetTask, createdAt = new Date().toISOString()) {
-  // Use the resolved task's canonical ids (the adapter contract returns full
-  // ids), not the raw input ref which may be a short id — the deep link must
-  // carry full ids to resolve in the storage app.
-  const projectId = targetTask.projectId || target.projectId;
-  const taskId = targetTask.id || target.taskId;
+  // Resolve through the adapter's canonical ids, then normalize to the URL form
+  // so the stored ids match what a later parse recovers.
+  const rawProjectId = targetTask.projectId || target.projectId;
+  const rawTaskId = targetTask.id || target.taskId;
+  const { projectId, taskId, url } = canonicalRef(adapter, rawProjectId, rawTaskId);
   return {
     type,
     projectId,
     taskId,
     title: targetTask.title,
-    url: adapter.urlFor({ projectId, taskId }),
+    url,
     createdAt,
   };
 }
@@ -902,6 +914,23 @@ function isCompletedTask(task) {
   return status === 'completed' || status === 2 || status === '2' || task?.completed === true;
 }
 
+// A note is a task that lives in a note-kind project (e.g. TickTick "Permanent
+// Notes"). Used by auto-routing to file notes under References and active tasks
+// under Related. Adapters without project kinds simply report no notes (so
+// everything routes to Related), which is a safe default.
+async function isNoteTarget(adapter, task) {
+  if (typeof adapter.listProjects !== 'function') return false;
+  let projects;
+  try {
+    projects = await adapter.listProjects();
+  } catch {
+    return false;
+  }
+  const pid = task?.projectId;
+  const project = (projects || []).find((p) => p && (p.fullId === pid || p.id === pid));
+  return Boolean(project && String(project.kind || '').toUpperCase() === 'NOTE');
+}
+
 export async function addTaskLink(adapter, source, target, type) {
   if (!LINK_TYPES.includes(type)) throw new Error(`Link type must be one of: ${LINK_TYPES.join(', ')}.`);
   const targetTask = await adapter.getTask(target.projectId, target.taskId);
@@ -920,15 +949,13 @@ export async function addTaskLink(adapter, source, target, type) {
 
 export async function removeTaskLink(adapter, source, target, type) {
   if (!LINK_TYPES.includes(type)) throw new Error(`Link type must be one of: ${LINK_TYPES.join(', ')}.`);
-  // Resolve the target to its canonical full ids so a short-id argument still
-  // matches links stored with full ids. Fall back to the raw ref if the target
-  // can no longer be fetched (e.g. it was deleted).
-  let projectId = target.projectId;
-  let taskId = target.taskId;
+  // Resolve the target to the same canonical (URL-recovered) ids stored links
+  // carry, so a short-id argument still matches. Fall back to the raw ref if the
+  // target can no longer be fetched (e.g. it was deleted).
+  let { projectId, taskId } = canonicalRef(adapter, target.projectId, target.taskId);
   try {
     const targetTask = await adapter.getTask(target.projectId, target.taskId);
-    projectId = targetTask.projectId || projectId;
-    taskId = targetTask.id || taskId;
+    ({ projectId, taskId } = canonicalRef(adapter, targetTask.projectId || projectId, targetTask.id || taskId));
   } catch {
     // keep the ids as given
   }
@@ -983,6 +1010,28 @@ export async function removeTaskReference(adapter, source, url) {
 export async function listTaskReferences(adapter, projectId, taskId) {
   const task = await adapter.getTask(projectId, taskId);
   return { task: { id: task.id, projectId: task.projectId, title: task.title }, references: metadataForTask(task).references };
+}
+
+// Auto-route a relevant target into the right section by what it is — so an
+// agent just says "this is relevant" and ATS files it correctly:
+//   active task  -> Related   (a typed link; default `related`)
+//   note         -> References (a resource the task consults)
+//   completed    -> refused    (Related/References hold active or note tasks only)
+// Returns the underlying add result plus `routedTo: 'related' | 'references'`.
+export async function relateTask(adapter, source, target, { type = 'related', desc } = {}) {
+  const targetTask = await adapter.getTask(target.projectId, target.taskId);
+  if (isCompletedTask(targetTask)) {
+    throw new Error('Cannot relate a completed task; Related and References hold active or note tasks only.');
+  }
+  if (await isNoteTarget(adapter, targetTask)) {
+    const projectId = targetTask.projectId || target.projectId;
+    const taskId = targetTask.id || target.taskId;
+    const url = adapter.urlFor({ projectId, taskId });
+    const result = await addTaskReference(adapter, source, { url, title: targetTask.title, desc });
+    return { ...result, routedTo: 'references' };
+  }
+  const result = await addTaskLink(adapter, source, target, type);
+  return { ...result, routedTo: 'related' };
 }
 
 function inspectCorpus(corpus) {

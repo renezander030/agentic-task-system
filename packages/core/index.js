@@ -32,6 +32,7 @@ export {
   addTaskReference,
   removeTaskReference,
   listTaskReferences,
+  relateTask,
   buildTaskGraph,
   evaluateTaskHierarchy,
   contextForTask,

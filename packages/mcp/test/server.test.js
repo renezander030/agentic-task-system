@@ -114,6 +114,7 @@ test('registers the full ATS tool set', async () => {
     'poll_task_events',
     'promote_exploration',
     'record_action',
+    'relate_task',
     'remove_task_link',
     'remove_task_reference',
     'set_task_hierarchy',
