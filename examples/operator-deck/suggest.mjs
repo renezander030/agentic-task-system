@@ -1,7 +1,7 @@
 // Suggestion engine for the HITL operator deck. Derives "best next actions" from
 // the live ATS corpus (no external proposal queue), so every card is grounded in
 // real task state and approving it performs a real ATS mutation.
-import { loadCorpus, taskMetadataForRead, relateTask, setTaskLifecycle, recordAction } from '@reneza/ats-core';
+import { loadCorpus, taskMetadataForRead, relateTask, setTaskLifecycle, setTaskIntent, recordAction } from '@reneza/ats-core';
 
 const STALE_DAYS = 21;
 const RELATE_MIN = 0.5;  // share at least half the words...
@@ -132,6 +132,16 @@ export async function executeSuggestion(adapter, s) {
     await setTaskLifecycle(adapter, s.exec.source.projectId, s.exec.source.taskId, { status: 'archived' });
     audit({ agent: 'operator-deck', action: 'suggestion.approved', task: s.exec.source, sources: [], output: 'archived', advanced: true });
     return { ok: true, summary: 'Archived (lifecycle)' };
+  }
+  if (s.exec.type === 'intent') {
+    await setTaskIntent(adapter, s.exec.source.projectId, s.exec.source.taskId, s.exec.intent);
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: s.exec.source, sources: [], output: 'intent set', advanced: true });
+    return { ok: true, summary: 'Intent set' };
+  }
+  if (s.exec.type === 'next') {
+    // The operator accepts the proposed next action — record it for the agent.
+    audit({ agent: 'operator', action: 'suggestion.next-action', task: s.exec.source, sources: [], output: s.exec.nextAction || '', advanced: false });
+    return { ok: true, summary: 'Noted as next action' };
   }
   throw new Error(`unknown suggestion type: ${s.exec.type}`);
 }

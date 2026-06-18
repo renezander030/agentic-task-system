@@ -79,7 +79,7 @@
 <body>
 <div id="app"></div>
 <script type="module">
-import React, { useState, useEffect, useCallback } from 'https://esm.sh/react@18.3.1';
+import React, { useState, useEffect, useCallback, useRef } from 'https://esm.sh/react@18.3.1';
 import { createRoot } from 'https://esm.sh/react-dom@18.3.1/client';
 import { motion, AnimatePresence, useMotionValue, useTransform } from 'https://esm.sh/framer-motion@11.3.19?deps=react@18.3.1,react-dom@18.3.1';
 import htm from 'https://esm.sh/htm@3.1.1';
@@ -169,16 +169,33 @@ function App() {
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(null), 1600); };
 
+  // Lazy-load: when ~3 cards are left, pull the next page from the buffer.
+  const refilling = useRef(false);
+  const refill = useCallback((haveIds) => {
+    if (refilling.current) return;
+    refilling.current = true;
+    fetch(`${API}/api/refill`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ have: haveIds }) })
+      .then((r) => r.json())
+      .then((d) => { const add = (d.suggestions || []); if (add.length) setCards((c) => [...c, ...add.filter((s) => !c.some((x) => x.id === s.id))]); })
+      .catch(() => {})
+      .finally(() => { refilling.current = false; });
+  }, []);
+  const drop = useCallback((cardId) => setCards((cur) => {
+    const next = cur.filter((c) => c.id !== cardId);
+    if (next.length <= 3) refill(next.map((c) => c.id));
+    return next;
+  }), [refill]);
+
   const decide = useCallback((card, action, dir) => {
     if (action === 'modify') { setModifying(card); setModText(''); return; } // open the sheet
     card.__dir = dir;
     card.__exit = 'x';
-    setCards((cur) => cur.filter((c) => c.id !== card.id));
+    drop(card.id);
     fetch(`${API}/api/suggestions/${encodeURIComponent(card.id)}/${action}`, { method: 'POST' })
       .then((r) => r.json())
       .then((res) => flash(action === 'approve' ? (res.summary || 'Approved') : 'Dismissed'))
       .catch(() => flash('Saved offline'));
-  }, []);
+  }, [drop]);
 
   const sendModify = useCallback(() => {
     const card = modifying;
@@ -188,14 +205,12 @@ function App() {
     card.__dir = 0;
     setModifying(null);
     setModText('');
-    setCards((cur) => cur.filter((c) => c.id !== card.id));
-    flash(note ? 'Sent back with your note · returns later' : 'Sent back to the agent · returns later');
+    drop(card.id);
+    flash(note ? 'Sent back with your note' : 'Sent back to the agent');
     fetch(`${API}/api/suggestions/${encodeURIComponent(card.id)}/modify`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note }),
     }).catch(() => {});
-    // It returns to the stack later, now carrying the operator's note for the agent.
-    setTimeout(() => setCards((cur) => [...cur, { ...card, __dir: undefined, __exit: undefined, note }]), 1600);
-  }, [modifying, modText]);
+  }, [modifying, modText, drop]);
 
   if (err) return html`<div class="empty"><div class="big">Backend unreachable</div><div>${err}</div></div>`;
   if (!cards) return html`<div class="empty"><div>Loading suggestions…</div></div>`;
