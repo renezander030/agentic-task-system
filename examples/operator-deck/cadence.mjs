@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { loadCorpus, taskMetadataForRead } from '@reneza/ats-core';
 import { findSimilar } from '../../packages/adapter-ticktick/embedding.js';
 import { loadState, benchReason, driftPenalty, recencyScore, impressionPenalty } from './state.mjs';
+import { hasGoal } from './format.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const QUEUE_FILE = process.env.OPERATOR_QUEUE || path.join(os.homedir(), '.config', 'ats', 'operator-queue.json');
@@ -110,7 +111,9 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed =
   }
 
   const linked = (a, b) => { const m = meta.get(a); return m && (m.links.some((l) => l.taskId === b) || (m.references || []).some((r) => (r.url || '').includes(b))); };
-  const hasIntent = (t) => Boolean(meta.get(t.id)?.intent?.outcome);
+  // A task is "scoped" if it already has a Goal: block (Rene's prose layout) or
+  // ATS intent — so we don't keep re-suggesting a goal for it.
+  const hasIntent = (t) => hasGoal(t.content) || Boolean(meta.get(t.id)?.intent?.outcome);
   // Feed score: recency + semantic relevance to the anchor + goal/value, minus
   // impression and 2-week-drift decay.
   const scoreOf = (t) => 0.44 * recencyScore(t, now)
@@ -138,7 +141,7 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed =
         items: [{ adapter: 'ticktick', title: t.title }],
         action: d.goal ? `Goal: ${d.goal}` : d.outcome,
         back: { heading: 'Set this task’s goal & outcome', body: [d.outcome && `Outcome: ${d.outcome}`, doneWhen.length && `Done when: ${doneWhen.join(' · ')}`].filter(Boolean).join('  —  ') },
-        exec: { type: 'intent', source: { projectId: t.projectId, taskId: t.id }, intent: { outcome: d.outcome || d.goal, why: d.goal || '', doneWhen } },
+        exec: { type: 'intent', source: { projectId: t.projectId, taskId: t.id }, goal: d.goal || d.outcome, outcome: d.outcome || '' },
       });
       usedTask.add(t.id);
     }
@@ -174,7 +177,7 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed =
         items: [{ adapter: 'ticktick', title: t.title }, { adapter: 'ticktick', title: nt.title }],
         action: 'Link these two tasks',
         back: { heading: 'Why', body: `Semantically close (${Math.round(sc * 100)}%) but not linked. Approving files a Related link.` },
-        exec: { type: 'relate', source: { projectId: t.projectId, taskId: t.id }, target: { projectId: nt.projectId, taskId: nid } } });
+        exec: { type: 'relate', source: { projectId: t.projectId, taskId: t.id }, target: { projectId: nt.projectId, taskId: nid }, targetTitle: nt.title } });
       break;
     }
   }

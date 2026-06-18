@@ -1,7 +1,8 @@
 // Suggestion engine for the HITL operator deck. Derives "best next actions" from
 // the live ATS corpus (no external proposal queue), so every card is grounded in
 // real task state and approving it performs a real ATS mutation.
-import { loadCorpus, taskMetadataForRead, relateTask, setTaskLifecycle, setTaskIntent, recordAction } from '@reneza/ats-core';
+import { loadCorpus, taskMetadataForRead, relateTask, setTaskLifecycle, recordAction } from '@reneza/ats-core';
+import { setGoal, appendLog } from './format.mjs';
 
 const STALE_DAYS = 21;
 const RELATE_MIN = 0.5;  // share at least half the words...
@@ -133,33 +134,41 @@ function audit(entry) {
 }
 
 // Execute an approved suggestion against ATS. Returns a short result summary.
+// Every approve writes in Rene's layout: a "Goal:" block on top, and a dated
+// bullet in the "Log:" section recording what the agent just did. Plan/Process
+// and the rest of the body are left untouched. Terse, to counteract bloat.
 export async function executeSuggestion(adapter, s) {
   if (!s || !s.exec) throw new Error('suggestion has no executable action');
-  if (s.exec.type === 'relate') {
-    const r = await relateTask(adapter, s.exec.source, s.exec.target);
-    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: s.exec.source, sources: [], output: `relate → ${r.routedTo}`, advanced: true });
-    return { ok: true, summary: `Filed under ## ${r.routedTo === 'references' ? 'References' : 'Related'}` };
+  const e = s.exec;
+  const { projectId, taskId } = e.source;
+  const logTo = async (entry, mutate) => {
+    const t = await adapter.getTask(projectId, taskId);
+    const content = appendLog(mutate ? mutate(t.content) : t.content, entry);
+    await adapter.updateTask(projectId, taskId, { content });
+  };
+
+  if (e.type === 'relate') {
+    const r = await relateTask(adapter, e.source, e.target); // files ## Related / ## References
+    await logTo(`linked to "${e.targetTitle || 'related task'}"`);
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: e.source, sources: [], output: `relate → ${r.routedTo}`, advanced: true });
+    return { ok: true, summary: `Linked (## ${r.routedTo === 'references' ? 'References' : 'Related'})` };
   }
-  if (s.exec.type === 'archive') {
-    await setTaskLifecycle(adapter, s.exec.source.projectId, s.exec.source.taskId, { status: 'archived' });
-    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: s.exec.source, sources: [], output: 'archived', advanced: true });
+  if (e.type === 'intent') {
+    await logTo('goal set', (c) => setGoal(c, e.goal || e.outcome || ''));
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: e.source, sources: [], output: 'goal set', advanced: true });
+    return { ok: true, summary: 'Goal set' };
+  }
+  if (e.type === 'next') {
+    await logTo(`next: ${e.nextAction || ''}`);
+    audit({ agent: 'operator', action: 'suggestion.next-action', task: e.source, sources: [], output: e.nextAction || '', advanced: true });
+    return { ok: true, summary: 'Logged next action' };
+  }
+  if (e.type === 'archive') {
+    await setTaskLifecycle(adapter, projectId, taskId, { status: 'archived' });
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: e.source, sources: [], output: 'archived', advanced: true });
     return { ok: true, summary: 'Archived (lifecycle)' };
   }
-  if (s.exec.type === 'intent') {
-    await setTaskIntent(adapter, s.exec.source.projectId, s.exec.source.taskId, s.exec.intent);
-    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: s.exec.source, sources: [], output: 'intent set', advanced: true });
-    return { ok: true, summary: 'Intent set' };
-  }
-  if (s.exec.type === 'next') {
-    // Write the chosen next action to the top of the task body (just under any
-    // frontmatter), replacing a prior one. No date/priority change.
-    const { projectId, taskId } = s.exec.source;
-    const task = await adapter.getTask(projectId, taskId);
-    await adapter.updateTask(projectId, taskId, { content: withNextLine(task.content, s.exec.nextAction || '') });
-    audit({ agent: 'operator', action: 'suggestion.next-action', task: s.exec.source, sources: [], output: s.exec.nextAction || '', advanced: true });
-    return { ok: true, summary: 'Next action added' };
-  }
-  throw new Error(`unknown suggestion type: ${s.exec.type}`);
+  throw new Error(`unknown suggestion type: ${e.type}`);
 }
 
 // The operator swiped up / hit modify and (optionally) typed what should change.
