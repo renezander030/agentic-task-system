@@ -97,6 +97,26 @@ function draftIntents(tasks) {
   });
 }
 
+// Round-robin across kinds (highest-scored first within each) so a batch always
+// carries a MIX — not just goal cards. `relate` leads each round because it's the
+// underrepresented axis ("which tasks are similar, link them?"); intent/next follow.
+function pickDiverse(cards, limit) {
+  const order = ['relate', 'intent', 'next'];
+  const buckets = new Map(order.map((k) => [k, []]));
+  const extra = [];
+  for (const c of cards) (buckets.get(c.kind) || extra).push(c);
+  for (const arr of buckets.values()) arr.sort((a, b) => b.score - a.score);
+  extra.sort((a, b) => b.score - a.score);
+  const out = [];
+  let progressed = true;
+  while (out.length < limit && progressed) {
+    progressed = false;
+    for (const k of order) { const arr = buckets.get(k); if (arr.length && out.length < limit) { out.push(arr.shift()); progressed = true; } }
+  }
+  for (const c of extra) { if (out.length >= limit) break; out.push(c); }
+  return out;
+}
+
 export async function buildBatch(adapter, { existingIds = new Set(), dismissed: dismissedMap = activeDismissed(), limit = BATCH } = {}) {
   const now = Date.now();
   const { corpus } = await loadCorpus(adapter, { cache: true });
@@ -193,9 +213,14 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed: 
   }
 
   // Stage 2: relate the top-ranked tasks to their nearest semantic neighbour.
+  // Cap on relate's OWN count (not total cards): on a small refill `cards` is
+  // already full of intent/next, so a total-count cap would skip relate entirely
+  // and the queue drifts to all-goal. Generate a pool; pickDiverse selects the mix.
   const pairSeen = new Set();
+  let relateCount = 0;
+  const relateTarget = Math.max(limit, 10);
   for (const { t, s } of ranked) {
-    if (cards.length >= limit * 2) break;
+    if (relateCount >= relateTarget) break;
     if (usedTask.has(t.id)) continue;
     let neighbours = [];
     try { const r = await findSimilar(t.id, { limit: 4 }); neighbours = Array.isArray(r) ? r : (r.similar || r.results || r.tasks || []); } catch { neighbours = []; }
@@ -216,12 +241,12 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed: 
         action: 'Link these two tasks',
         back: { heading: 'Why', body: `Semantically close (${Math.round(sc * 100)}%) but not linked. Approving files a Related link.` },
         exec: { type: 'relate', source: { projectId: t.projectId, taskId: t.id }, target: { projectId: nt.projectId, taskId: nid }, targetTitle: nt.title } });
+      relateCount += 1;
       break;
     }
   }
 
-  cards.sort((a, b) => b.score - a.score);
-  return cards.slice(0, limit);
+  return pickDiverse(cards, limit);
 }
 
 // CLI: top the queue up to BATCH, appending fresh cards.
