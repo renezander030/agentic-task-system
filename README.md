@@ -121,6 +121,12 @@ The half everyone skips. Every item is hung on a "trunk" — a theme you already
 
 _Plus the plumbing that makes it usable every turn: a disk-backed corpus cache that avoids repeated store fetches, a retrieval benchmark, and a workflow-progress benchmark. ATS can now measure whether context was relevant and whether work advanced instead of treating a polished response as success. End-to-end latency depends on corpus size and enabled retrievers._
 
+## Human-in-the-loop: the operator deck
+
+The agent proposes the next best action on your task system; you approve or reject with a thumb. The [operator deck](examples/operator-deck/) is a mobile card surface that derives suggestions from live ATS state — *relate these two tasks*, *archive this stale one* — and runs the real action on approve (`relateTask`, `setTaskLifecycle`). Swipe right to approve, left to reject, tap to flip for the reasoning. Suggestions are generated on demand from the current corpus, so the deck is always current; when nothing is pending it shows **All caught up**.
+
+![Operator deck — swipe to approve agent-suggested actions](docs/images/operator-deck.gif)
+
 ## Architecture
 
 ```

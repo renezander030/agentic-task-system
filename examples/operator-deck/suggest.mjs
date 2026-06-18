@@ -1,0 +1,122 @@
+// Suggestion engine for the HITL operator deck. Derives "best next actions" from
+// the live ATS corpus (no external proposal queue), so every card is grounded in
+// real task state and approving it performs a real ATS mutation.
+import { loadCorpus, taskMetadataForRead, relateTask, setTaskLifecycle, recordAction } from '@reneza/ats-core';
+
+const STALE_DAYS = 21;
+const RELATE_MIN = 0.5;  // share at least half the words...
+const RELATE_MAX = 0.9;  // ...but not be the same task (recurring duplicates)
+const MIN_TOKENS = 2;    // ignore one-word titles — too easy to overlap spuriously
+const MAX_CARDS = 25;
+
+const isCompleted = (t) => t?.status === 'completed' || t?.raw?.status === 'completed';
+const tokens = (s) => new Set((String(s || '').toLowerCase().match(/[a-z0-9]{3,}/g)) || []);
+
+function titleOverlap(a, b) {
+  const ta = tokens(a);
+  const tb = tokens(b);
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared += 1;
+  return shared / Math.min(ta.size, tb.size);
+}
+
+function safeMeta(task) {
+  try {
+    return taskMetadataForRead(task);
+  } catch {
+    return { links: [], references: [] };
+  }
+}
+
+// Build the ranked deck of suggestions from the corpus. `dismissed` is a Set of
+// suggestion ids the operator has already swiped left on (so we don't re-offer).
+export async function buildSuggestions(adapter, { dismissed = new Set() } = {}) {
+  const { corpus, fromCache, ageMs } = await loadCorpus(adapter, { cache: true });
+  const active = corpus.filter((t) => !isCompleted(t));
+  const meta = new Map(active.map((t) => [t.id, safeMeta(t)]));
+
+  const alreadyConnected = (a, b) => {
+    const ma = meta.get(a.id);
+    const mb = meta.get(b.id);
+    const hit = (m, id) => m && (m.links.some((l) => l.taskId === id) || (m.references || []).some((r) => (r.url || '').includes(id)));
+    return hit(ma, b.id) || hit(mb, a.id);
+  };
+
+  const suggestions = [];
+
+  // Collapse recurring/identical tasks to one representative per normalized title
+  // so a repeating task doesn't spawn N² near-duplicate relate cards.
+  const repByNorm = new Map();
+  for (const t of active) {
+    const norm = [...tokens(t.title)].sort().join(' ');
+    if (norm && !repByNorm.has(norm)) repByNorm.set(norm, t);
+  }
+  const reps = [...repByNorm.values()].filter((t) => tokens(t.title).size >= MIN_TOKENS);
+
+  // 1) Relate clearly-related-but-distinct tasks that aren't linked yet.
+  for (let i = 0; i < reps.length; i += 1) {
+    for (let j = i + 1; j < reps.length; j += 1) {
+      const a = reps[i];
+      const b = reps[j];
+      const sim = titleOverlap(a.title, b.title);
+      if (sim < RELATE_MIN || sim >= RELATE_MAX) continue;
+      if (alreadyConnected(a, b)) continue;
+      const id = `relate:${a.id}:${b.id}`;
+      if (dismissed.has(id)) continue;
+      suggestions.push({
+        id,
+        kind: 'relate',
+        score: sim,
+        front: { badge: 'Relate', title: a.title, subtitle: `↔ ${b.title}` },
+        back: { heading: 'Why', body: `These two share ${Math.round(sim * 100)}% of their wording but have no link. Approving adds a Related link — ATS auto-routes it (active task → Related, note → References).` },
+        exec: { type: 'relate', source: { projectId: a.projectId, taskId: a.id }, target: { projectId: b.projectId, taskId: b.id } },
+      });
+    }
+  }
+
+  // 2) Archive tasks that have gone stale, so dead context stops steering work.
+  const now = Date.now();
+  for (const t of active) {
+    if (!t.dueDate) continue;
+    const days = Math.round((now - new Date(t.dueDate).getTime()) / 86400000);
+    if (!Number.isFinite(days) || days < STALE_DAYS) continue;
+    const id = `archive:${t.id}`;
+    if (dismissed.has(id)) continue;
+    suggestions.push({
+      id,
+      kind: 'archive',
+      score: Math.min(1, days / 180),
+      front: { badge: 'Archive', title: t.title, subtitle: `Overdue ${days} days` },
+      back: { heading: 'Why', body: `No movement for ${days} days. Approving sets lifecycle: archived (reversible) so ATS stops surfacing it as live context.` },
+      exec: { type: 'archive', source: { projectId: t.projectId, taskId: t.id } },
+    });
+  }
+
+  suggestions.sort((a, b) => b.score - a.score);
+  return { suggestions: suggestions.slice(0, MAX_CARDS), corpus: { size: corpus.length, active: active.length, fromCache, ageMs } };
+}
+
+function audit(entry) {
+  try {
+    recordAction(entry);
+  } catch {
+    // ledger disabled or unavailable — non-fatal for the operator channel
+  }
+}
+
+// Execute an approved suggestion against ATS. Returns a short result summary.
+export async function executeSuggestion(adapter, s) {
+  if (!s || !s.exec) throw new Error('suggestion has no executable action');
+  if (s.exec.type === 'relate') {
+    const r = await relateTask(adapter, s.exec.source, s.exec.target);
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: s.exec.source, sources: [], output: `relate → ${r.routedTo}`, advanced: true });
+    return { ok: true, summary: `Filed under ## ${r.routedTo === 'references' ? 'References' : 'Related'}` };
+  }
+  if (s.exec.type === 'archive') {
+    await setTaskLifecycle(adapter, s.exec.source.projectId, s.exec.source.taskId, { status: 'archived' });
+    audit({ agent: 'operator-deck', action: 'suggestion.approved', task: s.exec.source, sources: [], output: 'archived', advanced: true });
+    return { ok: true, summary: 'Archived (lifecycle)' };
+  }
+  throw new Error(`unknown suggestion type: ${s.exec.type}`);
+}
