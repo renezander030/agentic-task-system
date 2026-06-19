@@ -243,6 +243,29 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 
 ## Available adapters
 
+**Why an adapter instead of pointing your agent straight at the backend's API?**
+A raw Airtable or Google call returns *that* backend's rows; an adapter makes the
+backend part of one retrieval surface:
+
+- **Fused, ranked retrieval across every source.** One query returns a single
+  RRF-ranked, deduped list spanning Airtable + Google + your task app — not N
+  separate tool calls the model has to stitch together itself.
+- **Top-k, not token dumps.** Core runs the hybrid keyword+dense retrieval and
+  hands back only what's relevant, so the agent never loads a whole base into
+  context or hand-writes `filterByFormula` / Sheets ranges it tends to get wrong.
+- **One contract, every backend.** Auth, pagination, rate limits, and payload
+  shape collapse into the same six-method `Task`/`Project` vocabulary — add a
+  backend and nothing in your prompts changes. Caching, the MCP surface, and
+  deep links come for free.
+- **The credential stays in the adapter.** A scoped Airtable PAT or a dedicated
+  read-only Google user is the security boundary, instead of handing broad API
+  access to the model's tool layer.
+
+It's memory/retrieval infrastructure, not an API wrapper. For a single live
+transactional write to one backend, call the API directly — the adapter earns its
+keep the moment you want that data to be **persistent, searchable context fused
+with everything else.**
+
 | Adapter         | Status            | Storage                         |
 | --------------- | ----------------- | ------------------------------- |
 | `ticktick`      | reference         | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
