@@ -1,7 +1,7 @@
 {
-  "name": "@reneza/ats-adapter-notion",
+  "name": "@reneza/ats-adapter-composite",
   "version": "0.8.1",
-  "description": "Notion adapter for Agentic Task System. Expose any Notion database as agent-queryable pages through ATS retrieval, RRF fusion, and MCP — a database is a project, a page is a task. Adapter, not migration.",
+  "description": "Cross-source adapter for the Agentic Task System. Query GitHub + Notion + TickTick + any ATS backends as ONE fused corpus: a single `ats find` returns one RRF-ranked list across all of them, each result tagged with its backend. The thing a single-vendor MCP server can't do.",
   "type": "module",
   "main": "index.js",
   "files": [
@@ -18,7 +18,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/renezander030/agentic-task-system.git",
-    "directory": "packages/adapter-notion"
+    "directory": "packages/adapter-composite"
   },
   "homepage": "https://github.com/renezander030/agentic-task-system#readme",
   "bugs": {
@@ -26,11 +26,10 @@
   },
   "author": "René Zander",
   "keywords": [
-    "notion",
-    "notion-api",
-    "notion-mcp",
-    "notion-mcp-server",
-    "notion-agent-memory",
+    "composite",
+    "cross-source",
+    "multi-source",
+    "federated-search",
     "agent-memory",
     "agent-context",
     "context-engineering",

@@ -57,8 +57,13 @@ ats find "deployment runbook"
 </p>
 
 <p align="center">
-  <img src="assets/demo-fusion.gif" alt="ats find — one query fused across GitHub, Notion, and TickTick with RRF" width="760" />
-  <br><em>One <code>ats find</code> across <strong>GitHub + Notion + TickTick</strong>, fused and ranked by RRF — the one thing no single-vendor MCP server can do.</em>
+  <img src="assets/demo-fusion.gif" alt="ats find — one query fused across GitHub, Notion, and TickTick, ranked by RRF" width="760" />
+  <br><em>One <code>ats find</code> across <strong>GitHub + Notion + TickTick</strong> via the <a href="packages/adapter-composite/">composite adapter</a>, ranked by RRF. Your connectors give the agent access; this is the semantic layer that lands the first query on the right answer.</em>
+</p>
+
+<p align="center">
+  <img src="assets/semantic-layer.png" alt="Claude's built-in memory vs the ATS semantic layer — right answer on the first try, fewer steps" width="760" />
+  <br><em>ATS is <strong>task-first</strong>: your task manager is the agent's memory, with supporting tools (GitHub, Notion, docs) fused in as context — not a pile of <code>MEMORY.md</code> files the agent writes and forgets.</em>
 </p>
 
 ## Why this exists
@@ -206,6 +211,7 @@ agentic-task-system/
 │   ├── adapter-google/             # Google Sheets/Docs/Slides as a read-only corpus
 │   ├── adapter-notion/             # Notion databases + pages (page body as markdown)
 │   ├── adapter-github/             # GitHub issues + discussions as text records
+│   ├── adapter-composite/          # cross-source: query many backends as one fused corpus
 │   ├── cli/                        # `ats` command
 │   └── mcp/                        # `@reneza/ats-mcp` — MCP server
 ├── docs/
@@ -249,13 +255,18 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 
 ## Available adapters
 
-**Why an adapter instead of pointing your agent straight at the backend's API?**
-A raw Airtable or Google call returns *that* backend's rows; an adapter makes the
-backend part of one retrieval surface:
+**You already have connectors. ATS is the semantic layer they're missing.**
+Every vendor ships an official MCP connector now, so your agent can already *reach*
+Notion, GitHub, and your task app. What it can't do is *retrieve* — answer "what do
+I know about the auth migration?" ranked by relevance, across all of them. That's
+the layer ATS adds:
 
-- **Fused, ranked retrieval across every source.** One query returns a single
-  RRF-ranked, deduped list spanning Airtable + Google + your task app — not N
-  separate tool calls the model has to stitch together itself.
+- **Ranked by meaning, not endpoints.** Hybrid keyword + dense + sparse retrieval,
+  fused with RRF, so the first result is the relevant one — not whatever the model
+  guessed to query.
+- **One query, every source.** The [composite adapter](packages/adapter-composite/)
+  fuses GitHub + Notion + your task app into one ranked, deduped list, each hit
+  tagged with its backend — the cross-source retrieval no single-vendor connector does.
 - **Top-k, not token dumps.** Core runs the hybrid keyword+dense retrieval and
   hands back only what's relevant, so the agent never loads a whole base into
   context or hand-writes `filterByFormula` / Sheets ranges it tends to get wrong.
@@ -283,6 +294,7 @@ with everything else.**
 | `google`        | shipped v0.8      | Google Sheets / Docs / Slides (read-only corpus) |
 | `notion`        | shipped v0.8      | Notion databases + pages (page body as markdown) |
 | `github`        | shipped v0.8      | GitHub issues + discussions (repo = project, issue = task) |
+| `composite`     | shipped v0.8      | many adapters fused as one cross-source corpus |
 | `things`        | wishlist          | Things URL scheme + AppleScript |
 | `apple-notes`   | wishlist          | AppleScript                     |
 | `google-tasks`  | wishlist          | Google Tasks API                |
@@ -364,8 +376,8 @@ ats find "Q3 pricing model"
 
 The [Notion adapter](packages/adapter-notion/README.md) maps a database to a
 project and a page to a task — the page title is the title, the block tree renders
-to a markdown body — so your "second brain" is searchable through `ats find` and
-fused with everything else. Auth is an internal integration token, and the
+to a markdown body — so the Notion specs and docs that *support your tasks* are
+searchable through `ats find` and fused in alongside them. Auth is an internal integration token, and the
 security boundary is Notion's own per-page sharing: the integration only sees the
 databases you explicitly share with it.
 

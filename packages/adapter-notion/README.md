@@ -6,7 +6,7 @@ An [Agentic Task System](https://github.com/renezander030/agentic-task-system) s
 
 ![ats find — one query fused across GitHub, Notion, and TickTick, ranked by RRF](https://raw.githubusercontent.com/renezander030/agentic-task-system/main/assets/demo-fusion.gif)
 
-Under the hood it gives Claude Code Notion access as agent memory: RAG / retrieval over your Notion pages, combined with hybrid search (keyword plus dense vectors) so an agent can pull the right page from your second brain without you copy-pasting it into the prompt.
+Under the hood it gives Claude Code Notion access as agent memory: RAG / retrieval over your Notion pages, combined with hybrid search (keyword plus dense vectors) so an agent can pull the right page from your Notion workspace as supporting context for the task it's working on, without you copy-pasting it into the prompt.
 
 ## Mapping
 
