@@ -22,3 +22,9 @@ scripts/.pii-denylist
 
 # npm pack artifacts
 *.tgz
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
