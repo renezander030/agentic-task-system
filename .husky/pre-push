@@ -1,0 +1,4 @@
+# Pre-push gate — mirror CI exactly so a red commit can't reach the remote.
+# (pre-commit runs the fast subset; CI runs the full `npm test`. Pushing without
+# this gate is how PII/prove failures flooded the inbox with red CI runs.)
+npm test || { echo "✗ full gate (npm test) failed — fix before pushing"; exit 1; }

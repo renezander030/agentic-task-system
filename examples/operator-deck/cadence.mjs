@@ -25,6 +25,11 @@ export const BATCH = Number(process.env.OPERATOR_BATCH || 10);
 const INTENT_BUDGET = Number(process.env.OPERATOR_INTENT_BUDGET || 6); // balanced: <= 6 LLM-drafted tasks per batch
 const MODEL = process.env.OPERATOR_MODEL || 'haiku';
 const SIM_MIN = 0.62;
+// Headless-Claude invocation paths — derived from the home dir (override via env)
+// so the example carries no machine-specific absolute path.
+const CLAUDE_BIN = process.env.OPERATOR_CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
+const CLAUDE_HOME = process.env.OPERATOR_CLAUDE_HOME || os.homedir();
+const CLAUDE_CWD = process.env.OPERATOR_CLAUDE_CWD || path.join(os.homedir(), 'claude');
 
 const isCompleted = (t) => t?.status === 'completed' || t?.raw?.status === 'completed';
 const safeMeta = (t) => { try { return taskMetadataForRead(t); } catch { return { links: [], references: [] }; } };
@@ -79,10 +84,10 @@ function draftIntents(tasks) {
     'Tasks:', JSON.stringify(payload),
   ].join('\n');
   return new Promise((resolve) => {
-    const env = { ...process.env, HOME: '/home/debian' };
+    const env = { ...process.env, HOME: CLAUDE_HOME };
     delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
-    const child = execFile('/home/debian/.local/bin/claude', ['-p', '--model', MODEL, '--permission-mode', 'bypassPermissions'],
-      { env, cwd: '/home/debian/claude', timeout: 90000, maxBuffer: 4 * 1024 * 1024 },
+    const child = execFile(CLAUDE_BIN, ['-p', '--model', MODEL, '--permission-mode', 'bypassPermissions'],
+      { env, cwd: CLAUDE_CWD, timeout: 90000, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout) => {
         if (err) { resolve({}); return; }
         try {
@@ -101,10 +106,10 @@ function draftIntents(tasks) {
 // available under bypassPermissions, so a prompt may instruct the model to use it.
 function callClaude(prompt, { timeout = 90000, model = MODEL } = {}) {
   return new Promise((resolve) => {
-    const env = { ...process.env, HOME: '/home/debian' };
+    const env = { ...process.env, HOME: CLAUDE_HOME };
     delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
-    const child = execFile('/home/debian/.local/bin/claude', ['-p', '--model', model, '--permission-mode', 'bypassPermissions'],
-      { env, cwd: '/home/debian/claude', timeout, maxBuffer: 4 * 1024 * 1024 },
+    const child = execFile(CLAUDE_BIN, ['-p', '--model', model, '--permission-mode', 'bypassPermissions'],
+      { env, cwd: CLAUDE_CWD, timeout, maxBuffer: 4 * 1024 * 1024 },
       (err, stdout) => resolve(err ? '' : String(stdout)));
     child.stdin.end(prompt);
   });

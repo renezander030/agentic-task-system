@@ -180,7 +180,9 @@ async function run() {
     typedContextRestoresAuthority: context.context[0]?.task.id === authority.taskId,
     staleContextExcluded: context.excluded.some((item) => item.taskId === stale.taskId && item.reasons.includes('status:archived')),
     provenanceExplainsAuthority: context.context[0]?.provenance.some((entry) => entry.kind === 'typed-link' && entry.type === 'decision') === true,
-    humanBodyPreserved: rootTask.content.startsWith('Human-authored plan:'),
+    // Machine metadata is now flat OKF YAML frontmatter ON TOP of the task; the
+    // human body is preserved directly beneath it (was: body-first, metadata-last).
+    humanBodyPreserved: rootTask.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n*/, '').startsWith('Human-authored plan:'),
     intentRoundTrips: parseTaskMetadata(rootTask.content).intent.doneWhen.length === 2,
     hierarchyProvesParentSupport: hierarchy.aligned === true && hierarchy.chain.map((node) => node.kind).join(',') === 'task,goal',
     explorationPromotionKeepsSourceScoped: parseTaskMetadata(promoted.task.content).links.some((link) => link.type === 'evidence' && link.taskId === 'announcement') && !promoted.task.content.includes('Draft public announcement copy.'),
