@@ -290,9 +290,9 @@ with everything else.**
 PRs welcome. Scaffold one in seconds and verify it against the contract:
 
 ```bash
-ats adapter new notion              # writes ats-adapter-notion/ (six stubs + package.json)
+ats adapter new linear              # writes ats-adapter-linear/ (six stubs + package.json)
 # …implement the six methods…
-ats adapter test ./ats-adapter-notion   # pass/fail/skip per contract check
+ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 ```
 
 ### Taskmaster: search and context over repo-local agent tasks
