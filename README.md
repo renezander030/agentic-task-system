@@ -42,8 +42,14 @@ curated, prioritized, deduplicated context, pre-filtered by the most reliable
 ranker there is — you.
 
 ATS makes that context agent-native. **Adapter, not migration**: keep the system
-you already live in (TickTick, Taskmaster, Beads, Obsidian, or OKF bundles today) and give
-your agent a fast, structured, two-way channel into it.
+you already live in — TickTick, Taskmaster, Beads, Obsidian, Notion, GitHub, Airtable,
+Google, or all of them at once via the [composite adapter](packages/adapter-composite/) —
+and give your agent a fast, structured, two-way channel into it.
+
+**ATS is task-first.** It turns the task manager you run your work from into the agent's
+memory, with supporting systems (GitHub issues, Notion specs, docs) fused in as context
+behind each task. It is **not** a second-brain / PKM tool — the task is the spine; the
+supporting docs are there to serve it.
 
 ```bash
 npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
@@ -307,102 +313,27 @@ ats adapter new linear              # writes ats-adapter-linear/ (six stubs + pa
 ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 ```
 
-### Taskmaster: search and context over repo-local agent tasks
+### Composite: every backend as one cross-source corpus
 
-The [Taskmaster adapter](packages/adapter-taskmaster/README.md) treats tags as projects, flattens subtasks into stable `<tag>:<id>` references, searches every native text field without model tokens, and exposes native dependencies as read-only `depends-on` context:
-
-```bash
-git clone https://github.com/renezander030/agentic-task-system.git
-cd agentic-task-system && npm install
-cd /path/to/taskmaster-project
-ats config use /path/to/agentic-task-system/packages/adapter-taskmaster
-ats tasks search "upload limit" --json
-ats context master master:4
-cd /path/to/agentic-task-system && npm run prove:taskmaster
-```
-
-### Beads: ATS context over the native issue graph
-
-The [Beads adapter](packages/adapter-beads/README.md) calls the official `bd --json` CLI, maps native dependencies and parent-child edges into ATS context, and leaves Beads' Dolt database authoritative:
+The [composite adapter](packages/adapter-composite/README.md) is the cross-source layer —
+it's what the demo above runs. Point it at several child adapters and one `ats find` fuses
+GitHub + Notion + your task app into a single RRF-ranked list, each hit tagged with its
+backend. Connectors give your agent access to one tool each; this is the retrieval layer
+that searches all of them at once. Each child keeps its own auth; the composite holds none.
 
 ```bash
-npm install -g @reneza/ats-cli @reneza/ats-adapter-beads
-cd /path/to/beads-repository
-ats config use beads
-ats find "release blocker"
-ats context my-repo bd-a1b2
+npm install -g @reneza/ats-cli @reneza/ats-adapter-composite \
+  @reneza/ats-adapter-github @reneza/ats-adapter-notion @reneza/ats-adapter-ticktick
+ats config use @reneza/ats-adapter-composite
+ats find "auth token migration"   # one ranked list across every backend
 ```
 
-Already shipped: the [Obsidian adapter](packages/adapter-obsidian/README.md) is
-a worked example of the contract over plain markdown — point ATS at a vault with
-`ATS_OBSIDIAN_VAULT` and `ats find` / `ats open` / `ats links` just work.
-
-The [OKF adapter](packages/adapter-okf/README.md) exposes Open Knowledge Format
-bundles as ATS projects and concept documents. Point it at a bundle with
-`ATS_OKF_BUNDLE` to query vendor-neutral markdown/frontmatter knowledge catalogs
-through the same retrieval, graph, and MCP surface.
-
-### Airtable: any base as agent-queryable records
-
-The [Airtable adapter](packages/adapter-airtable/README.md) maps a table to a
-project and a record to a task — the primary field becomes the title, the rest of
-the fields become the markdown body — so any base is searchable through `ats find`
-and MCP, fused by RRF with your other sources. Auth is a Personal Access Token
-scoped to only the bases you grant, keeping the blast radius small:
-
-```bash
-npm install -g @reneza/ats-cli @reneza/ats-adapter-airtable
-export ATS_AIRTABLE_TOKEN=pat... ATS_AIRTABLE_BASES=appXXX
-ats config use @reneza/ats-adapter-airtable
-ats find "supplier reconciliation"
-```
-
-### Google: Sheets, Docs, and Slides as a read-only corpus
-
-The [Google adapter](packages/adapter-google/README.md) pulls Google Sheets,
-Docs, and Slides into ATS retrieval as a read-only corpus — a doc type is a
-project, a file is a task, and the body is the extracted text (Sheets render as
-markdown tables). It authenticates as a **dedicated, read-only Workspace user**
-who only sees the files you share with them, so a leaked token can never reach the
-rest of anyone's Drive:
-
-```bash
-npm install -g @reneza/ats-cli @reneza/ats-adapter-google
-ats config use @reneza/ats-adapter-google   # then authLogin → authExchange as the dedicated user
-ats find "Q3 pricing model"
-```
-
-### Notion: databases and pages as agent-queryable knowledge
-
-The [Notion adapter](packages/adapter-notion/README.md) maps a database to a
-project and a page to a task — the page title is the title, the block tree renders
-to a markdown body — so the Notion specs and docs that *support your tasks* are
-searchable through `ats find` and fused in alongside them. Auth is an internal integration token, and the
-security boundary is Notion's own per-page sharing: the integration only sees the
-databases you explicitly share with it.
-
-```bash
-npm install -g @reneza/ats-cli @reneza/ats-adapter-notion
-export ATS_NOTION_TOKEN=ntn_...
-ats config use @reneza/ats-adapter-notion
-ats find "auth migration runbook"
-```
-
-### GitHub: issues and discussions as agent memory
-
-The [GitHub adapter](packages/adapter-github/README.md) treats a repository as a
-project and an issue (or discussion) as a task — title, markdown body, and comment
-thread become one retrievable record, labels become tags. It's the cleanest fit
-for ATS's own audience: the issues you already use as scratchpads, ADRs, and RFC
-threads, now fused by meaning with your notes and tasks. Auth is a fine-grained PAT
-scoped to just the repos you grant, read-only:
-
-```bash
-npm install -g @reneza/ats-cli @reneza/ats-adapter-github
-export ATS_GITHUB_TOKEN=github_pat_... ATS_GITHUB_REPOS=owner/repo
-ats config use @reneza/ats-adapter-github
-ats find "rate limit regression"
-```
+**Per-adapter setup — auth, mapping, error strings — lives in each package's own README**
+(linked from the table above): [Notion](packages/adapter-notion/README.md) ·
+[GitHub](packages/adapter-github/README.md) · [Airtable](packages/adapter-airtable/README.md) ·
+[Google](packages/adapter-google/README.md) · [Obsidian](packages/adapter-obsidian/README.md) ·
+[OKF](packages/adapter-okf/README.md) · [Taskmaster](packages/adapter-taskmaster/README.md) ·
+[Beads](packages/adapter-beads/README.md) · [TickTick](packages/adapter-ticktick/README.md).
 
 The scaffold + conformance kit + interface doc make it a couple-hundred-line job for most well-behaved APIs.
 
