@@ -197,6 +197,8 @@ agentic-task-system/
 │   ├── adapter-okf/                # Open Knowledge Format markdown bundles
 │   ├── adapter-taskmaster/          # local tagged tasks.json + native dependencies
 │   ├── adapter-beads/               # official bd JSON CLI + native dependency graph
+│   ├── adapter-airtable/           # Airtable bases over the REST API (table = project, record = task)
+│   ├── adapter-google/             # Google Sheets/Docs/Slides as a read-only corpus
 │   ├── adapter-notion/             # planned
 │   ├── cli/                        # `ats` command
 │   └── mcp/                        # `@reneza/ats-mcp` — MCP server
@@ -248,6 +250,8 @@ Full spec: [`docs/adapter-interface.md`](docs/adapter-interface.md).
 | `okf`           | shipped v0.6      | Open Knowledge Format markdown bundle |
 | `taskmaster`    | shipped v0.6      | local `.taskmaster/tasks/tasks.json` |
 | `beads`         | shipped v0.6      | repository-local Beads through `bd --json` |
+| `airtable`      | shipped v0.8      | Airtable REST API (table = project, record = task) |
+| `google`        | shipped v0.8      | Google Sheets / Docs / Slides (read-only corpus) |
 | `notion`        | planned           | Notion API                      |
 | `things`        | wishlist          | Things URL scheme + AppleScript |
 | `apple-notes`   | wishlist          | AppleScript                     |
@@ -295,6 +299,36 @@ The [OKF adapter](packages/adapter-okf/README.md) exposes Open Knowledge Format
 bundles as ATS projects and concept documents. Point it at a bundle with
 `ATS_OKF_BUNDLE` to query vendor-neutral markdown/frontmatter knowledge catalogs
 through the same retrieval, graph, and MCP surface.
+
+### Airtable: any base as agent-queryable records
+
+The [Airtable adapter](packages/adapter-airtable/README.md) maps a table to a
+project and a record to a task — the primary field becomes the title, the rest of
+the fields become the markdown body — so any base is searchable through `ats find`
+and MCP, fused by RRF with your other sources. Auth is a Personal Access Token
+scoped to only the bases you grant, keeping the blast radius small:
+
+```bash
+npm install -g @reneza/ats-cli @reneza/ats-adapter-airtable
+export ATS_AIRTABLE_TOKEN=pat... ATS_AIRTABLE_BASES=appXXX
+ats config use @reneza/ats-adapter-airtable
+ats find "supplier reconciliation"
+```
+
+### Google: Sheets, Docs, and Slides as a read-only corpus
+
+The [Google adapter](packages/adapter-google/README.md) pulls Google Sheets,
+Docs, and Slides into ATS retrieval as a read-only corpus — a doc type is a
+project, a file is a task, and the body is the extracted text (Sheets render as
+markdown tables). It authenticates as a **dedicated, read-only Workspace user**
+who only sees the files you share with them, so a leaked token can never reach the
+rest of anyone's Drive:
+
+```bash
+npm install -g @reneza/ats-cli @reneza/ats-adapter-google
+ats config use @reneza/ats-adapter-google   # then authLogin → authExchange as the dedicated user
+ats find "Q3 pricing model"
+```
 
 The scaffold + conformance kit + interface doc make it a couple-hundred-line job for most well-behaved APIs.
 
