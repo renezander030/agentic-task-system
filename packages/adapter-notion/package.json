@@ -1,0 +1,40 @@
+{
+  "name": "@reneza/ats-adapter-notion",
+  "version": "0.8.1",
+  "description": "Notion adapter for Agentic Task System. Expose any Notion database as agent-queryable pages through ATS retrieval, RRF fusion, and MCP — a database is a project, a page is a task. Adapter, not migration.",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "*.js"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "@reneza/ats-core": "^0.8.1"
+  },
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renezander030/agentic-task-system.git",
+    "directory": "packages/adapter-notion"
+  },
+  "homepage": "https://github.com/renezander030/agentic-task-system#readme",
+  "bugs": {
+    "url": "https://github.com/renezander030/agentic-task-system/issues"
+  },
+  "author": "René Zander",
+  "keywords": [
+    "notion",
+    "notion-api",
+    "agent-memory",
+    "agent-context",
+    "context-engineering",
+    "agentic",
+    "mcp",
+    "rrf",
+    "hybrid-search",
+    "ats-adapter"
+  ]
+}

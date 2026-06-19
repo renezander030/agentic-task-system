@@ -1,0 +1,42 @@
+{
+  "name": "@reneza/ats-adapter-github",
+  "version": "0.8.1",
+  "description": "GitHub Issues adapter for Agentic Task System. Expose any repository's issues as agent-queryable tasks through ATS retrieval, RRF fusion, and MCP — a repo is a project, an issue is a task. Adapter, not migration.",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "*.js"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "@reneza/ats-core": "^0.8.1"
+  },
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renezander030/agentic-task-system.git",
+    "directory": "packages/adapter-github"
+  },
+  "homepage": "https://github.com/renezander030/agentic-task-system#readme",
+  "bugs": {
+    "url": "https://github.com/renezander030/agentic-task-system/issues"
+  },
+  "author": "René Zander",
+  "keywords": [
+    "github",
+    "github-api",
+    "issues",
+    "github-issues",
+    "agent-memory",
+    "agent-context",
+    "context-engineering",
+    "agentic",
+    "mcp",
+    "rrf",
+    "hybrid-search",
+    "ats-adapter"
+  ]
+}

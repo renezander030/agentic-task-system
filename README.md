@@ -56,6 +56,11 @@ ats find "deployment runbook"
   <img src="assets/demo.svg" alt="ats find — hybrid retrieval with RRF provenance over your task manager" width="760" />
 </p>
 
+<p align="center">
+  <img src="assets/demo-fusion.gif" alt="ats find — one query fused across GitHub, Notion, and TickTick with RRF" width="760" />
+  <br><em>One <code>ats find</code> across <strong>GitHub + Notion + TickTick</strong>, fused and ranked by RRF — the one thing no single-vendor MCP server can do.</em>
+</p>
+
 ## Why this exists
 
 Andrej Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-wiki-knowledge-base-claude-code) idea — keep notes as plain markdown an LLM can reason over — is right about the destination and wrong about the starting line. Almost nobody's knowledge lives in clean markdown; it lives in the task app they've used for years. ATS closes that gap with pluggable storage adapters, so you get an agent-queryable knowledge layer without re-homing a single note.
@@ -199,7 +204,8 @@ agentic-task-system/
 │   ├── adapter-beads/               # official bd JSON CLI + native dependency graph
 │   ├── adapter-airtable/           # Airtable bases over the REST API (table = project, record = task)
 │   ├── adapter-google/             # Google Sheets/Docs/Slides as a read-only corpus
-│   ├── adapter-notion/             # planned
+│   ├── adapter-notion/             # Notion databases + pages (page body as markdown)
+│   ├── adapter-github/             # GitHub issues + discussions as text records
 │   ├── cli/                        # `ats` command
 │   └── mcp/                        # `@reneza/ats-mcp` — MCP server
 ├── docs/
@@ -275,7 +281,8 @@ with everything else.**
 | `beads`         | shipped v0.6      | repository-local Beads through `bd --json` |
 | `airtable`      | shipped v0.8      | Airtable REST API (table = project, record = task) |
 | `google`        | shipped v0.8      | Google Sheets / Docs / Slides (read-only corpus) |
-| `notion`        | planned           | Notion API                      |
+| `notion`        | shipped v0.8      | Notion databases + pages (page body as markdown) |
+| `github`        | shipped v0.8      | GitHub issues + discussions (repo = project, issue = task) |
 | `things`        | wishlist          | Things URL scheme + AppleScript |
 | `apple-notes`   | wishlist          | AppleScript                     |
 | `google-tasks`  | wishlist          | Google Tasks API                |
@@ -351,6 +358,38 @@ rest of anyone's Drive:
 npm install -g @reneza/ats-cli @reneza/ats-adapter-google
 ats config use @reneza/ats-adapter-google   # then authLogin → authExchange as the dedicated user
 ats find "Q3 pricing model"
+```
+
+### Notion: databases and pages as agent-queryable knowledge
+
+The [Notion adapter](packages/adapter-notion/README.md) maps a database to a
+project and a page to a task — the page title is the title, the block tree renders
+to a markdown body — so your "second brain" is searchable through `ats find` and
+fused with everything else. Auth is an internal integration token, and the
+security boundary is Notion's own per-page sharing: the integration only sees the
+databases you explicitly share with it.
+
+```bash
+npm install -g @reneza/ats-cli @reneza/ats-adapter-notion
+export ATS_NOTION_TOKEN=ntn_...
+ats config use @reneza/ats-adapter-notion
+ats find "auth migration runbook"
+```
+
+### GitHub: issues and discussions as agent memory
+
+The [GitHub adapter](packages/adapter-github/README.md) treats a repository as a
+project and an issue (or discussion) as a task — title, markdown body, and comment
+thread become one retrievable record, labels become tags. It's the cleanest fit
+for ATS's own audience: the issues you already use as scratchpads, ADRs, and RFC
+threads, now fused by meaning with your notes and tasks. Auth is a fine-grained PAT
+scoped to just the repos you grant, read-only:
+
+```bash
+npm install -g @reneza/ats-cli @reneza/ats-adapter-github
+export ATS_GITHUB_TOKEN=github_pat_... ATS_GITHUB_REPOS=owner/repo
+ats config use @reneza/ats-adapter-github
+ats find "rate limit regression"
 ```
 
 The scaffold + conformance kit + interface doc make it a couple-hundred-line job for most well-behaved APIs.
