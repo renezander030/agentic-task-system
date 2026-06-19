@@ -274,7 +274,7 @@ with everything else.**
 
 | Adapter         | Status            | Storage                         |
 | --------------- | ----------------- | ------------------------------- |
-| `ticktick`      | reference         | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
+| `ticktick`      | shipped v0.1 (reference) | TickTick OpenAPI v1 + qdrant + ollama (nomic-embed) |
 | `obsidian`      | shipped v0.4      | local markdown vault (files on disk) |
 | `okf`           | shipped v0.6      | Open Knowledge Format markdown bundle |
 | `taskmaster`    | shipped v0.6      | local `.taskmaster/tasks/tasks.json` |

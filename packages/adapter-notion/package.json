@@ -28,11 +28,18 @@
   "keywords": [
     "notion",
     "notion-api",
+    "notion-mcp",
+    "notion-mcp-server",
+    "notion-agent-memory",
+    "second-brain",
     "agent-memory",
     "agent-context",
     "context-engineering",
     "agentic",
     "mcp",
+    "claude-code",
+    "rag",
+    "retrieval",
     "rrf",
     "hybrid-search",
     "ats-adapter"

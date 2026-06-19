@@ -28,13 +28,18 @@
   "keywords": [
     "github",
     "github-api",
+    "github-mcp",
     "issues",
     "github-issues",
+    "github-agent-memory",
     "agent-memory",
     "agent-context",
     "context-engineering",
     "agentic",
     "mcp",
+    "claude-code",
+    "rag",
+    "retrieval",
     "rrf",
     "hybrid-search",
     "ats-adapter"

@@ -1,6 +1,12 @@
 # @reneza/ats-adapter-notion
 
+**ats-adapter-notion** is a Notion adapter for the Agentic Task System (ATS) — it turns your Notion pages into agent memory an LLM can retrieve, with hybrid RRF search and an MCP server for Claude Code, Claude Desktop, and Cursor. It is the Notion MCP server side of ATS: point it at a database and every page becomes retrievable context for your agent.
+
 An [Agentic Task System](https://github.com/renezander030/agentic-task-system) storage adapter over **Notion**. Point ATS at a database and every page becomes agent-queryable alongside your other ATS sources, fused by RRF and exposed over MCP. Adapter, not migration — the data stays in Notion.
+
+![ats find — one query fused across GitHub, Notion, and TickTick, ranked by RRF](https://raw.githubusercontent.com/renezander030/agentic-task-system/main/assets/demo-fusion.gif)
+
+Under the hood it gives Claude Code Notion access as agent memory: RAG / retrieval over your Notion pages, combined with hybrid search (keyword plus dense vectors) so an agent can pull the right page from your second brain without you copy-pasting it into the prompt.
 
 ## Mapping
 
@@ -61,3 +67,29 @@ ats adapter test ./packages/adapter-notion     # conformance kit (add --write to
 ```sh
 node --test     # offline unit tests (mocked Notion API)
 ```
+
+## FAQ
+
+**Is this a Notion MCP server?**
+Yes. Through ATS it exposes your Notion databases over MCP, so Claude Code, Claude Desktop, and Cursor can query your Notion pages as agent memory.
+
+**How do I give Claude access to my Notion pages?**
+Create a Notion internal integration, share only the databases and pages you want read with that integration, point ATS at the token, and those pages become RAG / retrieval over Notion inside any MCP client.
+
+**Does it work without a vector database?**
+Yes. Notion search and keyword retrieval run out of the box; ATS Core adds hybrid search (dense vectors fused with keyword via RRF) when you want stronger retrieval — the adapter omits embeddings so Core owns that layer.
+
+## Part of the Agentic Task System
+
+This Notion adapter is one backend in a family that all share the same retrieval, RRF fusion, and MCP surface — mix Notion agent memory with any of the siblings:
+
+- [@reneza/ats-adapter-ticktick](https://www.npmjs.com/package/@reneza/ats-adapter-ticktick)
+- [@reneza/ats-adapter-obsidian](https://www.npmjs.com/package/@reneza/ats-adapter-obsidian)
+- [@reneza/ats-adapter-github](https://www.npmjs.com/package/@reneza/ats-adapter-github)
+- [@reneza/ats-adapter-airtable](https://www.npmjs.com/package/@reneza/ats-adapter-airtable)
+- [@reneza/ats-adapter-google](https://www.npmjs.com/package/@reneza/ats-adapter-google)
+- [@reneza/ats-adapter-okf](https://www.npmjs.com/package/@reneza/ats-adapter-okf)
+- [@reneza/ats-adapter-taskmaster](https://www.npmjs.com/package/@reneza/ats-adapter-taskmaster)
+- [@reneza/ats-adapter-beads](https://www.npmjs.com/package/@reneza/ats-adapter-beads)
+
+See the main repo: [agentic-task-system](https://github.com/renezander030/agentic-task-system).

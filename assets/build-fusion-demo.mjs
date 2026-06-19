@@ -24,7 +24,7 @@ const CMD = 'ats find "auth token migration"';
 const RESULTS = [
   { title: 'Rotate auth tokens before the Q3 migration', rrf: '0.93', src: 'github', tail: 'issue #482 · updated 2d ago · dense #1 · keyword #1' },
   { title: 'Auth migration runbook (OAuth to PAT)', rrf: '0.87', src: 'notion', tail: 'Engineering DB · updated 5d ago · dense #2 · sparse #1' },
-  { title: 'Ship the token-refresh hotfix', rrf: '0.74', src: 'ticktick', tail: 'Permanent Notes · updated 1w ago · sparse #2 · keyword #2' },
+  { title: 'Ship the token-refresh hotfix', rrf: '0.74', src: 'ticktick', tail: 'Inbox · updated 1w ago · sparse #2 · keyword #2' },
 ];
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

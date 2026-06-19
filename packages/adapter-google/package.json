@@ -28,6 +28,7 @@
   "keywords": [
     "google-workspace",
     "google-sheets",
+    "google-sheets-mcp",
     "google-docs",
     "google-slides",
     "agent-memory",
@@ -35,6 +36,9 @@
     "context-engineering",
     "agentic",
     "mcp",
+    "claude-code",
+    "rag",
+    "retrieval",
     "rrf",
     "ats-adapter"
   ]

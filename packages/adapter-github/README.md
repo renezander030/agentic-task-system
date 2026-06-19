@@ -1,6 +1,12 @@
 # @reneza/ats-adapter-github
 
+**ats-adapter-github** is a GitHub adapter for the Agentic Task System (ATS) — it turns your GitHub issues into agent memory an LLM can retrieve, with hybrid RRF search and an MCP server for Claude Code, Claude Desktop, and Cursor. It is the GitHub MCP server side of ATS: point it at a repository and every issue becomes retrievable context for your agent.
+
 An [Agentic Task System](https://github.com/renezander030/agentic-task-system) storage adapter over **GitHub Issues**. Point ATS at a repository and every issue becomes agent-queryable alongside your other ATS sources, fused by RRF and exposed over MCP. Adapter, not migration — the issues stay in GitHub.
+
+![ats find — one query fused across GitHub, Notion, and TickTick, ranked by RRF](https://raw.githubusercontent.com/renezander030/agentic-task-system/main/assets/demo-fusion.gif)
+
+Under the hood it gives Claude Code GitHub access as agent memory: RAG / retrieval over GitHub issues, combined with hybrid search (keyword plus dense vectors) so an agent can pull the relevant issue and its comments without you copy-pasting it into the prompt.
 
 ## Mapping
 
@@ -62,3 +68,29 @@ ats adapter test ./packages/adapter-github  # conformance kit (add --write to ex
 ```sh
 node --test     # offline unit tests (mocked GitHub API)
 ```
+
+## FAQ
+
+**Is this a GitHub MCP server?**
+Yes. Through ATS it exposes a repository's GitHub issues over MCP, so Claude Code, Claude Desktop, and Cursor can query your issues as agent memory.
+
+**How do I give Claude access to my GitHub issues?**
+Create a fine-grained GitHub Personal Access Token scoped to the repo(s) you want read with `Issues = Read`, point ATS at it, and those issues become RAG / retrieval over GitHub inside any MCP client.
+
+**Does it work without a vector database?**
+Yes. GitHub issue search and keyword retrieval run out of the box; ATS Core adds hybrid search (dense vectors fused with keyword via RRF) when you want stronger retrieval — the adapter omits embeddings so Core owns that layer.
+
+## Part of the Agentic Task System
+
+This GitHub adapter is one backend in a family that all share the same retrieval, RRF fusion, and MCP surface — mix GitHub agent memory with any of the siblings:
+
+- [@reneza/ats-adapter-ticktick](https://www.npmjs.com/package/@reneza/ats-adapter-ticktick)
+- [@reneza/ats-adapter-obsidian](https://www.npmjs.com/package/@reneza/ats-adapter-obsidian)
+- [@reneza/ats-adapter-notion](https://www.npmjs.com/package/@reneza/ats-adapter-notion)
+- [@reneza/ats-adapter-airtable](https://www.npmjs.com/package/@reneza/ats-adapter-airtable)
+- [@reneza/ats-adapter-google](https://www.npmjs.com/package/@reneza/ats-adapter-google)
+- [@reneza/ats-adapter-okf](https://www.npmjs.com/package/@reneza/ats-adapter-okf)
+- [@reneza/ats-adapter-taskmaster](https://www.npmjs.com/package/@reneza/ats-adapter-taskmaster)
+- [@reneza/ats-adapter-beads](https://www.npmjs.com/package/@reneza/ats-adapter-beads)
+
+See the main repo: [agentic-task-system](https://github.com/renezander030/agentic-task-system).
