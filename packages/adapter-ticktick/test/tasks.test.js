@@ -35,7 +35,7 @@ test('create returns the complete task fields needed by the adapter contract', a
   assert.equal(result.task.fullId, taskId);
   assert.equal(result.task.fullProjectId, projectId);
   assert.equal(result.task.content, 'body');
-  assert.equal(result.task.dueDate, '2026-06-15');
+  assert.equal(result.task.dueDate, '2026-06-15T12:00:00.000+0000');
   assert.deepEqual(result.task.tags, ['ats']);
   assert.equal(result.task.modifiedTime, '2026-06-12T10:00:00.000Z');
 });
@@ -55,7 +55,7 @@ test('create response preserves accepted fields omitted by TickTick OpenAPI', as
     reminder: '1h',
   }, { ...baseDeps, apiRequest });
 
-  assert.equal(result.task.dueDate, '2026-06-20');
+  assert.equal(result.task.dueDate, '2026-06-20T12:00:00.000+0000');
   assert.equal(result.task.priority, 'high');
   assert.deepEqual(result.task.tags, ['ats']);
   assert.deepEqual(result.task.reminders, ['TRIGGER:-PT1H']);

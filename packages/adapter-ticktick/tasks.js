@@ -8,6 +8,15 @@ import * as usageLog from '@reneza/ats-core/usage-log';
 import * as corpusCache from '@reneza/ats-core/corpus-cache';
 import * as retrieval from '@reneza/ats-core/retrieval';
 
+// TickTick wants a full ISO datetime; normalize bare YYYY-MM-DD (e.g. ats --due 2026-06-20).
+function normalizeDue(d) {
+  if (typeof d !== 'string' || d === '') return d;
+  if (/T\d{2}:\d{2}/.test(d)) return d;
+  const m = d.match(/^(\d{4}-\d{2}-\d{2})$/);
+  return m ? `${m[1]}T12:00:00.000+0000` : d;
+}
+
+
 /**
  * List tasks in a project
  * @param {string} projectId - Project ID
@@ -31,6 +40,7 @@ export async function list(projectId, deps = {}) {
     dueDate: t.dueDate,
     priority: formatPriority(t.priority),
     tags: t.tags || [],
+    kind: t.kind || 'TEXT',         // TASK | NOTE — TickTick distinguishes; surface it
     status: t.status === 2 ? 'completed' : 'active',
     completedTime: t.completedTime,
     modifiedTime: t.modifiedTime,
@@ -69,6 +79,7 @@ export async function get(projectId, taskId, deps = {}) {
     startDate: task.startDate,
     priority: formatPriority(task.priority),
     tags: task.tags || [],
+    kind: task.kind || 'TEXT',      // TASK | NOTE — TickTick distinguishes; surface it
     status: task.status === 2 ? 'completed' : 'active',
     completedTime: task.completedTime,
     reminders: task.reminders,
@@ -103,7 +114,7 @@ export async function create(projectId, title, options = {}, deps = {}) {
   const input = { title: title.trim(), projectId: resolvedProjectId };
 
   if (options.content !== undefined) input.content = options.content;
-  if (options.dueDate !== undefined) input.dueDate = options.dueDate;
+  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
   if (options.priority !== undefined) input.priority = parsePriority(options.priority);
   if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
   if (options.reminder !== undefined) {
@@ -171,7 +182,7 @@ export async function update(projectId, taskId, options = {}, deps = {}) {
 
   if (options.title !== undefined) input.title = options.title;
   if (options.content !== undefined) input.content = options.content;
-  if (options.dueDate !== undefined) input.dueDate = options.dueDate;
+  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
   if (options.priority !== undefined) input.priority = parsePriority(options.priority);
   if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
   if (options.reminder !== undefined) {
