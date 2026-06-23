@@ -28,3 +28,4 @@ scripts/.pii-denylist
 *.db
 .beads-credential-key
 .beads/proxieddb/
+.beads-ats.env
