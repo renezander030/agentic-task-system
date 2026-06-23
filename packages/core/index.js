@@ -60,3 +60,4 @@ export {
   scoreProgressEpisodes,
   formatProgressBenchmark,
 } from './progress-benchmark.js';
+export { normalizeTaskBody, TRIAGE_TAG } from './task-format.js';

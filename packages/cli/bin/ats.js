@@ -68,6 +68,8 @@ import {
   acknowledgeTaskEvents,
   snapshotTaskEvents,
   collectAndSpoolTaskEvents,
+  normalizeTaskBody,
+  TRIAGE_TAG,
 } from '@reneza/ats-core';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
@@ -204,6 +206,9 @@ async function main() {
         break;
       case 'bench':
         handleBench();
+        return;
+      case 'fmt':
+        handleFmt();
         return;
       case 'sync':
         result = await handleSync();
@@ -365,7 +370,7 @@ function helpFor(command) {
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
-  'doctor', 'status', 'cache', 'bench', 'sync', 'adapter', 'init', 'config', 'auth',
+  'doctor', 'status', 'cache', 'bench', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion',
 ];
 
@@ -647,6 +652,96 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false) {
   }
 }
 
+// Cheap-model triage classifier (route/type/model/effort/do tags). Shells the
+// shared beads-triage.py in --emit-json mode so the LLM prompt has ONE source of
+// truth. Returns {tags:[], next:''} or null on any failure (caller degrades to
+// structure-only). No write happens here — the caller persists once.
+// Default location is Rene's checkout; override with ATS_TRIAGE_BIN. runTriageEmit's
+// existsSync guard means triage is simply skipped where the script isn't present.
+const TRIAGE_BIN = process.env.ATS_TRIAGE_BIN || path.join(os.homedir(), 'claude', 'beads-triage.py');
+
+// Cost caps mirror beads-triage.py: (1) PER-CALL — the shared classify() already
+// passes `--max-budget-usd 0.05`, inherited here automatically. (2) VOLUME — the cron
+// caps tasks/run (TRIAGE_MAX_PER_RUN) to protect the shared 5h budget from bursts;
+// get processes one task per call, so the analog is a rolling DAILY cap on get-triage
+// Haiku calls. Past the cap, get degrades to structure-only normalize (no loss — the
+// task still conforms and gets tagged on a later get or by the batch cron). 0 disables.
+const GET_TRIAGE_MAX_PER_DAY = parseInt(process.env.ATS_GET_TRIAGE_MAX_PER_DAY || '25', 10);
+function getTriageBudgetFile() {
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'ats', 'get-triage-budget.json');
+}
+function claimGetTriageBudget() {
+  if (!(GET_TRIAGE_MAX_PER_DAY > 0)) return false;
+  const day = new Date().toISOString().slice(0, 10);
+  const file = getTriageBudgetFile();
+  let st;
+  try { st = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { st = {}; }
+  if (st.day !== day) st = { day, count: 0 };
+  if (st.count >= GET_TRIAGE_MAX_PER_DAY) return false;
+  st.count += 1;
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(st)); } catch { /* best-effort */ }
+  return true;
+}
+
+function runTriageEmit(task) {
+  try {
+    if (!fs.existsSync(TRIAGE_BIN)) return null;
+    const env = { ...process.env };
+    delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT;
+    const r = spawnSync('python3', [TRIAGE_BIN, '--emit-json'], {
+      input: JSON.stringify([task]), encoding: 'utf8', timeout: 60000, env,
+    });
+    if (r.status !== 0 || !r.stdout) return null;
+    const line = r.stdout.trim().split('\n').filter(Boolean).pop();
+    const d = JSON.parse(line);
+    return { tags: d.tags || [], next: (d.next || '').trim() };
+  } catch { return null; }
+}
+
+// Single explicit `ats tasks get PROJECT_ID TASK_ID` = "the task at hand" → read
+// the context once, normalize the Goal+Log body, classify triage tags, and persist
+// BOTH in one write. Skips the LLM call when the task is already triaged AND its
+// body is already conforming (freshness guard). Never fires for find/list/search.
+async function formatTriageOnGet(t, adapter, proj, id, task) {
+  const fullProj = task.fullProjectId || task.projectId || proj;
+  const fullId = task.fullId || task.id || id;
+  const curTags = task.tags || [];
+  const norm = normalizeTaskBody(task.content || '');
+  const hasTriage = curTags.some((x) => TRIAGE_TAG.test(x));
+  const skip = args.options['no-triage'] === true || process.env.ATS_GET_NOTRIAGE;
+
+  let newTags = null;
+  let next = '';
+  if (!skip && (!hasTriage || norm.changed)) {
+    if (claimGetTriageBudget()) {
+      const r = runTriageEmit({ id: fullId, projectId: fullProj, title: task.title, content: norm.content });
+      if (r) { newTags = r.tags; next = r.next; }
+    } else {
+      process.stderr.write(`[ats] get-triage daily cap (${GET_TRIAGE_MAX_PER_DAY}) reached — structure-only this read; triage deferred to the batch cron.\n`);
+    }
+  }
+  const finalBody = next ? normalizeTaskBody(norm.content, { next }).content : norm.content;
+  const bodyChanged = finalBody.trim() !== (task.content || '').trim();
+  if (!bodyChanged && !newTags) return task; // already conforming + tagged → no write
+
+  const patch = { content: finalBody };
+  if (newTags) patch.tags = [...curTags.filter((x) => !TRIAGE_TAG.test(x)), ...newTags];
+  const res = t?.update
+    ? await t.update(proj, id, patch)
+    : await adapter.updateTask(proj, id, { ...patch, tags: tagsToArray(patch.tags) });
+  auditCliWrite('task.updated', res, { projectId: proj, taskId: id }, { fields: Object.keys(patch), via: 'get-format' });
+  return res.task || res;
+}
+
+// `ats fmt [--next "..."]` — pure stdin→stdout Goal+Log normalizer (no adapter,
+// no network). Lets other tools (e.g. beads-triage.py) reuse the one normalizer.
+function handleFmt() {
+  let body;
+  try { body = fs.readFileSync(0, 'utf8'); } catch { body = ''; }
+  const { content } = normalizeTaskBody(body, { next: args.options.next || '' });
+  process.stdout.write(content);
+}
+
 async function handleTasks() {
   const adapter = await loadAdapter();
   const t = adapter.__ext?.tasks; // optional: rich adapters (TickTick) provide it
@@ -655,9 +750,26 @@ async function handleTasks() {
     case 'list':
       if (!args.positional[0]) { console.error('Usage: ats tasks list PROJECT_ID'); process.exit(1); }
       return t?.list ? await t.list(args.positional[0]) : await adapter.listTasksInProject(args.positional[0]);
-    case 'get':
+    case 'get': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks get PROJECT_ID TASK_ID'); process.exit(1); }
-      return t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
+      const [gp, gid] = args.positional;
+      const got = t?.get ? await t.get(gp, gid) : await adapter.getTask(gp, gid);
+      if (args.options['no-format'] === true || process.env.ATS_GET_NOFORMAT) return got;
+      return await formatTriageOnGet(t, adapter, gp, gid, got);
+    }
+    case 'normalize': {
+      // Structure-only backfill (no triage/LLM): lift Goal, ensure Log, preserve Notes.
+      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks normalize PROJECT_ID TASK_ID'); process.exit(1); }
+      const [np, nid] = args.positional;
+      const task = t?.get ? await t.get(np, nid) : await adapter.getTask(np, nid);
+      const norm = normalizeTaskBody(task.content || '');
+      if (!norm.changed) return { task: { projectId: np, taskId: nid }, changed: false };
+      const res = t?.update
+        ? await t.update(np, nid, { content: norm.content })
+        : await adapter.updateTask(np, nid, { content: norm.content });
+      auditCliWrite('task.updated', res, { projectId: np, taskId: nid }, { fields: ['content'], via: 'normalize' });
+      return res.task || res;
+    }
     case 'create': {
       let projectId = args.options.project || '';
       let title = args.positional[0];
@@ -686,6 +798,9 @@ async function handleTasks() {
         console.error('Run without arguments for interactive mode.');
         process.exit(1);
       }
+      // Conform any body that's written (deterministic, no LLM). Bare quick-captures
+      // (no --content) stay clean; they get the Goal+Log skeleton on first `get`.
+      if (opts.content) opts.content = normalizeTaskBody(opts.content).content;
       const result = t?.create
         ? await t.create(projectId, title, opts)
         : await adapter.createTask({
@@ -726,6 +841,8 @@ async function handleTasks() {
         tags: args.options.tags,
         reminder: args.options.reminder,
       };
+      // Normalize the body whenever content is being written (no extra fetch when it isn't).
+      if (patch.content !== undefined) patch.content = normalizeTaskBody(patch.content).content;
       const result = t?.update
         ? await t.update(args.positional[0], args.positional[1], patch)
         : await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
