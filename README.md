@@ -158,9 +158,9 @@ flowchart TB
     deck["Operator deck — the swipe UI"]
   end
 
-  subgraph HOST["VPS or Render · the part you deploy"]
-    agent["AI agent + ATS core<br/>MCP server · CLI · suggestion engine"]
-    search["Qdrant + Ollama<br/>optional semantic search"]
+  subgraph HOST["Render · the part you deploy (one click)"]
+    mcp["MCP server<br/>your agent connects here · token-gated"]
+    search["Search memory + embedding engine<br/>Qdrant + Ollama (nomic-embed)"]
   end
 
   subgraph TASKS["Your tools · already in the cloud"]
@@ -171,27 +171,28 @@ flowchart TB
   end
 
   user --> deck
-  deck -->|"approve · reject · modify"| agent
-  agent --> tt & nt & ob & gg
-  agent -.->|"rank"| search
+  deck -->|"approve · reject · modify"| mcp
+  mcp --> tt & nt & ob & gg
+  mcp -.->|"rank"| search
 ```
 
 - **The operator deck (the app on your phone)** lives on **Cloudflare Pages** — free, always on, nothing to manage.
-- **The backend (the agent that reads your tasks and proposes the next action)** runs on a **VPS or Render**. This is the only part you deploy.
+- **The backend you deploy** runs on **Render**. One click gives you the whole thing: the **MCP server** your agent connects to, plus its own **search memory** (Qdrant) and **embedding engine** (Ollama) so it can find tasks by meaning, not just keywords.
 - **Your task systems** (TickTick, Notion, Obsidian, Gmail/Calendar) are already in the cloud — ATS just connects to them.
 
 ### Deploy the backend in one click
 
 No terminal needed:
 
-1. Click the button. It opens **Render** (a hosting service with a free tier).
-2. Sign in with GitHub and confirm — Render reads the blueprint in this repo and builds everything for you.
-3. In a few minutes you get a URL like `https://ats-operator-backend.onrender.com`. That's your backend.
-4. It starts in **demo mode** so you see it working right away. To connect your own tasks, open the service's **Environment** tab in Render, set `DECK_DEMO` to `0`, and add your task-system token (see [the operator-deck guide](examples/operator-deck/)).
+1. Click the button. It opens **Render** (a hosting service). Sign in with GitHub.
+2. Render reads the blueprint in this repo and builds **four pieces** for you: the MCP server (the door your agent knocks on), a search memory, an embedding engine, and the operator-deck backend. The search memory and embedding engine are kept **private** — only your own server can reach them.
+3. In a few minutes the MCP server is live at a URL like `https://ats-mcp.onrender.com`. Its tasks-by-meaning search works out of the box; you only add your own task-system token when you want it reading *your* tasks.
+4. **Connect your agent — safely.** Open the **ats-mcp** service's **Environment** tab in Render and copy the auto-generated **`ATS_MCP_TOKEN`**. That token is the lock on the door: every request must carry it. Point your MCP client at `https://<your-mcp-url>/mcp` and have it send the header `Authorization: Bearer <ATS_MCP_TOKEN>`. No token, no access.
+5. **Wire your own tasks (optional).** In the same tab, paste your task-system token into `TICKTICK_ACCESS_TOKEN`. The server restarts and now reads your real tasks.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/renezander030/agentic-task-system)
 
-> Render's free tier sleeps after inactivity, so the first request after a quiet spell takes ~30s to wake. Any cheap VPS — or a paid Render instance — keeps it always on.
+> This stack runs on Render's paid instances (the search memory and embedding engine each need a little always-on RAM and a small disk), so it stays awake and answers instantly — no cold-start wait. Prefer to run it on your own machine or a VPS instead? The same pieces are plain Docker containers; see [the deploy guide](deploy/README.md).
 
 ## Architecture
 

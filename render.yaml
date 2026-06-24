@@ -1,21 +1,97 @@
-# Render blueprint — one-click deploy of the ATS operator-deck backend.
+# Render blueprint — one-click deploy of the full ATS backend.
 # The "Deploy to Render" button in the README points here. Render reads this
-# file, builds the backend, and gives you a URL. It boots in demo mode (no
-# credentials needed); set DECK_DEMO=0 + your task-system token to go live.
+# file and builds four connected services:
+#
+#   1. ats-qdrant            — the search memory (vector database)      [private]
+#   2. ats-ollama            — the embedding engine (nomic-embed-text)  [private]
+#   3. ats-mcp               — the MCP server your AI agent connects to [public, token-gated]
+#   4. ats-operator-backend  — the human-approval card-deck backend     [public, demo]
+#
+# Only ats-mcp and the operator backend are reachable from the internet; the
+# search memory and embedding engine stay on Render's private network and are
+# never publicly exposed. The MCP server requires a bearer token on every
+# request (auto-generated below — copy it from the dashboard into your agent).
+#
+# All services share one region so they can talk over the private network.
 # Spec: https://render.com/docs/blueprint-spec
 services:
+  # 1) Vector database — stores task embeddings for semantic search. Private.
+  - type: pserv
+    name: ats-qdrant
+    runtime: image
+    plan: standard
+    region: frankfurt
+    image:
+      url: qdrant/qdrant:latest
+    disk:
+      name: qdrant-storage
+      mountPath: /qdrant/storage
+      sizeGB: 1
+
+  # 2) Embedding engine — Ollama serving nomic-embed-text (768-dim). Private.
+  #    Pulls the model on first boot and caches it on the mounted disk.
+  - type: pserv
+    name: ats-ollama
+    runtime: docker
+    plan: standard
+    region: frankfurt
+    dockerfilePath: deploy/ollama/Dockerfile
+    dockerContext: .
+    disk:
+      name: ollama-models
+      mountPath: /root/.ollama
+      sizeGB: 2
+
+  # 3) MCP server — what your AI agent talks to. Public, but every request needs
+  #    the bearer token. ATS_MCP_TOKEN is generated for you; read it from the
+  #    service's Environment tab and send it as: Authorization: Bearer <token>.
+  #    Endpoints: https://<your-mcp-url>/mcp (streamable HTTP) and /sse (SSE).
+  - type: web
+    name: ats-mcp
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: deploy/mcp/Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: ATS_MCP_TOKEN          # the secret your agent sends; keep it private
+        generateValue: true
+      - key: ATS_ADAPTER
+        value: "@reneza/ats-adapter-ticktick"
+      - key: QDRANT_HOST            # private hostname of the vector database
+        fromService:
+          type: pserv
+          name: ats-qdrant
+          property: host
+      - key: OLLAMA_HOST            # private hostname of the embedding engine
+        fromService:
+          type: pserv
+          name: ats-ollama
+          property: host
+      - key: TICKTICK_ACCESS_TOKEN  # your task-system token — paste to go live
+        sync: false
+      - key: TICKTICK_CLIENT_ID     # only needed if you want token auto-refresh
+        sync: false
+      - key: TICKTICK_CLIENT_SECRET
+        sync: false
+
+  # 4) Operator deck backend — the swipe-to-approve card UI's backend. Boots in
+  #    demo mode (no credentials, never touches real tasks). Set DECK_DEMO=0 and
+  #    add your token to wire it to the live stack above.
   - type: web
     name: ats-operator-backend
     runtime: node
     plan: free
+    region: frankfurt
     rootDir: examples/operator-deck
     buildCommand: npm install
     startCommand: node server.mjs
     healthCheckPath: /api/suggestions
     envVars:
       - key: DECK_DEMO
-        value: "1"        # demo mode: serves curated cards, never touches real tasks. Set to 0 to wire your own.
+        value: "1"        # demo mode: serves curated cards, never touches real tasks
       - key: OPERATOR_ORIGIN
-        value: "*"        # CORS: lets the Cloudflare-hosted deck call this backend. Lock to your deck URL later.
+        value: "*"        # CORS: lets the Cloudflare-hosted deck call this backend
       - key: OPERATOR_TOKEN
-        sync: false       # optional: set a long token to require it on writes (Authorization: Bearer ...).
+        sync: false       # optional: require Authorization: Bearer ... on writes

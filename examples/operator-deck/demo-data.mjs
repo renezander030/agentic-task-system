@@ -47,10 +47,10 @@ export const DEMO_SUGGESTIONS = [
     back: { heading: 'Why', body: 'No movement for 47 days and the queue decision already shipped. Archiving (reversible) stops dead context steering planning.' },
   },
   {
-    id: 'demo-merge-fde', kind: 'relate', score: 0.61,
+    id: 'demo-merge-roles', kind: 'relate', score: 0.61,
     items: [
-      { adapter: 'ticktick', title: 'FDE-044: AI Engineer (Python + React)' },
-      { adapter: 'ticktick', title: 'FDE-055: FullStack AI Developer' },
+      { adapter: 'ticktick', title: 'JOB-201: Senior Backend Engineer (Go)' },
+      { adapter: 'ticktick', title: 'JOB-214: Backend Engineer, Platform team' },
     ],
     action: 'Merge these duplicate role specs',
     back: { heading: 'Why', body: 'Near-duplicate role specs sitting apart. Linking them as the same search keeps them from drifting out of sync.' },
