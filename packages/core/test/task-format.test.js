@@ -80,3 +80,32 @@ test('empty input yields the full scaffold', () => {
   assert.ok(content.startsWith('# Goal'));
   assert.ok(content.includes('# Log'));
 });
+
+test('# Process is protected: round-trips verbatim, never hoisted into Log', () => {
+  const input = [
+    '# Goal', '::ship it::', '',
+    '# Log', '- 06-26 Draft created', '',
+    '# Process',
+    '- ➡️step1 - 🤖',
+    '- next: review angle - 🧑',   // starts with "next" — would be hoisted if not protected
+    '- step3 - 🧑', '',
+    '# Notes', 'original idea',
+  ].join('\n');
+  const { content } = normalizeTaskBody(input);
+  // every Process line stays inside the Process section, in order, untouched
+  const proc = content.slice(content.indexOf('# Process'), content.indexOf('# Notes'));
+  assert.ok(proc.includes('- ➡️step1 - 🤖'));
+  assert.ok(proc.includes('- next: review angle - 🧑'), 'next:-prefixed step must NOT be hoisted to Log');
+  assert.ok(proc.includes('- step3 - 🧑'));
+  // and it did NOT leak into the Log section
+  const logSeg = content.slice(content.indexOf('# Log'), content.indexOf('# Process'));
+  assert.ok(!logSeg.includes('review angle'), 'Process step must not appear in Log');
+});
+
+test('# Process re-run is a no-op (idempotent, frozen after a human edit)', () => {
+  const body = '# Goal\n::g::\n\n# Log\n- 06-26 x\n\n# Process\n- ➡️step1 - 🤖\n- step2 - 🧑\n\n# Notes\n';
+  const once = normalizeTaskBody(body).content;
+  const twice = normalizeTaskBody(once);
+  assert.equal(twice.changed, false);
+  assert.equal(twice.content, once);
+});

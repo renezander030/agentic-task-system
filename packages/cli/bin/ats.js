@@ -694,7 +694,7 @@ function runTriageEmit(task) {
     if (r.status !== 0 || !r.stdout) return null;
     const line = r.stdout.trim().split('\n').filter(Boolean).pop();
     const d = JSON.parse(line);
-    return { tags: d.tags || [], next: (d.next || '').trim() };
+    return { tags: d.tags || [], next: (d.next || '').trim(), goal: (d.goal || '').trim(), summary: (d.summary || '').trim() };
   } catch { return null; }
 }
 
@@ -703,6 +703,8 @@ function runTriageEmit(task) {
 // BOTH in one write. Skips the LLM call when the task is already triaged AND its
 // body is already conforming (freshness guard). Never fires for find/list/search.
 async function formatTriageOnGet(t, adapter, proj, id, task) {
+  // Notes are freeform reference/wiki content — never triage or Goal/Log-reformat them.
+  if ((task.kind || 'TEXT') === 'NOTE') return task;
   const fullProj = task.fullProjectId || task.projectId || proj;
   const fullId = task.fullId || task.id || id;
   const curTags = task.tags || [];
@@ -712,15 +714,20 @@ async function formatTriageOnGet(t, adapter, proj, id, task) {
 
   let newTags = null;
   let next = '';
+  let goal = '';
+  let summary = '';
   if (!skip && (!hasTriage || norm.changed)) {
     if (claimGetTriageBudget()) {
       const r = runTriageEmit({ id: fullId, projectId: fullProj, title: task.title, content: norm.content });
-      if (r) { newTags = r.tags; next = r.next; }
+      if (r) { newTags = r.tags; next = r.next; goal = r.goal; summary = r.summary; }
     } else {
       process.stderr.write(`[ats] get-triage daily cap (${GET_TRIAGE_MAX_PER_DAY}) reached — structure-only this read; triage deferred to the batch cron.\n`);
     }
   }
-  const finalBody = next ? normalizeTaskBody(norm.content, { next }).content : norm.content;
+  const created = task.createdTime || '';
+  const finalBody = (next || goal || summary)
+    ? normalizeTaskBody(norm.content, { next, goal, created, summary }).content
+    : norm.content;
   const bodyChanged = finalBody.trim() !== (task.content || '').trim();
   if (!bodyChanged && !newTags) return task; // already conforming + tagged → no write
 
@@ -738,7 +745,10 @@ async function formatTriageOnGet(t, adapter, proj, id, task) {
 function handleFmt() {
   let body;
   try { body = fs.readFileSync(0, 'utf8'); } catch { body = ''; }
-  const { content } = normalizeTaskBody(body, { next: args.options.next || '' });
+  const { content } = normalizeTaskBody(body, {
+    next: args.options.next || '', goal: args.options.goal || '',
+    created: args.options.created || '', summary: args.options.summary || '',
+  });
   process.stdout.write(content);
 }
 

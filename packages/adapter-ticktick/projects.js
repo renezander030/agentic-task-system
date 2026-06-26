@@ -57,8 +57,11 @@ export async function get(projectId, deps = {}) {
       dueDate: t.dueDate,
       priority: formatPriority(t.priority),
       tags: t.tags || [],
+      kind: t.kind || 'TEXT',      // TASK | NOTE — surface it so callers can exclude notes
       status: t.status === 2 ? 'completed' : 'active',
       completedTime: t.completedTime,
+      createdTime: t.createdTime,
+      modifiedTime: t.modifiedTime,
     })),
     taskCount: data.tasks.length,
   };

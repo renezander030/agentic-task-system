@@ -17,6 +17,7 @@ const GOAL_LINE = /^\s*(goal|ziel)\s*:\s*(.+?)\s*$/i;
 const DATED = /^\s*[-*]\s*(\*\*)?\d{4}-\d{2}-\d{2}/;
 const ACTION = /^\s*[-*]\s*(\*\*)?\s*(next|todo|next best action|tbd)\b/i;
 const BULLET = /^\s*[-*]\s+/;
+const PLACEHOLDER_GOAL = /^todo\b.*set goal$/i;   // the "no goal found" sentinel — replaceable
 
 // Triage tag namespaces — used by callers to decide whether a task is already classified.
 export const TRIAGE_TAG = /^(route|type|model|effort|do|tool|review)[:-]/;
@@ -49,7 +50,11 @@ function firstMeaningful(lines) {
 
 /**
  * @param {string} content - existing task body (markdown)
- * @param {{next?: string}} [opts] - next-step to fold in as the first Log action bullet
+ * @param {{next?: string, goal?: string, created?: string, summary?: string}} [opts] -
+ *   next-step folded in as the first Log action bullet; goal used for the `# Goal`
+ *   section ONLY when the body carries no real goal of its own (a model-inferred
+ *   fallback, never overriding a human goal); summary+created seed a dated Log entry
+ *   (`- <created>: <summary>`) when the task has no dated history of its own.
  * @returns {{content: string, changed: boolean, goal: string|null}}
  */
 export function normalizeTaskBody(content = '', opts = {}) {
@@ -71,6 +76,13 @@ export function normalizeTaskBody(content = '', opts = {}) {
       for (const l of s.lines) if (l.trim()) logLines.push(l.replace(/\s+$/, ''));
       continue;
     }
+    // `# Process` is human-authored and OFF-LIMITS: round-trip it verbatim — never
+    // hoist its bullets into Log, never mine it for a goal, never trim it. The step
+    // plan (and its ➡️ position) belongs to the human; automation reads it, never edits it.
+    if (h === 'process') {
+      blocks.push({ heading: h, raw: s.raw, lines: s.lines.slice() });
+      continue;
+    }
     const kept = [];
     for (const l of s.lines) {
       if (goal == null && HIGHLIGHT.test(l)) { goal = l.match(HIGHLIGHT)[1].trim(); continue; }
@@ -89,10 +101,24 @@ export function normalizeTaskBody(content = '', opts = {}) {
     if (!already) logLines.unshift(`- next: ${next}`);
   }
 
+  // Preserve EVERY log line — hoist `next:`/action bullets to the top, but keep all other
+  // lines (dated entries AND the free-text notes underneath them) in their original order.
+  // Do NOT drop non-bullet lines: a date followed by plain-text notes is a valid entry, and
+  // discarding those notes is silent data loss. Order is kept so each date keeps its notes.
   const actions = logLines.filter((l) => ACTION.test(l));
-  const dated = logLines.filter((l) => DATED.test(l));
-  const otherLog = logLines.filter((l) => !ACTION.test(l) && !DATED.test(l) && BULLET.test(l));
-  let log = [...actions, ...dated, ...otherLog];
+  // Keep every line that carries content (dated entries AND their free-text notes), in order;
+  // only drop content-less empty bullets ("-", "- ") so the empty-log placeholder regenerates.
+  const rest = logLines.filter((l) => !ACTION.test(l) && l.replace(/^\s*[-*]\s*/, '').trim() !== '');
+  // Seed history: if the task has a caller-supplied summary of its body but NO dated log
+  // entry of its own, assume that text dates from task creation — log the summary at the
+  // creation date. Skipped once any dated entry exists, so it's idempotent and never
+  // fabricates over real history. The full prose still round-trips under ## Notes.
+  const created = String(opts.created || '').slice(0, 10);
+  const summary = String(opts.summary || '').trim().replace(/\s+/g, ' ');
+  if (!rest.some((l) => DATED.test(l)) && summary && /^\d{4}-\d{2}-\d{2}$/.test(created)) {
+    rest.push(`- ${created}: ${summary}`);
+  }
+  let log = [...actions, ...rest];
   if (!log.length) log = ['- ', '- ', '- '];
 
   // Leftover preamble prose folds under "## Notes" — into an existing Notes block
@@ -102,6 +128,15 @@ export function normalizeTaskBody(content = '', opts = {}) {
     const notes = blocks.find((b) => b.heading === 'notes');
     if (notes) notes.lines = [...preText.split('\n'), '', ...notes.lines];
     else blocks.unshift({ heading: 'notes', raw: '## Notes', lines: preText.split('\n') });
+  }
+
+  // A previously-written placeholder ("TODO — set goal") is NOT a real goal — drop it
+  // so a caller-supplied (model-inferred) goal, or a fresh placeholder, can replace it.
+  if (goal && PLACEHOLDER_GOAL.test(goal)) goal = null;
+  // Fall back to a caller-supplied goal before the placeholder; never override a real one.
+  if (goal == null && opts.goal) {
+    const g = String(opts.goal).trim().replace(/^::|::$/g, '').trim();
+    if (g && !PLACEHOLDER_GOAL.test(g)) goal = g;
   }
 
   const parts = ['# Goal', goal ? `::${goal}::` : '::TODO — set goal::', '', '# Log', log.join('\n')];
