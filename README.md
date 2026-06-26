@@ -146,6 +146,22 @@ _Plus the plumbing that makes it usable every turn: a disk-backed corpus cache t
 
 The agent proposes the next best action across your tools; you approve, reject, or send it back to refine — with a thumb (the demo up top). The [operator deck](examples/operator-deck/) is a mobile card surface that derives suggestions from live ATS state and across adapters — *link this Notion spec to its TickTick task*, *archive this stale spike* — running the real action on approve (`relateTask`, `setTaskLifecycle`). Swipe right to approve, left to reject, **up to modify** (hands it back to the agent; it returns later). Suggestions are generated on demand from the current corpus, so the deck is always current; when nothing is pending it shows **All caught up**.
 
+## Walkthrough: from a task pile to the next action
+
+The whole loop, start to finish. This is what Beads changed for me: I stopped *choosing* what to work on and let the dependency graph hand me the next ready thing. Three tags steer it — `do:` (does the **agent** run it, or do **you**?), `type:` (build / research / review / …), and `effort:` (S/M/L). Skip the rest; those three route and size every task.
+
+<p align="center">
+  <img src="assets/beads-flow.svg" alt="From a pile of tasks to the next right action: three tags (do/type/effort) steer each task; capture, tag, link dependencies, and bd ready surfaces the unblocked frontier; do the work and closing it recomputes the frontier." width="820" />
+</p>
+
+1. **Capture.** Drop tasks into the system you already use. No structure required yet.
+2. **Tag — just the three.** Tag each task `do:`, `type:`, `effort:`. That's enough for an agent or you to route and size it.
+3. **Link dependencies.** Tell Beads what blocks what: `ats link add <task> <blocker> --type depends-on`. Typed, durable edges — not a flat checklist.
+4. **Let `bd ready` pick.** Beads computes the unblocked frontier — tasks whose blockers are all closed. You never scan the backlog; `ats find` and `ats due` read from it.
+5. **Do it, then close.** The agent takes ready `do:agent` work and runs it with full `ats context`; you take `do:human`. Close one and the frontier recomputes — the next right thing surfaces on its own.
+
+Three tags in, a self-updating queue out.
+
 ## Deploy it yourself
 
 ATS is two pieces, and each has an easy home — only the backend is yours to run.
