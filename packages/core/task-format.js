@@ -16,7 +16,6 @@ const HIGHLIGHT = /^\s*::(.+?)::\s*$/;
 const GOAL_LINE = /^\s*(goal|ziel)\s*:\s*(.+?)\s*$/i;
 const DATED = /^\s*[-*]\s*(\*\*)?\d{4}-\d{2}-\d{2}/;
 const ACTION = /^\s*[-*]\s*(\*\*)?\s*(next|todo|next best action|tbd)\b/i;
-const BULLET = /^\s*[-*]\s+/;
 const PLACEHOLDER_GOAL = /^todo\b.*set goal$/i;   // the "no goal found" sentinel — replaceable
 
 // Triage tag namespaces — used by callers to decide whether a task is already classified.
