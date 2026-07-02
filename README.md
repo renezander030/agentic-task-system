@@ -155,6 +155,15 @@ claude mcp add ats -e ATS_ADAPTER=@reneza/ats-adapter-ticktick -- ats-mcp
 
 ATS holds the line where agent systems fail: **writes round-trip without lossy re-encoding, the store → `Task` mapping is contract-tested, and every result carries its provenance** (`sources`, `find --explain`). A publish-safety gate ([`check-no-pii.mjs`](scripts/check-no-pii.mjs)) fails the build if personal data could leak into a package. Full note: [`docs/state-integrity.md`](docs/state-integrity.md).
 
+## Working on ATS
+
+Contributions welcome — bug fixes and especially new adapters under `packages/adapter-*`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup and adapter pattern, and
+[AGENTS.md](AGENTS.md) if you drive a coding agent over the repo. Working on the source,
+[`pi-codegraph`](https://github.com/renezander030/pi-codegraph) gives your agent a
+call-graph of the monorepo — the adapter pattern and the blast radius of a core change —
+so it stops re-reading the whole tree each session.
+
 ## Versioning & license
 
 `v0.6` — portable intent, exploration promotion, goal hierarchy + conflict evaluation, bounded task events, workflow-progress evaluation, Taskmaster and Beads adapters. See [`CHANGELOG.md`](CHANGELOG.md). MIT.
