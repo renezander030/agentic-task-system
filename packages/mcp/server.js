@@ -34,6 +34,7 @@ import {
   promoteExploration,
   checkTaskAccess,
   addTaskLink,
+  resolveTaskLinks,
   removeTaskLink,
   addTaskReference,
   removeTaskReference,
@@ -44,6 +45,8 @@ import {
   contextForTask,
   recordAction,
   listActions,
+  snapshotTask,
+  revertAction,
   snapshotTaskEvents,
   collectAndSpoolTaskEvents,
   listPendingTaskEvents,
@@ -90,11 +93,15 @@ function taskRefFromResult(result, fallback = {}) {
   };
 }
 
-function auditWrite(action, result, fallback, agent, metadata, advanced = false) {
+function auditWrite(action, result, fallback, agent, metadata, advanced = false, before = undefined) {
   const task = taskRefFromResult(result, fallback);
   if (!task.projectId || !task.taskId) return;
   try {
-    recordAction({ agent: agent || process.env.ATS_AGENT_ID || 'ats-mcp', action, task, advanced, metadata });
+    recordAction({
+      agent: agent || process.env.ATS_AGENT_ID || 'ats-mcp',
+      action, task, advanced, metadata,
+      ...(before !== undefined ? { before } : {}),
+    });
   } catch (err) {
     console.error(`[ats-mcp] action ledger warning: ${err.message}`);
   }
@@ -228,9 +235,28 @@ export function createServer(adapter) {
     },
     async ({ projectId, taskId, agent, ...patch }) => {
       try {
+        // Before-image so `undo_write` / `ats undo` can restore this task after a bad patch.
+        let before;
+        try { before = snapshotTask(await adapter.getTask(projectId, taskId)); } catch { before = undefined; }
         const result = await adapter.updateTask(projectId, taskId, patch);
-        auditWrite('task.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) });
+        auditWrite('task.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) }, false, before);
         return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'undo_write',
+    'WRITE. Reverses a recorded write using the before-image the ledger captured: restores an updated task to its prior state, or deletes a task that was created. Omit actionId to undo the most recent undoable write. Pass dryRun to preview the plan without changing anything. Records a compensating `action.reverted` entry.',
+    {
+      actionId: z.string().optional().describe('Ledger action id to reverse (from `list_actions`). Omit to undo the most recent undoable write.'),
+      dryRun: z.boolean().optional().describe('Preview the revert plan without writing.'),
+    },
+    async ({ actionId, dryRun }) => {
+      try {
+        return ok(await revertAction(adapter, actionId, { apply: !dryRun }));
       } catch (e) {
         return fail(e);
       }
@@ -457,27 +483,49 @@ export function createServer(adapter) {
 
   server.tool(
     'add_task_link',
-    'WRITE. Adds a typed relationship from one task to another. Types express dependencies, evidence, decisions, outputs, supersession, support, or a general relation.',
+    'WRITE. Adds a typed relationship from one task to another. Types express dependencies, evidence, decisions, outputs, supersession, support, or a general relation. Set allowMissing to record a forward link to a task that does not exist yet — it auto-resolves once the target is created (or run `resolve_task_links` to refresh its title).',
     {
       sourceProjectId: z.string(),
       sourceTaskId: z.string(),
       targetProjectId: z.string(),
       targetTaskId: z.string(),
       type: z.enum(['blocks', 'depends-on', 'parent', 'conflicts-with', 'supports', 'evidence', 'decision', 'output', 'supersedes', 'related']),
+      allowMissing: z.boolean().optional().describe('Allow linking to a target that does not exist yet (a forward/dangling link).'),
+      title: z.string().optional().describe('Title hint for a forward link whose target cannot be read yet.'),
       agent: z.string().optional(),
     },
-    async ({ sourceProjectId, sourceTaskId, targetProjectId, targetTaskId, type, agent }) => {
+    async ({ sourceProjectId, sourceTaskId, targetProjectId, targetTaskId, type, allowMissing, title, agent }) => {
       try {
         const result = await addTaskLink(
           adapter,
           { projectId: sourceProjectId, taskId: sourceTaskId },
           { projectId: targetProjectId, taskId: targetTaskId },
-          type
+          type,
+          { allowMissing: !!allowMissing, title }
         );
         auditWrite('task.link.added', result, { projectId: sourceProjectId, taskId: sourceTaskId }, agent, {
           type,
           target: { projectId: targetProjectId, taskId: targetTaskId },
         });
+        return ok(result);
+      } catch (e) {
+        return fail(e);
+      }
+    }
+  );
+
+  server.tool(
+    'resolve_task_links',
+    "Read-mostly. Back-resolves a task's forward links: for each stored link whose target now exists, refreshes the placeholder title to the real one. Returns which links resolved and which are still missing. Writes only if a title changed.",
+    {
+      projectId: z.string(),
+      taskId: z.string(),
+      agent: z.string().optional(),
+    },
+    async ({ projectId, taskId, agent }) => {
+      try {
+        const result = await resolveTaskLinks(adapter, { projectId, taskId });
+        if (result.changed) auditWrite('task.links.resolved', result, { projectId, taskId }, agent, { resolved: result.resolved.length });
         return ok(result);
       } catch (e) {
         return fail(e);

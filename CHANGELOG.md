@@ -1,6 +1,16 @@
 
 # Changelog
 
+## 0.9.0 - Undo, forward links, path-traversal hardening, broader MCP clients
+
+Released 2026-07-03.
+
+- **Reversible writes.** `ats undo [ACTION_ID]` and the `undo_write` MCP tool reverse a recorded write from a before-image the ledger now captures on every update: an updated task is restored to its prior title/body/tags/due, and a created task is deleted. Omit the id to undo the most recent undoable write. Each undo appends a compensating `action.reverted` entry, so it is itself audited and cannot be applied twice. Before-images are only stored for writes that need them, keeping the ledger lean for reads and creates.
+- **Forward (dangling) links.** `add_task_link` and `ats link add` gain `--allow-missing`, which records a typed link to a task that does not exist yet. Because ATS resolves a link's target from corpus presence at read time, the link auto-resolves the moment the target is created (the graph node flips from `missing: true` to the real title). `resolve_task_links` / `ats link resolve` persists that heal by refreshing the placeholder title to the real one. Default `add_task_link` stays strict (unknown target still errors).
+- **Path-traversal hardening (Obsidian adapter).** Task ids and project ids flowed into filesystem paths unconstrained, so a crafted `../`, leading `/`, or decoded `..%2f` could read or overwrite files outside the vault. Every fs access derived from user input is now constrained to the vault root via a single guard; a title alone was already safe (separators are stripped).
+- **Broader MCP client coverage.** Verified stdio configuration for Cursor, Windsurf, and OpenCode alongside Claude Code and Claude Desktop, with a compatibility table and copy-paste config blocks.
+- Added a live end-to-end retrieval smoke test that locks in the add→find round-trip and graceful degradation to keyword/RRF retrieval when no embedder is present (or the embedder throws).
+
 ## 0.8.1 - Minimal frontmatter
 
 Released 2026-06-17.

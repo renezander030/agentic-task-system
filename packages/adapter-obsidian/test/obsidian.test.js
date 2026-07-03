@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runConformance, find as coreFind } from '@reneza/ats-core';
 import adapter from '../index.js';
+import * as vault from '../vault.js';
 
 process.env.ATS_CORPUS_CACHE_DISABLE = '1';
 process.env.ATS_OBSIDIAN_VAULT_NAME = 'TestVault';
@@ -270,6 +271,60 @@ test('notes.links resolves a [[wikilink]] in a note body', async () => {
     assert.equal(links[0].found, true);
     assert.equal(links[0].note.fullId, 'Inbox');
   } finally {
+    cleanup(dir);
+  }
+});
+
+// ---- path-traversal hardening -------------------------------------------
+
+test('assertInsideVault rejects ../ escapes and accepts in-vault paths', async () => {
+  const dir = makeVault();
+  try {
+    assert.throws(() => vault.assertInsideVault(dir, '../secret'), /escapes vault/);
+    assert.throws(() => vault.assertInsideVault(dir, '/etc/passwd'), /escapes vault/);
+    assert.throws(() => vault.assertInsideVault(dir, 'a/../../b'), /escapes vault/);
+    // The vault root itself and paths beneath it are allowed.
+    assert.doesNotThrow(() => vault.assertInsideVault(dir, '.'));
+    assert.doesNotThrow(() => vault.assertInsideVault(dir, 'Projects/Note.md'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('getTask/updateTask reject a ../ id instead of reading/writing outside the vault', async () => {
+  const dir = makeVault();
+  // A sentinel file sitting OUTSIDE the vault, next to it.
+  const secret = path.join(path.dirname(dir), `outside-${path.basename(dir)}.md`);
+  fs.writeFileSync(secret, 'TOP SECRET');
+  const escId = `../outside-${path.basename(dir)}`;
+  try {
+    await assert.rejects(adapter.getTask('.', escId), /escapes vault/);
+    await assert.rejects(adapter.updateTask('.', escId, { content: 'pwned' }), /escapes vault/);
+    // The external file was neither read into a note nor overwritten.
+    assert.equal(fs.readFileSync(secret, 'utf8'), 'TOP SECRET');
+    // A legitimate id still round-trips.
+    const t = await adapter.getTask('.', 'Inbox');
+    assert.equal(t.title, 'Inbox');
+  } finally {
+    fs.rmSync(secret, { force: true });
+    cleanup(dir);
+  }
+});
+
+test('createTask rejects a ../ projectId instead of writing outside the vault', async () => {
+  const dir = makeVault();
+  const escapedDir = path.join(path.dirname(dir), `evil-${path.basename(dir)}`);
+  try {
+    await assert.rejects(
+      adapter.createTask({ projectId: `../evil-${path.basename(dir)}`, title: 'boom', content: 'x' }),
+      /escapes vault/
+    );
+    assert.equal(fs.existsSync(escapedDir), false);
+    // A normal create still works.
+    const t = await adapter.createTask({ title: 'Fresh Note', content: 'hi' });
+    assert.equal(t.title, 'Fresh Note');
+  } finally {
+    fs.rmSync(escapedDir, { recursive: true, force: true });
     cleanup(dir);
   }
 });

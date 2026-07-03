@@ -126,9 +126,19 @@ ats bench run|score|progress|analyze-usage
 npm run prove:intent|prove:taskmaster|prove:beads|prove:progress
 ```
 
-## Use it from Claude Code, Claude Desktop, Cursor (MCP)
+## Use it from any MCP client (Claude Code, Claude Desktop, Cursor, Windsurf, OpenCode)
 
-[`@reneza/ats-mcp`](packages/mcp) exposes the active adapter as a tool set spanning retrieval, CRUD, and execution context (`find`, `get_task`, `create_task`, `set_task_intent`, `add_task_link`, `context_for_task`, `record_action`, `poll_task_events`, and more). For Claude Code this is persistent memory between sessions with no new database — the agent recalls runbooks, decisions, and project state from the task app you already keep current.
+[`@reneza/ats-mcp`](packages/mcp) exposes the active adapter as a tool set spanning retrieval, CRUD, and execution context (`find`, `get_task`, `create_task`, `set_task_intent`, `add_task_link`, `resolve_task_links`, `context_for_task`, `record_action`, `undo_write`, `poll_task_events`, and more). For Claude Code this is persistent memory between sessions with no new database: the agent recalls runbooks, decisions, and project state from the task app you already keep current.
+
+ATS speaks MCP over **stdio**, so any client that can launch a stdio MCP server works. Only the config file and the wrapper key differ; the binary (`ats-mcp`) and its `ATS_ADAPTER` env are the same everywhere.
+
+| Client | Where the config lives | Wrapper key |
+| --- | --- | --- |
+| Claude Code | `claude mcp add` (below) | n/a |
+| Claude Desktop | `claude_desktop_config.json` | `mcpServers` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` |
+| OpenCode | `opencode.json` | `mcp` (shape differs, below) |
 
 ```bash
 # Claude Code
@@ -136,13 +146,29 @@ claude mcp add ats -e ATS_ADAPTER=@reneza/ats-adapter-ticktick -- ats-mcp
 ```
 
 ```jsonc
-// Claude Desktop / Cursor
+// Claude Desktop / Cursor / Windsurf — identical `mcpServers` shape
 {
   "mcpServers": {
     "ats": { "command": "ats-mcp", "env": { "ATS_ADAPTER": "@reneza/ats-adapter-ticktick" } }
   }
 }
 ```
+
+```jsonc
+// OpenCode (opencode.json) — local stdio server, note `command` is an array
+{
+  "mcp": {
+    "ats": {
+      "type": "local",
+      "command": ["ats-mcp"],
+      "environment": { "ATS_ADAPTER": "@reneza/ats-adapter-ticktick" },
+      "enabled": true
+    }
+  }
+}
+```
+
+Install the binary on `PATH` first (`npm i -g @reneza/ats-cli`), or use an absolute path to `ats-mcp` if your client does not inherit your shell `PATH`.
 
 ## Conventions
 
@@ -166,6 +192,6 @@ so it stops re-reading the whole tree each session.
 
 ## Versioning & license
 
-`v0.6` — portable intent, exploration promotion, goal hierarchy + conflict evaluation, bounded task events, workflow-progress evaluation, Taskmaster and Beads adapters. See [`CHANGELOG.md`](CHANGELOG.md). MIT.
+`v0.9`: reversible writes (`ats undo` / `undo_write` from a ledger before-image), forward/dangling links that back-resolve on target creation (`add_task_link --allow-missing`, `resolve_task_links`), Obsidian path-traversal hardening, and verified stdio config for Cursor, Windsurf, and OpenCode. Built on v0.6-v0.8: portable intent, exploration promotion, goal hierarchy and conflict evaluation, bounded task events, and the Taskmaster/Beads adapters. See [`CHANGELOG.md`](CHANGELOG.md). MIT.
 
 If ATS is useful, consider a ⭐ — it helps others find it.

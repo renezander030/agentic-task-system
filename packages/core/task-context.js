@@ -931,13 +931,24 @@ async function isNoteTarget(adapter, task) {
   return Boolean(project && String(project.kind || '').toUpperCase() === 'NOTE');
 }
 
-export async function addTaskLink(adapter, source, target, type) {
+export async function addTaskLink(adapter, source, target, type, { allowMissing = false, title } = {}) {
   if (!LINK_TYPES.includes(type)) throw new Error(`Link type must be one of: ${LINK_TYPES.join(', ')}.`);
-  const targetTask = await adapter.getTask(target.projectId, target.taskId);
-  if (isCompletedTask(targetTask)) {
+  // Forward link: the target may not exist yet. With allowMissing we record a
+  // dangling link (title hint = taskId) that auto-resolves on the next graph/context
+  // read once the target is created — no stored `pending` flag needed, since ATS
+  // computes resolution from corpus presence (graphNode.missing) at read time.
+  let targetTask = null;
+  try {
+    targetTask = await adapter.getTask(target.projectId, target.taskId);
+  } catch (err) {
+    if (!allowMissing) throw err;
+  }
+  if (targetTask && isCompletedTask(targetTask)) {
     throw new Error('Cannot link a completed task; Related links point to active or note tasks only.');
   }
-  const ref = linkedRef(adapter, target, type, targetTask);
+  const ref = targetTask
+    ? linkedRef(adapter, target, type, targetTask)
+    : linkedRef(adapter, target, type, { title: optionalString(title, 'link.title') || target.taskId });
   return updateMetadata(adapter, source.projectId, source.taskId, (metadata) => {
     const duplicate = metadata.links.some((link) =>
       link.type === ref.type && link.projectId === ref.projectId && link.taskId === ref.taskId
@@ -945,6 +956,43 @@ export async function addTaskLink(adapter, source, target, type) {
     if (duplicate) return metadata;
     return { ...metadata, links: [...metadata.links, ref] };
   });
+}
+
+// Back-resolve a source task's forward links: for each stored link whose target now
+// exists, refresh the placeholder title (taskId) to the real task title. This is the
+// explicit "heal" that persists what a graph read already resolves visually — call it
+// after the target task is created. Returns which links resolved / are still missing.
+export async function resolveTaskLinks(adapter, source) {
+  const src = taskRef(source, 'source');
+  const current = await listTaskLinks(adapter, src.projectId, src.taskId);
+  const resolved = [];
+  const missing = [];
+  const newTitles = new Map(); // "type|projectId|taskId" -> refreshed title
+  for (const link of current.links) {
+    let targetTask = null;
+    try { targetTask = await adapter.getTask(link.projectId, link.taskId); } catch { /* target still missing */ }
+    if (targetTask && !isCompletedTask(targetTask)) {
+      const realTitle = targetTask.title || link.title;
+      const wasPlaceholder = !link.title || link.title === link.taskId;
+      if (wasPlaceholder && realTitle !== link.title) {
+        newTitles.set(`${link.type}|${link.projectId}|${link.taskId}`, realTitle);
+      }
+      resolved.push({ projectId: link.projectId, taskId: link.taskId, title: realTitle });
+    } else {
+      missing.push({ projectId: link.projectId, taskId: link.taskId, title: link.title });
+    }
+  }
+  const changed = newTitles.size > 0;
+  if (changed) {
+    await updateMetadata(adapter, src.projectId, src.taskId, (metadata) => ({
+      ...metadata,
+      links: metadata.links.map((link) => {
+        const title = newTitles.get(`${link.type}|${link.projectId}|${link.taskId}`);
+        return title ? { ...link, title } : link;
+      }),
+    }));
+  }
+  return { task: current.task, resolved, missing, changed };
 }
 
 export async function removeTaskLink(adapter, source, target, type) {

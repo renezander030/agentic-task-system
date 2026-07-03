@@ -57,9 +57,26 @@ export function idForFile(vaultDir, absFile) {
   return rel.replace(/\.md$/i, '');
 }
 
-/** Absolute .md file path for a task id. */
+/**
+ * Guard against path traversal: throw unless `candidate` resolves to the vault
+ * root or a path beneath it. Blocks `../`, leading `/`, and decoded `..%2f` in
+ * ids/titles/`file=` links before any fs read or write derived from user input.
+ * Returns the resolved absolute path so callers can reuse it.
+ */
+export function assertInsideVault(vaultRoot, candidate) {
+  const root = path.resolve(vaultRoot);
+  const resolved = path.resolve(root, candidate);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new Error(`Path escapes vault: ${candidate}`);
+  }
+  return resolved;
+}
+
+/** Absolute .md file path for a task id (constrained to the vault). */
 export function fileForId(vaultDir, id) {
-  return path.join(vaultDir, ...`${id}.md`.split('/'));
+  const abs = path.join(vaultDir, ...`${id}.md`.split('/'));
+  assertInsideVault(vaultDir, abs);
+  return abs;
 }
 
 /** The project ("." for root) that owns a task id. */
@@ -194,6 +211,7 @@ function normalizeTags(tags) {
 export function writeNote(vaultDir, input = {}) {
   const project = input.projectId && input.projectId !== '.' ? input.projectId : '';
   const dirAbs = project ? path.join(vaultDir, ...project.split('/')) : vaultDir;
+  assertInsideVault(vaultDir, dirAbs); // projectId is user input — keep it in the vault
   fs.mkdirSync(dirAbs, { recursive: true });
 
   const base = sanitizeFilename(input.title) || 'untitled';
@@ -201,6 +219,7 @@ export function writeNote(vaultDir, input = {}) {
   let n = 1;
   while (fs.existsSync(path.join(dirAbs, `${name}.md`))) name = `${base} ${++n}`;
   const abs = path.join(dirAbs, `${name}.md`);
+  assertInsideVault(vaultDir, abs);
 
   const fm = {};
   const tags = normalizeTags(input.tags);

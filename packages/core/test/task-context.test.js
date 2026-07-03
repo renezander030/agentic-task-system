@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addTaskLink,
+  resolveTaskLinks,
+  listTaskLinks,
   addTaskReference,
   buildTaskGraph,
   contextForTask,
@@ -63,6 +65,43 @@ function fakeAdapter() {
     authLogin: async () => ({}),
   };
 }
+
+test('forward links: addTaskLink allowMissing records a dangling link that back-resolves', async () => {
+  const adapter = fakeAdapter();
+  const src = { projectId: 'demo', taskId: 'plan' };
+  const future = { projectId: 'demo', taskId: 'future' };
+
+  // Default is strict: you cannot link a target that does not exist yet.
+  await assert.rejects(() => addTaskLink(adapter, src, future, 'depends-on'), /not found/);
+
+  // allowMissing records the forward link with a placeholder title (the taskId).
+  await addTaskLink(adapter, src, future, 'depends-on', { allowMissing: true });
+  const before = await listTaskLinks(adapter, 'demo', 'plan');
+  const dangling = before.links.find((l) => l.taskId === 'future');
+  assert.ok(dangling, 'forward link was recorded');
+  assert.equal(dangling.title, 'future');
+
+  // Until the target exists, the graph marks that node missing (read-time resolution).
+  const g1 = await buildTaskGraph(adapter, src, { depth: 1 });
+  assert.equal(g1.nodes.find((n) => n.taskId === 'future').missing, true);
+
+  // Create the target — the link auto-resolves on the next graph read, no rewrite.
+  adapter.tasks.push({ id: 'future', projectId: 'demo', title: 'The Future Task', content: '', tags: [], modifiedTime: '2026-01-03T00:00:00Z' });
+  const g2 = await buildTaskGraph(adapter, src, { depth: 1 });
+  const node = g2.nodes.find((n) => n.taskId === 'future');
+  assert.equal(node.missing, false);
+  assert.equal(node.title, 'The Future Task');
+
+  // resolveTaskLinks persists the heal: the stored placeholder title is refreshed.
+  const res = await resolveTaskLinks(adapter, src);
+  assert.equal(res.changed, true);
+  assert.ok(res.resolved.some((r) => r.taskId === 'future' && r.title === 'The Future Task'));
+  const after = await listTaskLinks(adapter, 'demo', 'plan');
+  assert.equal(after.links.find((l) => l.taskId === 'future').title, 'The Future Task');
+
+  // Idempotent: a second resolve finds nothing to change.
+  assert.equal((await resolveTaskLinks(adapter, src)).changed, false);
+});
 
 test('metadata block round-trips without changing the human-authored body', () => {
   const content = writeTaskMetadata('Keep this paragraph.\n', {

@@ -51,6 +51,7 @@ import {
   addTaskLink,
   removeTaskLink,
   listTaskLinks,
+  resolveTaskLinks,
   addTaskReference,
   removeTaskReference,
   listTaskReferences,
@@ -60,6 +61,9 @@ import {
   contextForTask,
   recordAction,
   listActions,
+  snapshotTask,
+  revertAction,
+  mostRecentUndoable,
   taskEventStatePath,
   taskEventSpoolPath,
   readTaskEventCheckpoint,
@@ -267,6 +271,9 @@ async function main() {
       case 'events':
         result = await handleEvents();
         break;
+      case 'undo':
+        result = await handleUndo();
+        break;
       case 'find':
       case 'get':
       case 'url':
@@ -371,7 +378,7 @@ const COMPLETION_COMMANDS = [
   'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
   'doctor', 'status', 'cache', 'bench', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth',
-  'projects', 'tasks', 'notes', 'help', 'completion',
+  'projects', 'tasks', 'notes', 'help', 'completion', 'undo',
 ];
 
 // Emit a shell completion script for the given shell. Built from single-quoted
@@ -636,7 +643,7 @@ function taskRefFromResult(result, fallback = {}) {
   };
 }
 
-function auditCliWrite(action, result, fallback, metadata, advanced = false) {
+function auditCliWrite(action, result, fallback, metadata, advanced = false, before = undefined) {
   const task = taskRefFromResult(result, fallback);
   if (!task.projectId || !task.taskId) return;
   try {
@@ -646,6 +653,7 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false) {
       task,
       advanced,
       metadata,
+      ...(before !== undefined ? { before } : {}),
     });
   } catch (err) {
     console.error(`Warning: action ledger write failed: ${err.message}`);
@@ -736,7 +744,7 @@ async function formatTriageOnGet(t, adapter, proj, id, task) {
   const res = t?.update
     ? await t.update(proj, id, patch)
     : await adapter.updateTask(proj, id, { ...patch, tags: tagsToArray(patch.tags) });
-  auditCliWrite('task.updated', res, { projectId: proj, taskId: id }, { fields: Object.keys(patch), via: 'get-format' });
+  auditCliWrite('task.updated', res, { projectId: proj, taskId: id }, { fields: Object.keys(patch), via: 'get-format' }, false, snapshotTask(task));
   return res.task || res;
 }
 
@@ -777,7 +785,7 @@ async function handleTasks() {
       const res = t?.update
         ? await t.update(np, nid, { content: norm.content })
         : await adapter.updateTask(np, nid, { content: norm.content });
-      auditCliWrite('task.updated', res, { projectId: np, taskId: nid }, { fields: ['content'], via: 'normalize' });
+      auditCliWrite('task.updated', res, { projectId: np, taskId: nid }, { fields: ['content'], via: 'normalize' }, false, snapshotTask(task?.task || task));
       return res.task || res;
     }
     case 'create': {
@@ -853,10 +861,16 @@ async function handleTasks() {
       };
       // Normalize the body whenever content is being written (no extra fetch when it isn't).
       if (patch.content !== undefined) patch.content = normalizeTaskBody(patch.content).content;
+      // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
+      let before;
+      try {
+        const cur = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
+        before = snapshotTask(cur?.task || cur);
+      } catch { before = undefined; }
       const result = t?.update
         ? await t.update(args.positional[0], args.positional[1], patch)
         : await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
-      auditCliWrite('task.updated', result, { projectId: args.positional[0], taskId: args.positional[1] }, { fields: Object.keys(patch).filter((key) => patch[key] !== undefined) });
+      auditCliWrite('task.updated', result, { projectId: args.positional[0], taskId: args.positional[1] }, { fields: Object.keys(patch).filter((key) => patch[key] !== undefined) }, false, before);
       return result;
     }
     case 'complete': {
@@ -1063,12 +1077,20 @@ async function handleLink() {
       adapter,
       { projectId: sourceProjectId, taskId: sourceTaskId },
       { projectId: targetProjectId, taskId: targetTaskId },
-      args.options.type
+      args.options.type,
+      { allowMissing: args.options['allow-missing'] === true, title: args.options.title }
     );
     auditCliWrite('task.link.added', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
       type: args.options.type,
       target: { projectId: targetProjectId, taskId: targetTaskId },
     });
+    return result;
+  }
+  if (args.subcommand === 'resolve') {
+    const [projectId, taskId] = args.positional;
+    if (!projectId || !taskId) { console.error('Usage: ats link resolve PROJECT_ID TASK_ID'); process.exit(1); }
+    const result = await resolveTaskLinks(adapter, { projectId, taskId });
+    if (result.changed) auditCliWrite('task.links.resolved', result, { projectId, taskId }, { resolved: result.resolved.length });
     return result;
   }
   if (args.subcommand === 'remove') {
@@ -1200,6 +1222,32 @@ async function handleLedger() {
     });
   }
   console.log(getAgentLayerHelp('ledger'));
+}
+
+// `ats undo [ACTION_ID] [--dry-run]` — reverse the last write (or a named one) using
+// the before-image the ledger captured. Restores an update; deletes a created task.
+async function handleUndo() {
+  const id = args.positional[0];
+  const dryRun = args.options['dry-run'] === true || args.options.n === true;
+  if (!dryRun) {
+    // Peek so we can fail clearly BEFORE loading an adapter (which needs auth).
+    const target = id
+      ? listActions({}).find((e) => e.id === id)
+      : mostRecentUndoable();
+    if (!target) {
+      console.error(id ? `No action ${id} in the ledger.` : 'Nothing to undo — no undoable write in the ledger.');
+      process.exit(1);
+    }
+  }
+  const adapter = dryRun ? {} : await loadAdapter();
+  try {
+    const res = await revertAction(adapter, id, { apply: !dryRun });
+    if (dryRun) return { dryRun: true, ...res.plan };
+    return { undone: res.plan.id, op: res.plan.op, action: res.plan.action, task: res.plan.task, result: res.result };
+  } catch (err) {
+    console.error(`Undo failed: ${err.message}`);
+    process.exit(1);
+  }
 }
 
 async function handleSecurity() {

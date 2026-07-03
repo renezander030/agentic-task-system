@@ -117,6 +117,7 @@ test('registers the full ATS tool set', async () => {
     'relate_task',
     'remove_task_link',
     'remove_task_reference',
+    'resolve_task_links',
     'set_task_hierarchy',
     'set_task_intent',
     'set_task_lifecycle',
@@ -124,6 +125,7 @@ test('registers the full ATS tool set', async () => {
     'similar',
     'snapshot_task_events',
     'task_graph',
+    'undo_write',
     'update_task',
     'url_for',
   ]);

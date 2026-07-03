@@ -27,6 +27,7 @@ export {
   evaluateTaskAccess,
   checkTaskAccess,
   addTaskLink,
+  resolveTaskLinks,
   removeTaskLink,
   listTaskLinks,
   addTaskReference,
@@ -37,7 +38,7 @@ export {
   evaluateTaskHierarchy,
   contextForTask,
 } from './task-context.js';
-export { actionLogPath, recordAction, listActions } from './action-ledger.js';
+export { actionLogPath, recordAction, listActions, snapshotTask, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
 export {
   TASK_EVENT_STATE_VERSION,
   TASK_EVENT_SPOOL_VERSION,

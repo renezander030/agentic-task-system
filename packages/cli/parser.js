@@ -406,6 +406,7 @@ Commands:
   graph          Traverse the typed task graph around an item
   context        Assemble valid linked + retrieved context with provenance
   ledger         Record or inspect agent actions and work advancement
+  undo [id]      Reverse the last write (or a named one) from the ledger before-image
   security       Define task trust/resource scope and audit access decisions
   events         Snapshot, poll, or watch observation-only task state changes
   doctor         Diagnose adapter, auth, capabilities, cache, retrieval
@@ -475,11 +476,16 @@ ${common}`,
     link: `ats link - Typed relationships to other active or note tasks
 
 Usage:
-  ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE
+  ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE [--allow-missing] [--title HINT]
   ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE
   ats link list PROJECT_ID TASK_ID
+  ats link resolve PROJECT_ID TASK_ID
 
 Types: blocks, depends-on, parent, conflicts-with, supports, evidence, decision, output, supersedes, related
+
+--allow-missing records a forward link to a task that does not exist yet; it back-resolves
+on the next graph read once the target is created. 'ats link resolve' refreshes the stored
+placeholder title to the real one after the target lands.
 
 Links render in a "## Related" section at the bottom of the body. "related" is the
 generic up-link / Map-of-Content pointer and renders bare (- [Title](url)); the
