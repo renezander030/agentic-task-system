@@ -46,6 +46,7 @@ Andrej Karpathy's [LLM Wiki](https://www.mindstudio.ai/blog/andrej-karpathy-llm-
 - **Durable typed links.** One agent attaches a `decision` / `depends-on` / `output` / `supersedes` link; a later agent in a fresh context receives it via `ats context`. The handoff lives in the task app, not a chat log.
 - **Execution context.** `ats intent` captures outcome/why/done-when; `ats lifecycle` keeps stale context from steering current work; `ats security` scopes actions and audits allow/deny; `ats ledger` records what an agent did and whether the task advanced; `ats promote` turns exploration into a committed goal; `ats hierarchy evaluate` checks local work still supports its parent.
 - **Bounded events.** `ats events watch --json` emits deterministic `task.created/updated/completed/...` NDJSON, spooled `0600` with pending/ack recovery and stable dedup IDs. ATS only emits observations — a consumer still evaluates intent, validity, and security before acting.
+- **Task graph for agents.** Tasks become structured nodes with proof, writeback, review, lifecycle, and link edges instead of free-form memory text; see [`docs/task-graph-for-agents.md`](docs/task-graph-for-agents.md).
 - **Curated at write time.** Every item is hung on a "trunk" (a theme like `writing`, `client-work`) the moment it's captured, so retrieval has structure to grab.
 
 Metadata lives in flat YAML frontmatter on the task body, typed links in `## Related`, consulted sources in `## References`. Writes are **add-only** — ATS never drops a row or link a human added. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the full path.
@@ -180,6 +181,8 @@ Install the binary on `PATH` first (`npm i -g @reneza/ats-cli`), or use an absol
 ## State integrity
 
 ATS holds the line where agent systems fail: **writes round-trip without lossy re-encoding, the store → `Task` mapping is contract-tested, and every result carries its provenance** (`sources`, `find --explain`). A publish-safety gate ([`check-no-pii.mjs`](scripts/check-no-pii.mjs)) fails the build if personal data could leak into a package. Full note: [`docs/state-integrity.md`](docs/state-integrity.md).
+
+For the agent-side operating model, see [`docs/task-graph-for-agents.md`](docs/task-graph-for-agents.md): task text is the human projection, but the execution layer needs structured links, proof commands, review requirements, and writeback targets.
 
 ## Working on ATS
 
