@@ -31,6 +31,9 @@ export {
 
 export { record as logUsage } from './usage-log.js';
 
+export { SESSION_INDEX_VERSION, normalizeSessionIndexEntry, normalizeSessionIndex, sessionIndexTaskBody } from './session-index.js';
+export type { SessionTaskRef, SessionTokenStats, SessionIndexInput, SessionIndexEntry } from './session-index.js';
+
 export { runConformance, formatConformance } from './conformance.js';
 export type {
   ConformanceStatus,

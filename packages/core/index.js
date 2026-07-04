@@ -7,6 +7,7 @@ export {
   clear as clearCorpus,
 } from './corpus-cache.js';
 export { record as logUsage } from './usage-log.js';
+export { SESSION_INDEX_VERSION, normalizeSessionIndexEntry, normalizeSessionIndex, sessionIndexTaskBody } from './session-index.js';
 export { runConformance, formatConformance } from './conformance.js';
 export {
   TASK_CONTEXT_VERSION,

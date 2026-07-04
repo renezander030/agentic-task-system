@@ -30,6 +30,10 @@
       "types": "./usage-log.d.ts",
       "default": "./usage-log.js"
     },
+    "./session-index": {
+      "types": "./session-index.d.ts",
+      "default": "./session-index.js"
+    },
     "./task-context": {
       "types": "./task-context.d.ts",
       "default": "./task-context.js"
