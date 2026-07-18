@@ -8,6 +8,7 @@
  *   node bench/run.js --method=semantic     # one method
  *   node bench/run.js --questions=path.jsonl
  *   node bench/run.js --top=10              # capture top 10 instead of 5
+ *   node bench/run.js --variant=baseline    # keep A/B result files separate
  *
  * To add a method: edit METHODS below.
  */
@@ -23,6 +24,7 @@ const args = parseArgs(process.argv.slice(2));
 const questionsPath = args.questions || path.join(__dirname, 'data', 'questions.jsonl');
 const top = Number(args.top) || 5;
 const onlyMethod = args.method || null;
+const variant = sanitizeVariant(args.variant || process.env.ATS_BENCH_VARIANT || '');
 const resultsDir = path.resolve(args.results || path.join(__dirname, 'results'));
 const cli = process.env.ATS_BENCH_CLI || 'ats';
 
@@ -159,6 +161,13 @@ function todayStamp() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function sanitizeVariant(value) {
+  if (!value) return '';
+  const sanitized = String(value).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '');
+  if (!sanitized) throw new Error(`invalid benchmark variant: ${value}`);
+  return sanitized;
+}
+
 function readQuestions(p) {
   if (!fs.existsSync(p)) {
     console.error(`questions file missing: ${p}`);
@@ -166,7 +175,7 @@ function readQuestions(p) {
     process.exit(2);
   }
   const lines = fs.readFileSync(p, 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('//'));
-  return lines.map((l, i) => {
+  const questions = lines.map((l, i) => {
     try {
       return JSON.parse(l);
     } catch (err) {
@@ -174,6 +183,19 @@ function readQuestions(p) {
       process.exit(2);
     }
   });
+  const seen = new Set();
+  for (const q of questions) {
+    if (!q.id || !q.question || (!q.gold_task_id && !q.gold_task_ids)) {
+      console.error(`invalid question schema for ${q.id || '<missing id>'}`);
+      process.exit(2);
+    }
+    if (seen.has(q.id)) {
+      console.error(`duplicate question id: ${q.id}`);
+      process.exit(2);
+    }
+    seen.add(q.id);
+  }
+  return questions;
 }
 
 function runAll() {
@@ -191,20 +213,22 @@ function runAll() {
       console.error(`unknown method: ${m}`);
       continue;
     }
-    const outPath = path.join(resultsDir, `${m}-${date}.jsonl`);
+    const outputMethod = variant ? `${m}-${variant}` : m;
+    const outPath = path.join(resultsDir, `${outputMethod}-${date}.jsonl`);
     const out = fs.openSync(outPath, 'w');
-    console.log(`[${m}] ${METHODS[m].description}`);
+    console.log(`[${outputMethod}] ${METHODS[m].description}`);
     let ok = 0;
     let fail = 0;
     for (const q of questions) {
       process.stdout.write(`  ${q.id}: ${q.question.slice(0, 60)}... `);
       const result = METHODS[m].run(q.question);
       const line = JSON.stringify({
-        method: m,
+        method: outputMethod,
         date,
         id: q.id,
         question: q.question,
         gold_task_id: q.gold_task_id,
+        gold_task_ids: q.gold_task_ids,
         gold_project_id: q.gold_project_id,
         tags: q.tags || [],
         top: result.top || [],
@@ -216,7 +240,8 @@ function runAll() {
         console.log(`ERR: ${result.error}`);
       } else {
         ok++;
-        const goldIdx = (result.top || []).findIndex((r) => r.id === q.gold_task_id);
+        const golds = q.gold_task_ids || [q.gold_task_id];
+        const goldIdx = (result.top || []).findIndex((r) => golds.includes(r.id));
         const rankStr = goldIdx === -1 ? 'miss' : `rank ${goldIdx + 1}`;
         console.log(rankStr);
       }

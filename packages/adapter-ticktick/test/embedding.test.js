@@ -1,6 +1,41 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dedupeRankedByTaskId, hashId } from '../embedding.js';
+import { dedupeRankedByTaskId, embeddingInput, hashId, truncateText } from '../embedding.js';
+
+test('Nomic prefixes distinguish stored documents from search queries', () => {
+  const options = { model: 'nomic-embed-text', useNomicPrefixes: true };
+  assert.equal(embeddingInput('deploy guide', 'document', options), 'search_document: deploy guide');
+  assert.equal(embeddingInput('how do I deploy?', 'query', options), 'search_query: how do I deploy?');
+});
+
+test('embedding input stays unchanged when Nomic prefixes are disabled', () => {
+  assert.equal(
+    embeddingInput('deploy guide', 'document', {
+      model: 'nomic-embed-text',
+      useNomicPrefixes: false,
+    }),
+    'deploy guide'
+  );
+});
+
+test('Nomic prefixes are not applied to another embedding model', () => {
+  assert.equal(
+    embeddingInput('deploy guide', 'document', {
+      model: 'other-embedder',
+      useNomicPrefixes: true,
+    }),
+    'deploy guide'
+  );
+});
+
+test('truncation preserves an astral Unicode character at the boundary', () => {
+  const text = `${'a'.repeat(499)}🔷Permanent Notes`;
+  const truncated = truncateText(text, 500);
+
+  assert.equal(Array.from(truncated).length, 500);
+  assert.equal(Array.from(truncated).at(-1), '🔷');
+  assert.equal(truncated.codePointAt(truncated.length - 2), 0x1f537);
+});
 
 test('semantic results keep the highest-ranked point for each task ID', () => {
   const ranked = [
