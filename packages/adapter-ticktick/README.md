@@ -28,6 +28,20 @@ docker exec ollama ollama pull nomic-embed-text
 ats sync vector
 ```
 
+Nomic retrieval prefixes are opt-in because stored documents and queries must
+be migrated together. Build a separate collection and metadata manifest before
+enabling them:
+
+```bash
+ATS_TICKTICK_VECTOR_COLLECTION=ticktick_tasks_nomic_prefixed \
+ATS_TICKTICK_VECTOR_META="$HOME/.local/share/ats/vector-index-meta-nomic-prefixed.json" \
+ATS_TICKTICK_NOMIC_PREFIXES=1 \
+ats sync vector --full
+```
+
+Use the same three variables for subsequent search commands. Do not enable only
+the query prefix against an existing unprefixed collection.
+
 ## What this adapter implements
 
 All six required methods of the ATS adapter contract:

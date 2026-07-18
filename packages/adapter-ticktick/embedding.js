@@ -23,7 +23,8 @@ import { homedir } from 'node:os';
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
-const COLLECTION_NAME = 'ticktick_tasks';
+const COLLECTION_NAME = process.env.ATS_TICKTICK_VECTOR_COLLECTION || 'ticktick_tasks';
+const USE_NOMIC_PREFIXES = process.env.ATS_TICKTICK_NOMIC_PREFIXES === '1';
 const EMBEDDING_DIMENSION = 768;
 const BATCH_SIZE = 10;
 const BATCH_DELAY_MS = 100;
@@ -36,7 +37,7 @@ const DATA_BASE = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'
 const _ATS_META_DIR = join(DATA_BASE, 'ats');
 const _LEGACY_META_DIR = join(DATA_BASE, 'akb');
 const META_DIR = (!existsSync(_ATS_META_DIR) && existsSync(_LEGACY_META_DIR)) ? _LEGACY_META_DIR : _ATS_META_DIR;
-const META_PATH = join(META_DIR, 'vector-index-meta.json');
+const META_PATH = process.env.ATS_TICKTICK_VECTOR_META || join(META_DIR, 'vector-index-meta.json');
 
 // --- HTTP helpers ---
 
@@ -61,8 +62,22 @@ async function httpJson(url, method = 'GET', body = undefined, timeoutMs = 30000
 
 // --- Embedding ---
 
-async function getEmbedding(text) {
-  const truncated = text.slice(0, 8000);
+export function embeddingInput(text, inputType = 'document', options = {}) {
+  const model = options.model || EMBEDDING_MODEL;
+  const useNomicPrefixes = options.useNomicPrefixes ?? USE_NOMIC_PREFIXES;
+  if (!useNomicPrefixes || !model.startsWith('nomic-embed-text')) return text;
+  const prefix = inputType === 'query' ? 'search_query: ' : 'search_document: ';
+  return `${prefix}${text}`;
+}
+
+export function truncateText(text, maxCharacters, suffix = '') {
+  const characters = Array.from(text);
+  if (characters.length <= maxCharacters) return text;
+  return characters.slice(0, maxCharacters).join('') + suffix;
+}
+
+async function getEmbedding(text, inputType = 'document') {
+  const truncated = truncateText(embeddingInput(text, inputType), 8000);
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const data = await httpJson(
@@ -259,7 +274,7 @@ export async function sync(fetchAllTasks, options = {}) {
     for (const { task, hash, isNew } of batch) {
       try {
         const text = taskToText(task);
-        const vector = await getEmbedding(text);
+        const vector = await getEmbedding(text, 'document');
         points.push({
           id: hashId(task.id),
           vector,
@@ -309,7 +324,7 @@ export async function search(query, options = {}) {
   const health = await checkHealth();
   if (!health.available) throw new Error(health.reason);
 
-  const vector = await getEmbedding(query);
+  const vector = await getEmbedding(query, 'query');
 
   const searchBody = {
     vector,
@@ -563,9 +578,21 @@ export async function indexStats() {
       available: true,
       vectorCount: info.result?.points_count || 0,
       lastSync: meta.lastSync,
+      collection: COLLECTION_NAME,
+      embeddingModel: EMBEDDING_MODEL,
+      nomicPrefixes: USE_NOMIC_PREFIXES,
+      metaPath: META_PATH,
     };
   } catch {
-    return { available: true, vectorCount: 0, lastSync: null };
+    return {
+      available: true,
+      vectorCount: 0,
+      lastSync: null,
+      collection: COLLECTION_NAME,
+      embeddingModel: EMBEDDING_MODEL,
+      nomicPrefixes: USE_NOMIC_PREFIXES,
+      metaPath: META_PATH,
+    };
   }
 }
 

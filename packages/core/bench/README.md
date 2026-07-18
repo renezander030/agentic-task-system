@@ -42,6 +42,9 @@ One JSON object per line:
 }
 ```
 
+For an any-of-N answer, replace `gold_task_id` with a non-empty
+`gold_task_ids` array. The runner preserves that array for the scorer.
+
 **`tags`** — free-form strings used as buckets in the score report.
 Suggested taxonomy:
 
@@ -93,6 +96,21 @@ const METHODS = {
 ```
 
 The scorer auto-discovers any method that has results in `results/`.
+
+## Side-by-side variants
+
+Use `--variant` when the same retrieval method is evaluated against different
+model, collection, or prompt configurations. The variant is appended to the
+result method name, so one run cannot overwrite another run from the same day.
+
+```bash
+ats bench run --method=semantic --variant=baseline
+ATS_TICKTICK_VECTOR_COLLECTION=ticktick_tasks_nomic_prefixed \
+ATS_TICKTICK_VECTOR_META="$HOME/.local/share/ats/vector-index-meta-nomic-prefixed.json" \
+ATS_TICKTICK_NOMIC_PREFIXES=1 \
+ats bench run --method=semantic --variant=nomic-prefixed
+ats bench score
+```
 
 ## Workflow progress
 
