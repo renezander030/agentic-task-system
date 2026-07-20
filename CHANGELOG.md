@@ -3,7 +3,7 @@
 
 ## 0.10.0 - Degraded-retrieval transparency, reranking, usage observability, dedup, reactive auth
 
-Unreleased.
+Released 2026-07-20.
 
 - **Degraded-retrieval transparency.** `find` now tells the caller when a result is partial instead of silently serving a subset. A dropped corpus source (a composite child backend that errored, or a single project that failed to list) and a retrieval branch that errored or timed out roll up into a top-level `degraded` boolean plus a `warnings` list and `corpus.sourcesFailed`; a known-partial corpus is no longer cached as if it were complete. The composite adapter records which child it dropped instead of filtering it away silently.
 - **Optional reranking.** `find` gains a second-stage reranker over the RRF-fused pool: `rerank: true` uses a built-in, dependency-free lexical scorer (query-term coverage with title/phrase weighting), or pass a function to plug a cross-encoder/LLM. It fuses a wider `rerankDepth` pool then trims to `limit`; a failing reranker degrades to the fused order (surfaced via `degraded`). CLI: `ats find --rerank [--rerank-depth N]`.

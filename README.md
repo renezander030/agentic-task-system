@@ -28,6 +28,14 @@ ats find "deployment runbook"
   <br><em>One <code>ats find</code> across <strong>GitHub + Notion + TickTick</strong>, ranked by RRF. Your connectors give the agent access; this is the semantic layer that lands the first query on the right answer.</em>
 </p>
 
+## What's new
+
+**v0.10.0** — partial-retrieval transparency (`find` returns `degraded` + `warnings` when a source or branch drops out, instead of silently serving a subset), optional reranking over the RRF pool (`ats find --rerank`), usage observability (`ats usage`: per-tool volume, latency, empty/degraded rates), near-duplicate and contradiction detection (`ats dedup`), and reactive OAuth token refresh (retry once on a 401).
+
+**v0.9.0** — reversible writes (`ats undo` / `undo_write` from a ledger before-image), forward/dangling links that back-resolve on target creation (`add_task_link --allow-missing`, `resolve_task_links`), Obsidian path-traversal hardening, and verified stdio config for Cursor, Windsurf, and OpenCode.
+
+Full history in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## How it compares
 
 | Approach | Where memory lives | Upkeep | Retrieval |
@@ -196,6 +204,6 @@ so it stops re-reading the whole tree each session.
 
 ## Versioning & license
 
-`v0.9`: reversible writes (`ats undo` / `undo_write` from a ledger before-image), forward/dangling links that back-resolve on target creation (`add_task_link --allow-missing`, `resolve_task_links`), Obsidian path-traversal hardening, and verified stdio config for Cursor, Windsurf, and OpenCode. Built on v0.6-v0.8: portable intent, exploration promotion, goal hierarchy and conflict evaluation, bounded task events, and the Taskmaster/Beads adapters. See [`CHANGELOG.md`](CHANGELOG.md). MIT.
+Latest releases are summarized under [What's new](#whats-new); the full history lives in [`CHANGELOG.md`](CHANGELOG.md). MIT.
 
 If ATS is useful, consider a ⭐ — it helps others find it.
