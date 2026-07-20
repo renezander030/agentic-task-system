@@ -109,13 +109,22 @@ export async function loadCorpus(adapter, { cache = true } = {}) {
     const cached = corpusCache.read();
     if (cached) {
       const m = corpusCache.meta();
-      return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null };
+      return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null, sourcesFailed: [] };
     }
   }
 
   let corpus;
+  const sourcesFailed = [];
   if (typeof adapter.bulkFetch === 'function') {
     corpus = await adapter.bulkFetch();
+    // A multi-source adapter (composite) records any child backend it silently
+    // dropped during the fan-out. Surface them so a partial corpus is not
+    // mistaken for a complete one.
+    if (Array.isArray(adapter.__fetchWarnings)) {
+      for (const w of adapter.__fetchWarnings) {
+        sourcesFailed.push({ source: w.source, name: w.source, error: w.error });
+      }
+    }
   } else {
     const projects = await adapter.listProjects();
     corpus = [];
@@ -125,13 +134,18 @@ export async function loadCorpus(adapter, { cache = true } = {}) {
         for (const t of tasks) {
           corpus.push({ projectName: p.name, ...t });
         }
-      } catch {
-        // skip projects that fail individually
+      } catch (err) {
+        // A single project failing must not silently shrink the corpus with no
+        // trace: record it so `find` can report the result is partial.
+        sourcesFailed.push({ source: p.id, name: p.name, error: err.message });
       }
     }
   }
-  if (cache) corpusCache.write(corpus);
-  return { corpus, fromCache: false, ageMs: null };
+  // Never persist a known-partial corpus: caching it would serve an incomplete
+  // result as complete (and healthy) for the whole TTL. Retry the failed sources
+  // on the next call instead.
+  if (cache && sourcesFailed.length === 0) corpusCache.write(corpus);
+  return { corpus, fromCache: false, ageMs: null, sourcesFailed };
 }
 
 /** Built-in substring keyword retriever. Pure CPU over the corpus. */
@@ -254,6 +268,42 @@ function withDeadline(run, ms) {
 }
 
 /**
+ * Built-in, dependency-free reranker (a "cross-encoder-lite").
+ *
+ * RRF fuses by rank POSITION across branches, so it never reads how well a
+ * candidate actually matches the query. This re-scores the fused pool directly
+ * against the query text — query-term coverage with a title>body field weight,
+ * plus an exact-phrase bonus — and breaks ties by the original fused score so it
+ * is fully deterministic. Callers can pass their own async reranker (e.g. a
+ * cross-encoder or LLM) instead; this is the zero-config default.
+ *
+ * @param {string} query
+ * @param {Array<object>} candidates - fused docs (carry `rrf`)
+ * @returns {Array<object>} candidates reordered, best first
+ */
+export function builtinRerank(query, candidates) {
+  const qTokens = [...new Set(String(query || '').toLowerCase().match(/[a-z0-9]+/g) || [])];
+  if (qTokens.length === 0) return candidates;
+  const qPhrase = String(query || '').toLowerCase().trim();
+  return candidates
+    .map((doc, i) => {
+      const title = (doc.title || '').toLowerCase();
+      const content = (doc.content || '').toLowerCase();
+      let score = 0;
+      for (const tok of qTokens) {
+        if (title.includes(tok)) score += 3;
+        else if (content.includes(tok)) score += 1;
+      }
+      score /= qTokens.length; // coverage-normalized
+      if (qPhrase && title.includes(qPhrase)) score += 2;
+      else if (qPhrase && content.includes(qPhrase)) score += 1;
+      return { doc, score, i, rrf: doc.rrf ?? 0 };
+    })
+    .sort((a, b) => b.score - a.score || b.rrf - a.rrf || a.i - b.i)
+    .map((entry) => entry.doc);
+}
+
+/**
  * Parallel fan-out retrieval fused with RRF.
  *
  * Branches (each returns a ranked list of docs, all races a shared budget):
@@ -276,9 +326,14 @@ function withDeadline(run, ms) {
  * @param {boolean} [cfg.includeKeyword=true] - include Core's keyword branch
  * @param {boolean} [cfg.includeNative=true] - include adapter.searchByQuery
  * @param {boolean} [cfg.explain=false] - attach per-result rank/contribution breakdown
+ * @param {boolean|Function} [cfg.rerank=false] - second-stage reranker over the fused
+ *   pool. `true` uses the built-in lexical scorer; a function (query, docs) => docs
+ *   plugs a custom reranker (cross-encoder/LLM). Off by default (pure RRF).
+ * @param {number} [cfg.rerankDepth] - how many fused candidates to feed the reranker
+ *   before trimming to `limit` (default max(limit*4, candidatesPerSource))
  * @param {Function} [cfg.loadCorpus] - override the corpus loader (store-specific)
  * @param {Function} [cfg.log] - usage-log record callback
- * @returns {Promise<object>} { query, mode, count, elapsedMs, corpus, branches, tasks }
+ * @returns {Promise<object>} { query, mode, count, degraded, elapsedMs, corpus, branches, tasks }
  */
 export async function find(query, cfg = {}) {
   const {
@@ -293,6 +348,8 @@ export async function find(query, cfg = {}) {
     includeKeyword = true,
     includeNative = true,
     explain = false,
+    rerank = false,
+    rerankDepth,
     loadCorpus: loadCorpusOverride,
     log,
   } = cfg;
@@ -318,6 +375,8 @@ export async function find(query, cfg = {}) {
       query,
       mode: 'find-failed',
       error: `corpus load failed: ${err.message}`,
+      degraded: true,
+      warnings: [`corpus load failed: ${err.message}`],
       count: 0,
       elapsedMs: Date.now() - t0,
       branches: [],
@@ -325,6 +384,7 @@ export async function find(query, cfg = {}) {
     };
   }
   const { corpus, fromCache, ageMs } = corpusInfo;
+  const sourcesFailed = corpusInfo.sourcesFailed || [];
 
   // Assemble branches. Branches are pure CPU over the shared corpus (plus the
   // optional hybrid call), so we can always run them all in parallel.
@@ -394,7 +454,26 @@ export async function find(query, cfg = {}) {
   );
 
   const branches = settled.filter((b) => b.ok).map((b) => ({ name: b.name, docs: b.value }));
-  const tasks = fuse(branches, { k, limit, explain });
+
+  // Reranking (optional). RRF ranks by fused position, not match quality; when a
+  // reranker is requested, fuse a wider `rerankDepth` pool, re-score it, then trim
+  // to `limit`. A failing reranker never sinks the query — it falls back to the
+  // fused order and is recorded as a degraded source (surfaced below).
+  const depth = rerankDepth || Math.max(limit * 4, candidatesPerSource);
+  let tasks = fuse(branches, { k, limit: rerank ? depth : limit, explain });
+  let reranked = false;
+  if (rerank) {
+    const reranker = typeof rerank === 'function' ? rerank : builtinRerank;
+    const rerankStart = Date.now();
+    try {
+      const out = await reranker(query, tasks);
+      tasks = (Array.isArray(out) ? out : tasks).slice(0, limit);
+      reranked = Array.isArray(out);
+    } catch (err) {
+      tasks = tasks.slice(0, limit);
+      settled.push({ name: 'rerank', ok: false, value: [], error: err.message, elapsedMs: Date.now() - rerankStart });
+    }
+  }
 
   const branchSummary = settled.map((b) => ({
     name: b.name,
@@ -404,13 +483,23 @@ export async function find(query, cfg = {}) {
     error: b.error || undefined,
   }));
 
+  // Roll partial failures up into one signal the caller can branch on without
+  // hand-walking `branches`: a dropped corpus source, or a retrieval branch that
+  // errored/timed out, means the result set is incomplete — say so.
+  const warnings = [
+    ...sourcesFailed.map((s) => `source "${s.name || s.source}" failed to load: ${s.error}`),
+    ...settled.filter((b) => !b.ok).map((b) => `retrieval branch "${b.name}" failed: ${b.error}`),
+  ];
+  const degraded = warnings.length > 0;
+
   if (typeof log === 'function') {
     log({
       tool: 'find',
       query,
       resultCount: tasks.length,
       topId: tasks[0]?.id || null,
-      meta: { budgetMs, branches: branchSummary },
+      durationMs: Date.now() - t0,
+      meta: { budgetMs, degraded, branches: branchSummary },
     });
   }
 
@@ -418,9 +507,12 @@ export async function find(query, cfg = {}) {
     query,
     mode: 'find',
     count: tasks.length,
+    degraded,
+    ...(rerank ? { reranked } : {}),
     elapsedMs: Date.now() - t0,
-    corpus: { fromCache, ageMs, size: corpus.length },
+    corpus: { fromCache, ageMs, size: corpus.length, sourcesFailed },
     branches: branchSummary,
+    ...(warnings.length ? { warnings } : {}),
     ...(explain ? { k } : {}),
     tasks,
   };
@@ -435,6 +527,7 @@ export async function find(query, cfg = {}) {
  */
 export async function similar(taskId, cfg = {}) {
   const { embedder, adapter, limit = 5, cache = true, log } = cfg;
+  const t0 = Date.now();
   try {
     let result;
     if (embedder && typeof embedder.findSimilar === 'function') {
@@ -468,12 +561,13 @@ export async function similar(taskId, cfg = {}) {
         query: taskId,
         resultCount: Array.isArray(result?.similar) ? result.similar.length : 0,
         topId: result?.similar?.[0]?.id || null,
+        durationMs: Date.now() - t0,
       });
     }
     return result;
   } catch (err) {
     if (typeof log === 'function') {
-      log({ tool: 'similar', query: taskId, resultCount: 0, topId: null, error: err.message });
+      log({ tool: 'similar', query: taskId, resultCount: 0, topId: null, durationMs: Date.now() - t0, error: err.message });
     }
     throw err;
   }

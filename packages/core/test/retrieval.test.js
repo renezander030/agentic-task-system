@@ -4,7 +4,7 @@ import { strict as assert } from 'node:assert';
 // Keep the on-disk corpus cache out of the picture for deterministic tests.
 process.env.ATS_CORPUS_CACHE_DISABLE = '1';
 
-import { rrf, fuse, find, loadCorpus, similar } from '../retrieval.js';
+import { rrf, fuse, find, loadCorpus, similar, builtinRerank } from '../retrieval.js';
 
 const NOW = new Date().toISOString();
 
@@ -241,4 +241,79 @@ test('similar rejects malformed adapter embedding output', async () => {
     () => similar('t1', { adapter, cache: false }),
     /returned 1 vectors for 2 texts/
   );
+});
+
+test('find flags degraded + warns when a retrieval branch fails', async () => {
+  const flakyBranch = { name: 'flaky', run: async () => { throw new Error('backend 503'); } };
+  const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false, retrievers: [flakyBranch] });
+  assert.equal(res.degraded, true);
+  assert.ok(res.warnings.some((w) => w.includes('flaky') && w.includes('503')));
+  // The keyword branch still succeeded, so results are still returned — degraded, not empty.
+  assert.ok(res.tasks.length > 0);
+  assert.ok(res.branches.some((b) => b.name === 'flaky' && !b.ok));
+});
+
+test('find flags degraded + warns when a corpus source fails to load', async () => {
+  const flaky = {
+    listProjects: async () => [{ id: 'p1', name: 'Good' }, { id: 'p2', name: 'Broken' }],
+    listTasksInProject: async (pid) => {
+      if (pid === 'p2') throw new Error('project fetch 500');
+      return [{ id: 't1', title: 'ffmpeg render', content: '', projectId: 'p1', tags: [] }];
+    },
+  };
+  const res = await find('ffmpeg', { adapter: flaky, cache: false });
+  assert.equal(res.degraded, true);
+  assert.ok(res.warnings.some((w) => w.includes('Broken') && w.includes('500')));
+  assert.deepEqual(res.corpus.sourcesFailed.map((s) => s.name), ['Broken']);
+  // The healthy project's task is still returned.
+  assert.equal(res.tasks[0].id, 't1');
+});
+
+test('find is not degraded and omits warnings on a healthy run', async () => {
+  const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false });
+  assert.equal(res.degraded, false);
+  assert.equal(res.warnings, undefined);
+  assert.deepEqual(res.corpus.sourcesFailed, []);
+  assert.equal(res.reranked, undefined); // rerank off by default
+});
+
+test('builtinRerank scores stronger textual matches over a higher-RRF weak match', () => {
+  const docs = [
+    { id: 'weak', title: 'z', content: 'mentions kube once', rrf: 0.9 },
+    { id: 'strong', title: 'kube deployment guide', content: 'kube kube', rrf: 0.1 },
+  ];
+  const out = builtinRerank('kube', docs);
+  assert.equal(out[0].id, 'strong'); // beats the higher-rrf but weaker-text doc
+});
+
+test('rerank feeds the reranker a pool wider than the final limit, then trims', async () => {
+  const corpus = Array.from({ length: 8 }, (_, i) => ({ id: `d${i}`, title: `deploy note ${i}`, content: '', projectId: 'p', tags: [] }));
+  let sawCandidates = 0;
+  const rerank = async (_q, docs) => { sawCandidates = docs.length; return docs; };
+  const res = await find('deploy', {
+    loadCorpus: async () => ({ corpus, fromCache: false, ageMs: null }),
+    limit: 3, includeNative: false, rerank, rerankDepth: 8,
+  });
+  assert.equal(res.tasks.length, 3);  // final result trimmed to limit
+  assert.ok(sawCandidates > 3);       // reranker saw the wider pool
+  assert.equal(res.reranked, true);
+});
+
+test('a custom reranker reorders the final results', async () => {
+  const corpus = [
+    { id: 'a', title: 'alpha deploy', content: '', projectId: 'p', tags: [] },
+    { id: 'b', title: 'beta deploy', content: '', projectId: 'p', tags: [] },
+    { id: 'c', title: 'gamma deploy', content: '', projectId: 'p', tags: [] },
+  ];
+  const load = async () => ({ corpus, fromCache: false, ageMs: null });
+  const plain = await find('deploy', { loadCorpus: load, limit: 3, includeNative: false });
+  const rr = await find('deploy', { loadCorpus: load, limit: 3, includeNative: false, rerank: async (_q, docs) => [...docs].reverse() });
+  assert.deepEqual(rr.tasks.map((t) => t.id), plain.tasks.map((t) => t.id).reverse());
+});
+
+test('a failing reranker degrades gracefully and keeps the fused results', async () => {
+  const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false, rerank: async () => { throw new Error('reranker oom'); } });
+  assert.equal(res.degraded, true);
+  assert.ok(res.warnings.some((w) => w.includes('rerank') && w.includes('oom')));
+  assert.ok(res.tasks.length > 0); // fell back to fused order, still returns results
 });

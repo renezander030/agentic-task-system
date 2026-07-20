@@ -254,17 +254,17 @@ export async function refreshAccessToken(config, refreshToken, deps = {}) {
 /**
  * Get a valid access token, refreshing if needed
  */
-export async function getValidAccessToken() {
-  const config = await loadConfig();
-  const tokens = await loadTokens();
+export async function getValidAccessToken(deps = {}) {
+  const config = await loadConfig(deps);
+  const tokens = await loadTokens(deps);
 
   if (!tokens) {
     throw new Error('Not authenticated. Run: ats auth login');
   }
 
   if (isTokenExpired(tokens)) {
-    const newTokens = await refreshAccessToken(config, tokens.refreshToken);
-    await saveTokens(newTokens);
+    const newTokens = await refreshAccessToken(config, tokens.refreshToken, deps);
+    await saveTokens(newTokens, deps);
     return newTokens.accessToken;
   }
 
@@ -272,32 +272,59 @@ export async function getValidAccessToken() {
 }
 
 /**
+ * Force a token refresh regardless of the stored expiry, persist it, and return
+ * the fresh access token. Used to recover from a 401 on a token the clock-based
+ * check still considered valid — revoked, invalidated early, or a wrong stored
+ * expiry. Returns null when there is no refresh token to try.
+ */
+async function forceRefresh(config, deps = {}) {
+  const tokens = await loadTokens(deps);
+  if (!tokens || !tokens.refreshToken) return null;
+  const newTokens = await refreshAccessToken(config, tokens.refreshToken, deps);
+  await saveTokens(newTokens, deps);
+  return newTokens.accessToken;
+}
+
+/**
  * Make an API request
  */
 export async function apiRequest(method, path, body = undefined, deps = {}) {
   const { fetchFn = fetch } = deps;
-  const config = await loadConfig();
-  const accessToken = await getValidAccessToken();
+  const config = await loadConfig(deps);
   const baseUrl = API_URLS[validateRegion(config.region)];
   const url = `${baseUrl}${path}`;
 
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    Accept: 'application/json',
+  const doFetch = (accessToken) => {
+    const headers = {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    };
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+    return fetchFn(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
   };
 
-  if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
+  let response = await doFetch(await getValidAccessToken(deps));
 
-  const response = await fetchFn(url, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // Proactive refresh (getValidAccessToken) only covers clock-based expiry. A 401
+  // still lands when a token is revoked, invalidated early, or its stored expiry
+  // is wrong — force one refresh and retry before surfacing the failure, so an
+  // agent mid-run doesn't hard-fail on a token that could have been renewed.
+  if (response.status === 401) {
+    const refreshed = await forceRefresh(config, deps).catch(() => null);
+    if (refreshed) response = await doFetch(refreshed);
+  }
 
   if (!response.ok) {
     const error = await response.text();
+    if (response.status === 401) {
+      throw new Error(`API request failed (401): ${error}\nToken refresh did not resolve it — run: ats auth login`);
+    }
     throw new Error(`API request failed (${response.status}): ${error}`);
   }
 

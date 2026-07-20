@@ -90,13 +90,23 @@ export function buildAdapter(getChildren) {
     async bulkFetch() {
       const children = await getChildren();
       adapter.__children = children; // cache for synchronous urlFor()
-      const corpora = await settle(
-        children.map((c) =>
-          (typeof c.adapter.bulkFetch === 'function'
-            ? c.adapter.bulkFetch()
-            : fallbackFetch(c.adapter)
-          ).then((tasks) => (tasks || []).map((t) => remapTask(c.key, t)))
-        )
+      adapter.__fetchWarnings = [];
+      const corpora = await Promise.all(
+        children.map(async (c) => {
+          try {
+            const tasks = typeof c.adapter.bulkFetch === 'function'
+              ? await c.adapter.bulkFetch()
+              : await fallbackFetch(c.adapter);
+            return (tasks || []).map((t) => remapTask(c.key, t));
+          } catch (e) {
+            // A child backend that fails must not vanish from the fused corpus
+            // without a trace — record it (keyed by backend) so the retrieval
+            // layer can flag the result as partial rather than serve a silent
+            // subset of the user's memory.
+            adapter.__fetchWarnings.push({ source: c.key, error: e.message });
+            return [];
+          }
+        })
       );
       return corpora.flat();
     },
@@ -146,6 +156,7 @@ export function buildAdapter(getChildren) {
     },
 
     __children: [],
+    __fetchWarnings: [],
   };
 
   return adapter;
