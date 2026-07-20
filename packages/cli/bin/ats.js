@@ -38,6 +38,9 @@ import {
   formatConformance,
   find as coreFind,
   similar as coreSimilar,
+  loadCorpus as coreLoadCorpus,
+  detectDuplicates,
+  formatDedup,
   logUsage,
   parseTaskMetadata,
   taskMetadataForRead,
@@ -211,6 +214,16 @@ async function main() {
       case 'bench':
         handleBench();
         return;
+      case 'usage':
+        // `ats usage [--json] [--days=N] [--since=D]` — retrieval observability
+        // (per-tool volume, empty/error/degraded rates, latency, re-queries).
+        // Aliases the analyze-usage renderer, which reads the same usage log.
+        args.subcommand = 'analyze-usage';
+        handleBench();
+        return;
+      case 'dedup':
+        await handleDedup();
+        return;
       case 'fmt':
         handleFmt();
         return;
@@ -375,9 +388,9 @@ function helpFor(command) {
 }
 
 const COMPLETION_COMMANDS = [
-  'setup', 'find', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
+  'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
-  'doctor', 'status', 'cache', 'bench', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth',
+  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth',
   'projects', 'tasks', 'notes', 'help', 'completion', 'undo',
 ];
 
@@ -542,6 +555,24 @@ function handleBench() {
   });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);
+}
+
+// `ats dedup [--threshold 0.6] [--max-corpus N] [--no-cache] [--json]` — scan the
+// corpus for near-duplicate (and disagreeing) tasks so an agent can link/merge
+// them instead of recalling contradictory copies. Detection only; it never edits.
+async function handleDedup() {
+  const adapter = await loadAdapter();
+  const { corpus } = await coreLoadCorpus(adapter, { cache: !args.options['no-cache'] });
+  const threshold = args.options.threshold !== undefined ? parseFloat(args.options.threshold) : 0.6;
+  const report = detectDuplicates(corpus, {
+    threshold: Number.isFinite(threshold) ? threshold : 0.6,
+    maxCorpus: parseInt(args.options['max-corpus']) || undefined,
+  });
+  if (args.options.format === 'json') {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    console.log(formatDedup(report));
+  }
 }
 
 async function handleSync() {
@@ -887,7 +918,13 @@ async function handleTasks() {
     }
     case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats tasks find QUERY'); process.exit(1); }
-      const opts = { limit, budgetMs: parseInt(args.options['budget-ms']) || 3000, explain: !!args.options.explain };
+      const opts = {
+        limit,
+        budgetMs: parseInt(args.options['budget-ms']) || 3000,
+        explain: !!args.options.explain,
+        rerank: !!args.options.rerank,
+        rerankDepth: parseInt(args.options['rerank-depth']) || undefined,
+      };
       // Rich adapters bring their own embedder-backed find; generic adapters get
       // core's storage-agnostic keyword + native + RRF fan-out over the contract.
       return t?.find ? await t.find(args.positional[0], opts) : await coreFind(args.positional[0], { adapter, ...opts, log: logUsage });

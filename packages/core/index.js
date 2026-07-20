@@ -1,5 +1,6 @@
 export { validateAdapter, adapterCapabilities } from './adapter-interface.js';
 export { rrf, fuse, find, loadCorpus, similar, RRF_K } from './retrieval.js';
+export { detectDuplicates, formatDedup } from './dedup.js';
 export {
   read as readCorpus,
   write as writeCorpus,
