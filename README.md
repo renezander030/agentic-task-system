@@ -10,6 +10,7 @@
   <a href="https://github.com/renezander030/agentic-task-system/actions/workflows/ci.yml"><img src="https://github.com/renezander030/agentic-task-system/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3b82f6" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/PRs-welcome-7C5CFF" alt="PRs welcome" />
+  <a href="https://bundledex.net"><img src="https://bundledex.net/static-badge.svg" alt="OKF BundleDex" /></a>
 </p>
 
 `ats` is an **MCP server and CLI that gives your AI agent memory from the task system you already use** — TickTick, Taskmaster, Beads, Obsidian, Notion, GitHub, Airtable, Google, or all at once via the [composite adapter](packages/adapter-composite/). It fuses retrieval across adapters with Reciprocal Rank Fusion (RRF) and layers on portable intent, typed task links, lifecycle validity, scoped access, an action ledger, and bounded task events. Works with Claude Code, Claude Desktop, Cursor, and any MCP client.
