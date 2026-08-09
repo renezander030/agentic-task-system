@@ -39,8 +39,10 @@ echo "[ats-mcp] QDRANT_URL=${QDRANT_URL:-unset} OLLAMA_URL=${OLLAMA_URL:-unset} 
 MCP_PROXY_PORT="${MCP_PROXY_PORT:-8080}"
 export MCP_PROXY_PORT
 
-# mcp-proxy bridges our stdio MCP server to HTTP (/mcp) + SSE (/sse) on localhost.
-mcp-proxy --port "$MCP_PROXY_PORT" -- node /app/packages/mcp/server.js &
+# mcp-proxy bridges our stdio MCP server to HTTP (/mcp) + SSE (/sse). Bind it
+# explicitly to loopback: mcp-proxy defaults to `::`, which would expose the
+# ungated upstream port to peers on the service's private network.
+mcp-proxy --host 127.0.0.1 --port "$MCP_PROXY_PORT" -- node /app/packages/mcp/server.js &
 PROXY_PID=$!
 
 # The gateway is the public port; it bearer-gates every request to mcp-proxy.
