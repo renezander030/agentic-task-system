@@ -67,7 +67,7 @@ Point it at any ATS adapter — a folder of markdown, Obsidian, Notion, your own
 ATS_ADAPTER=@you/ats-adapter-obsidian ats-mcp
 ```
 
-See the [adapter contract](https://github.com/renezander030/agentic-task-system/blob/main/docs/adapter-interface.md) — six methods and you're done.
+See the [adapter contract](https://github.com/renezander030/agentic-task-system/blob/main/docs/adapter-interface.md) — six storage methods plus authentication lifecycle hooks.
 
 ---
 

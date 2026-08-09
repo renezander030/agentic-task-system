@@ -48,7 +48,7 @@ const server = http.createServer((req, res) => {
 
   const auth = req.headers['authorization'] || '';
   const expected = `Bearer ${TOKEN}`;
-  // Length check first so the constant string compare doesn't leak via early exit.
+  // Reject malformed bearer values before comparing against the configured token.
   if (auth.length !== expected.length || auth !== expected) {
     unauthorized(res);
     return;
