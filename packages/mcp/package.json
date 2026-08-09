@@ -19,7 +19,7 @@
     "prepublishOnly": "node ../../scripts/check-no-pii.mjs --self"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@reneza/ats-core": "^0.10.0",
     "zod": "^4.3.6"
   },
