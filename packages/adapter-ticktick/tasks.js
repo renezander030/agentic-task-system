@@ -243,9 +243,22 @@ export async function complete(projectId, taskId, deps = {}) {
  * @returns {Promise<object>}
  */
 export async function remove(projectId, taskId, deps = {}) {
-  const { apiRequest = coreFunctions.apiRequest, shortId = coreFunctions.shortId } = deps;
+  const {
+    apiRequest = coreFunctions.apiRequest,
+    shortId = coreFunctions.shortId,
+    isShortId = coreFunctions.isShortId,
+  } = deps;
   const resolvedProjectId = await resolveProjectId(projectId, deps);
   const resolvedTaskId = await resolveTaskId(taskId, resolvedProjectId, deps);
+  // TickTick answers DELETE with 200 even for an ID that does not exist, so an
+  // unresolved short ID would delete nothing and still report success. Refuse
+  // instead of reporting a deletion that did not happen.
+  if (isShortId(resolvedTaskId)) {
+    throw new Error(
+      `Could not resolve task "${taskId}" to a full ID — refusing to report a delete that would not happen. `
+      + 'Pass the full 24-character task ID.'
+    );
+  }
   await apiRequest(
     'DELETE',
     `/project/${encodeURIComponent(resolvedProjectId)}/task/${encodeURIComponent(resolvedTaskId)}`,
@@ -844,6 +857,20 @@ async function resolveTaskId(taskId, projectId = null, deps = {}) {
     } catch {
       // Skip projects we can't access
     }
+  }
+
+  // /project/{id}/data only returns uncompleted tasks, so a completed task's short
+  // ID never matches above. Fall back to the completed listing — without this, a
+  // short ID for a completed task falls through unresolved and every call made with
+  // it silently targets an ID that does not exist.
+  try {
+    const done = await apiRequest('POST', '/task/completed', {}, deps);
+    const match = (done || []).find((t) => t.id.startsWith(taskId));
+    if (match) {
+      return match.id;
+    }
+  } catch {
+    // Completed listing unavailable — fall through
   }
 
   // Return as-is if no match (let API handle the error)
