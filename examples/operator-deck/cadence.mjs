@@ -21,6 +21,10 @@ import { hasGoal } from './format.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const QUEUE_FILE = process.env.OPERATOR_QUEUE || path.join(os.homedir(), '.config', 'ats', 'operator-queue.json');
 const DISMISS_FILE = process.env.OPERATOR_DISMISS_FILE || path.join(os.homedir(), '.config', 'ats', 'operator-dismissed.json');
+// Projects the deck leaves alone entirely — no goal/next/relate/research cards.
+// One pattern per line (or comma-separated in OPERATOR_SKIP_PROJECTS), matched
+// against project id, fullId, or name as a case-insensitive substring; '#' comments.
+const SKIP_FILE = process.env.OPERATOR_SKIP_FILE || path.join(os.homedir(), '.config', 'ats', 'operator-skip.txt');
 export const BATCH = Number(process.env.OPERATOR_BATCH || 10);
 const INTENT_BUDGET = Number(process.env.OPERATOR_INTENT_BUDGET || 6); // balanced: <= 6 LLM-drafted tasks per batch
 const MODEL = process.env.OPERATOR_MODEL || 'haiku';
@@ -64,9 +68,28 @@ export function activeDismissed(now = Date.now()) {
 }
 export function dismiss(id, now = Date.now(), mtime = null) { const { map } = loadDismissedRaw(now); map[id] = { at: now, mtime: (mtime == null ? null : Number(mtime)) }; saveDismissed(map); }
 
-async function noteProjectSet(adapter) {
+function skipPatterns() {
+  let fromFile = '';
+  try { fromFile = fs.readFileSync(SKIP_FILE, 'utf-8'); } catch { /* no skip file */ }
+  return [...String(process.env.OPERATOR_SKIP_PROJECTS || '').split(','), ...fromFile.split('\n')]
+    .map((l) => l.split('#')[0].trim().toLowerCase())
+    .filter(Boolean);
+}
+
+// Out-of-scope projects: NOTE-kind (wiki/notes) automatically, plus anything
+// the user listed in the skip file — those tasks keep whatever shape they have.
+export async function excludedProjectSet(adapter) {
   const set = new Set();
-  try { for (const p of (await adapter.listProjects()) || []) if (String(p?.kind || '').toUpperCase() === 'NOTE') { if (p.fullId) set.add(p.fullId); if (p.id) set.add(p.id); } } catch { /* none */ }
+  const pats = skipPatterns();
+  try {
+    for (const p of (await adapter.listProjects()) || []) {
+      const hay = `${p?.id || ''} ${p?.fullId || ''} ${p?.name || ''}`.toLowerCase();
+      const excluded = String(p?.kind || '').toUpperCase() === 'NOTE' || pats.some((pat) => hay.includes(pat));
+      if (!excluded) continue;
+      if (p.fullId) set.add(p.fullId);
+      if (p.id) set.add(p.id);
+    }
+  } catch { /* none */ }
   return set;
 }
 
@@ -179,8 +202,8 @@ function pickDiverse(cards, limit) {
 export async function buildBatch(adapter, { existingIds = new Set(), dismissed: dismissedMap = activeDismissed(), limit = BATCH, allowResearch = false } = {}) {
   const now = Date.now();
   const { corpus } = await loadCorpus(adapter, { cache: true });
-  const notes = await noteProjectSet(adapter);
-  const isNote = (t) => notes.has(t.projectId);
+  const excluded = await excludedProjectSet(adapter);
+  const isExcluded = (t) => excluded.has(t.projectId);
   const active = corpus.filter((t) => !isCompleted(t));
   const meta = new Map(active.map((t) => [t.id, safeMeta(t)]));
   const state = loadState();
@@ -197,8 +220,8 @@ export async function buildBatch(adapter, { existingIds = new Set(), dismissed: 
     dismissed.add(id);
   }
 
-  // Candidate pool: active, non-note, titled, and NOT decayed out (benched).
-  const candidates = active.filter((t) => !isNote(t) && (t.title || '').trim() && !benchReason(state, t, now));
+  // Candidate pool: active, in-scope project, titled, and NOT decayed out (benched).
+  const candidates = active.filter((t) => !isExcluded(t) && (t.title || '').trim() && !benchReason(state, t, now));
   const byId = new Map(candidates.map((t) => [t.id, t]));
 
   // Tasks already represented in the queue/dismissed — so each batch advances to
