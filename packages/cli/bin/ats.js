@@ -32,6 +32,7 @@ import {
   getEventsHelp,
   getAgentLayerHelp,
 } from '../parser.js';
+import { formatSkipped } from '../format-skip.js';
 import {
   validateAdapter,
   runConformance,
@@ -745,6 +746,8 @@ async function formatTriageOnGet(t, adapter, proj, id, task) {
   // Notes are freeform reference/wiki content — never triage or Goal/Log-reformat them.
   if ((task.kind || 'TEXT') === 'NOTE') return task;
   const fullProj = task.fullProjectId || task.projectId || proj;
+  // format-skip.txt projects opted out of the whole treatment: raw read, no write.
+  if (formatSkipped(fullProj) || formatSkipped(proj)) return task;
   const fullId = task.fullId || task.id || id;
   const curTags = task.tags || [];
   const norm = normalizeTaskBody(task.content || '');
@@ -811,6 +814,10 @@ async function handleTasks() {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks normalize PROJECT_ID TASK_ID'); process.exit(1); }
       const [np, nid] = args.positional;
       const task = t?.get ? await t.get(np, nid) : await adapter.getTask(np, nid);
+      const ntask = task?.task || task;
+      if (formatSkipped(ntask?.fullProjectId || ntask?.projectId || np)) {
+        return { task: { projectId: np, taskId: nid }, changed: false, skipped: 'format-skip' };
+      }
       const norm = normalizeTaskBody(task.content || '');
       if (!norm.changed) return { task: { projectId: np, taskId: nid }, changed: false };
       const res = t?.update
@@ -849,7 +856,9 @@ async function handleTasks() {
       }
       // Conform any body that's written (deterministic, no LLM). Bare quick-captures
       // (no --content) stay clean; they get the Goal+Log skeleton on first `get`.
-      if (opts.content) opts.content = normalizeTaskBody(opts.content).content;
+      // format-skip.txt projects keep the body verbatim (id-based match — a project
+      // passed by NAME is not recognized by the skip).
+      if (opts.content && !formatSkipped(projectId)) opts.content = normalizeTaskBody(opts.content).content;
       const result = t?.create
         ? await t.create(projectId, title, opts)
         : await adapter.createTask({
@@ -891,7 +900,8 @@ async function handleTasks() {
         reminder: args.options.reminder,
       };
       // Normalize the body whenever content is being written (no extra fetch when it isn't).
-      if (patch.content !== undefined) patch.content = normalizeTaskBody(patch.content).content;
+      // format-skip.txt projects keep the body verbatim (id-based match).
+      if (patch.content !== undefined && !formatSkipped(args.positional[0])) patch.content = normalizeTaskBody(patch.content).content;
       // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
       let before;
       try {
