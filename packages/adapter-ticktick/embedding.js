@@ -21,6 +21,7 @@ import { homedir } from 'node:os';
 // --- Configuration ---
 
 const QDRANT_URL = process.env.QDRANT_URL || 'http://localhost:6333';
+const QDRANT_API_KEY = process.env.QDRANT_API_KEY || '';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
 const COLLECTION_NAME = process.env.ATS_TICKTICK_VECTOR_COLLECTION || 'ticktick_tasks';
@@ -50,6 +51,13 @@ async function httpJson(url, method = 'GET', body = undefined, timeoutMs = 30000
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
     };
+    // A Qdrant started with QDRANT__SERVICE__API_KEY answers 401 on every path but
+    // '/', so an unauthenticated client reads as "down" rather than "refused".
+    // Scoped to Qdrant on purpose: httpJson also talks to Ollama, which must never
+    // receive the key.
+    if (QDRANT_API_KEY && url.startsWith(QDRANT_URL)) {
+      opts.headers['api-key'] = QDRANT_API_KEY;
+    }
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await fetch(url, opts);
     const text = await res.text();
@@ -169,8 +177,22 @@ async function saveMeta(meta) {
 export async function checkHealth() {
   try {
     await httpJson(`${QDRANT_URL}/collections`, 'GET', undefined, 5000);
-  } catch {
-    return { available: false, reason: `Qdrant not reachable at ${QDRANT_URL}` };
+  } catch (err) {
+    // Distinguish "down" from "refusing you". A blanket "not reachable" on a 401
+    // sends you hunting ports and containers while the service is up and simply
+    // wants QDRANT_API_KEY — that misdiagnosis is the whole reason this branch
+    // reports the status code.
+    const status = /\s(\d{3}):/.exec(err?.message || '')?.[1];
+    if (status === '401' || status === '403') {
+      return {
+        available: false,
+        reason: `Qdrant at ${QDRANT_URL} rejected the request (${status}) — set QDRANT_API_KEY`,
+      };
+    }
+    return {
+      available: false,
+      reason: `Qdrant not reachable at ${QDRANT_URL}${status ? ` (HTTP ${status})` : ''}`,
+    };
   }
   try {
     await httpJson(`${OLLAMA_URL}/api/tags`, 'GET', undefined, 5000);
