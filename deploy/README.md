@@ -78,6 +78,7 @@ curl https://ats-mcp.onrender.com/healthz   # -> {"ok":true,"service":"ats-mcp"}
 | `ATS_MCP_TOKEN` | Render (generated) | The bearer token your agent must send. |
 | `ATS_ADAPTER` | blueprint | Which task system to expose (default `@reneza/ats-adapter-ticktick`). |
 | `QDRANT_HOST` / `OLLAMA_HOST` | `fromService` | Private hostnames of the two backend services; the entrypoint composes `QDRANT_URL` / `OLLAMA_URL` from them. |
+| `QDRANT_API_KEY` | you (optional) | Required only if Qdrant runs with `QDRANT__SERVICE__API_KEY`. Without it every Qdrant path except `/` answers 401 and the vector index reports as unavailable. Sent to Qdrant only, never to Ollama. |
 | `TICKTICK_ACCESS_TOKEN` | you (optional) | Your task-system token. Paste it to make the server read your real tasks. |
 | `TICKTICK_CLIENT_ID` / `TICKTICK_CLIENT_SECRET` | you (optional) | Only needed if you want the token to auto-refresh. A long-lived Open API token does not. |
 
