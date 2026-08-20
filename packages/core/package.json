@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-core",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Adapter-agnostic core for Agentic Task System — retrieval (RRF parallel fan-out), corpus cache, usage logging, conformance kit, adapter interface",
   "type": "module",
   "main": "index.js",

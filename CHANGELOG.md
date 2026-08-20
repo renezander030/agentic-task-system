@@ -1,6 +1,13 @@
 
 # Changelog
 
+## 0.10.1 - Qdrant API-key authentication
+
+Released 2026-08-20.
+
+- **Key-protected Qdrant.** The TickTick adapter sends an `api-key` header when `QDRANT_API_KEY` is set, so a Qdrant started with `QDRANT__SERVICE__API_KEY` — which answers `401` on every path except `/` — is usable rather than apparently absent. The header is scoped to the Qdrant base URL on purpose: the same HTTP helper also calls Ollama, which must never receive the key. With the variable unset, behaviour is unchanged.
+- **Health checks name the real fault.** `checkHealth` now separates a `401`/`403` refusal from an unreachable service and points at `QDRANT_API_KEY` instead of reporting `Qdrant not reachable` for a service that is up and simply refusing. The old message sent you hunting ports, containers and firewall rules while retrieval quietly degraded to keyword-only — every query still answering, just worse, with no error to notice.
+
 ## 0.10.0 - Degraded-retrieval transparency, reranking, usage observability, dedup, reactive auth
 
 Released 2026-07-20.
