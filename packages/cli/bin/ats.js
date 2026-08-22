@@ -29,6 +29,7 @@ import {
   getCacheHelp,
   getReviewHelp,
   getStateHelp,
+  getKgHelp,
   getBenchHelp,
   getCompletionHelp,
   getEventsHelp,
@@ -91,6 +92,14 @@ import {
   importState,
   gardenSweep,
   formatGarden,
+  loadFacts,
+  proposeFact,
+  proposeRetract,
+  ratifyFactItem,
+  listKgFacts,
+  askFacts,
+  kgStats,
+  exportFactsCypher,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -252,6 +261,9 @@ async function main() {
       case 'garden':
         result = await handleGarden();
         break;
+      case 'kg':
+        result = await handleKg();
+        break;
       case 'fmt':
         handleFmt();
         return;
@@ -399,6 +411,7 @@ function helpFor(command) {
     case 'cache': return getCacheHelp();
     case 'review': return getReviewHelp();
     case 'state': return getStateHelp();
+    case 'kg': return getKgHelp();
     case 'bench': return getBenchHelp();
     case 'completion': return getCompletionHelp();
     case 'events': return getEventsHelp();
@@ -420,7 +433,7 @@ function helpFor(command) {
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
-  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'agent-setup', 'garden',
+  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'agent-setup', 'garden', 'kg',
   'projects', 'tasks', 'notes', 'help', 'completion', 'undo',
 ];
 
@@ -882,6 +895,97 @@ async function applyReviewedWrite(item, adapter, t) {
   }
 }
 
+async function handleKg() {
+  const agentId = args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli';
+  switch (args.subcommand) {
+    case 'propose': {
+      const [subject, predicate, object] = args.positional;
+      if (!subject || !predicate || !object) {
+        console.error('Usage: ats kg propose SUBJECT PREDICATE OBJECT [--domain D --source REF --confidence low|medium|high --task PROJECT/TASK]');
+        process.exit(1);
+      }
+      let taskRef;
+      if (args.options.task) {
+        const [tp, tt] = splitTaskRef(args.options.task);
+        taskRef = { projectId: tp, taskId: tt };
+      }
+      const item = proposeFact({
+        subject, predicate, object,
+        domain: args.options.domain,
+        source: args.options.source,
+        confidence: args.options.confidence,
+        taskRef,
+        by: agentId,
+      });
+      return {
+        staged: true,
+        reviewId: item.id,
+        message: `Fact proposed as ${item.id.slice(0, 8)}. Ratify with: ats review approve ${item.id.slice(0, 8)} && ats kg ratify --all`,
+      };
+    }
+    case 'retract': {
+      if (!args.positional[0]) { console.error('Usage: ats kg retract FACT_ID [--reason "..."]'); process.exit(1); }
+      const item = proposeRetract({ factId: args.positional[0], reason: args.options.reason, by: agentId });
+      return {
+        staged: true,
+        reviewId: item.id,
+        message: `Retraction proposed as ${item.id.slice(0, 8)}. Ratify with: ats review approve ${item.id.slice(0, 8)} && ats kg ratify --all`,
+      };
+    }
+    case 'ratify': {
+      let targets;
+      if (args.options.all) {
+        targets = listReviewItems({ status: 'approved', kind: 'kg.fact' });
+      } else if (args.positional.length) {
+        targets = args.positional.map((id) => findReviewItem(id));
+      } else {
+        console.error('Usage: ats kg ratify <ID...|--all>   (approve first: ats review approve ID)');
+        process.exit(1);
+      }
+      const ratified = [];
+      for (const item of targets) {
+        try {
+          const outcome = ratifyFactItem(item);
+          const result = outcome.op === 'add' ? { factId: outcome.fact.id } : { retracted: outcome.factId };
+          markReviewItemApplied(item.id, { result });
+          ratified.push({ id: item.id.slice(0, 8), ok: true, ...result });
+        } catch (err) {
+          try { markReviewItemApplied(item.id, { error: err.message }); } catch {}
+          ratified.push({ id: item.id.slice(0, 8), ok: false, error: err.message });
+        }
+      }
+      return { ratified };
+    }
+    case 'ask': {
+      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted]'); process.exit(1); }
+      return askFacts(args.positional.join(' '), {
+        domain: args.options.domain,
+        limit: parseInt(args.options.limit) || 8,
+        includeRetracted: !!args.options['include-retracted'],
+      });
+    }
+    case 'facts':
+      return {
+        facts: listKgFacts({
+          domain: args.options.domain,
+          subject: args.options.subject,
+          predicate: args.options.predicate,
+          status: args.options.all ? 'all' : 'active',
+        }),
+      };
+    case 'stats':
+      return kgStats({ listReviewItems });
+    case 'export': {
+      if (args.options.cypher) return { __raw: exportFactsCypher({ domain: args.options.domain }) };
+      const { facts } = loadFacts();
+      const selected = args.options.domain ? facts.filter((f) => f.domain === args.options.domain) : facts;
+      return { __raw: JSON.stringify({ exportedAt: new Date().toISOString(), facts: selected }, null, 2) };
+    }
+    default:
+      console.log(getKgHelp());
+  }
+}
+
 async function handleState() {
   switch (args.subcommand) {
     case 'export': {
@@ -931,6 +1035,10 @@ Backend: ${source.pkg} (${source.origin})${wiki ? ` · wiki project: "${wiki}"` 
   \`ats review approve <id>\`, \`ats review apply --all\`). Never work around
   the gate through another tool.
 - Deep links come from \`ats url <ref>\` — never hand-write backend URLs.
+- Durable, plain-language knowledge goes to the facts layer:
+  \`ats kg propose "<subject>" "<predicate>" "<object>" --source <ref>\`.
+  Proposals only become queryable after human ratification; answer questions
+  from ratified facts with \`ats kg ask "<question>" --json\`.
 - \`ats events watch --json\` emits observations, not authorization: evaluate
   intent, validity, and security before acting on one.`;
   return { __raw: block };

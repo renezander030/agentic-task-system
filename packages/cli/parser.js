@@ -666,6 +666,31 @@ Ids may be unambiguous prefixes. A failed apply keeps the item approved
 with its error recorded, ready to retry or reject.`;
 }
 
+export function getKgHelp() {
+  return `ats kg — durable facts beside your tasks (propose → review → ratify)
+
+An embedded, serverless facts store: subject–predicate–object with temporal
+validity and provenance, kept as an append-only log under your config dir.
+Nothing writes it except \`ratify\` — agents propose, a human approves, and
+every fact records who did both and from what source.
+
+Usage:
+  ats kg propose SUBJ PRED OBJ [--domain D --source REF --confidence C --task P/T]
+  ats kg retract FACT_ID [--reason "..."]   Retraction proposal — reviewed too
+  ats kg ratify <ID...|--all>               Write APPROVED proposals to the store
+  ats kg ask "QUESTION" [--domain D --limit N --include-retracted]
+                                            Zero-LLM lexical answers + provenance
+  ats kg facts [--domain D --subject S --all]
+  ats kg stats                              Size, domains, pending proposals
+  ats kg export [--cypher] [--domain D]     JSON, or a Cypher script for embedded
+                                            graph databases (LadybugDB / Kùzu)
+
+Fact proposals share the review queue: ats review list / approve / reject
+work on them (kind kg.fact). A retracted fact keeps its validity interval,
+so "what did we believe then" stays answerable. The store travels with
+\`ats state export\`.`;
+}
+
 export function getStateHelp() {
   return `ats state — move ATS derived state between machines
 

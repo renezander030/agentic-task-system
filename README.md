@@ -89,6 +89,7 @@ ATS is a good fit when operational context already lives in task systems or conn
 - **Execution context.** `ats intent` captures outcome/why/done-when; `ats lifecycle` keeps stale context from steering current work; `ats security` records scoped allow/deny decisions for cooperating clients; `ats ledger` records what an agent did and whether the task advanced; `ats promote` turns exploration into a committed goal; `ats hierarchy evaluate` checks local work still supports its parent.
 - **Bounded events.** `ats events watch --json` emits deterministic `task.created/updated/completed/...` NDJSON, spooled `0600` with pending/ack recovery and stable dedup IDs. ATS only emits observations — a consumer still evaluates intent, validity, and security before acting.
 - **Task graph for agents.** Tasks become structured nodes with proof, writeback, review, lifecycle, and link edges instead of free-form memory text; see [`docs/task-graph-for-agents.md`](docs/task-graph-for-agents.md).
+- **A facts layer.** `ats kg` keeps durable subject–predicate–object knowledge beside the tasks: agents **propose**, a human **ratifies** (the only write path), and `ats kg ask` answers with deterministic lexical scoring plus full provenance — no LLM, no graph server, an append-only file that travels with `ats state export`. Retraction closes a fact's validity interval instead of deleting it, and `ats kg export --cypher` loads the graph into embedded engines (LadybugDB/Kùzu).
 - **Session-index handoff.** Coding-agent session browsers can keep raw transcript analytics while ATS stores the durable task-linked summary; see [`docs/agent-session-index.md`](docs/agent-session-index.md).
 
 ATS-managed execution metadata can be encoded in the task body, with typed links under `## Related` and consulted sources under `## References`. Managed helpers are designed to preserve human-authored rows and links, but a direct content update can replace the complete body; callers should read first, write the smallest intended change, and verify the result. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the execution-context path.
@@ -145,6 +146,7 @@ ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 - **The hosted blueprint is a reference deployment, not a managed service.** One bearer token grants the full MCP tool surface; the blueprint does not provide per-user or per-tool scopes, multi-tenant RBAC, high availability, or an SLA.
 - **Hosted ATS runtime state is ephemeral by default.** The blueprint persists Qdrant and Ollama, but does not mount a disk for `ats-mcp`; its cache, query log, action ledger and undo before-images, event spool, and vector-sync metadata disappear on a restart or redeploy.
 - **Events are observations, not authorization.** `ats events watch` can report task changes, but a consumer must still evaluate intent, validity, and security before taking an external action.
+- **The facts layer is lexical and human-gated.** `ats kg ask` is deterministic keyword scoring with provenance, not semantic search, and nothing reaches the fact store without human ratification — a burst of agent proposals waits for review by design.
 - **ATS policy is not a sandbox.** The CLI enforces the declared approval metadata — a write whose target sets `intent.approvalRequired` or lists the action in `security.approvalRequiredFor` stages into `ats review` instead of reaching the backend (`ATS_REVIEW_ALL=1` gates every write) — but this guards ATS's own write path only. `ats security check` remains an application-level decision point for cooperating clients, and nothing here intercepts shell, filesystem, network, model, or secret access outside ATS. A client calling an adapter directly bypasses the CLI gate.
 
 ## Verification and operational evidence
@@ -191,6 +193,12 @@ ats lifecycle set <project> <task> --status active --valid-until 2026-12-31
 ats link add <src-proj> <src-task> <dst-proj> <dst-task> --type decision
 ats graph <project> <task>
 ats context <project> <task>
+
+# Facts layer (proposed by agents, ratified by you)
+ats kg propose "Acme GmbH" "prefers" "invoices as PDF" --domain sales --source "call 2026-08-01"
+ats review approve <id> && ats kg ratify --all
+ats kg ask "what does Acme prefer" --domain sales --json
+ats kg export --cypher > facts.cypher      # load into LadybugDB / Kùzu
 ats ledger record <project> <task> --action release.verified --advanced true
 ats security set <project> <task> --trust trusted --allow-actions read --allow-resources task:self
 ats security check <project> <task> --action read --resource task:self --reason "load context"
