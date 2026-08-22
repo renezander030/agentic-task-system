@@ -16,6 +16,8 @@
 
 **Adapter, not migration.** Your task app, repository, or vault remains authoritative. ATS maps that source into a common task contract; optional caches and vector indexes improve retrieval but never become a second record that people must edit. It is **task-first**: the task is the spine, while supporting material such as GitHub issues and Notion specs is retrieved as context behind it.
 
+**Two layers, one CLI: tasks and a knowledge graph.** The task layer is record-based on purpose — every entry lives in one backend's projects and fields, and that backend stays authoritative. A record-based layer structurally cannot hold the other thing agents accumulate: durable knowledge **written from any source, about mixed subjects, into one space**. The knowledge-graph layer — **`ats kg`** (kg = knowledge graph) — is ATS's answer to exactly that: subject–predicate–object facts with provenance and temporal validity, proposed by agents from anywhere (a call, a task, a repo, a chat), ratified by a human, and queried in one place no matter which backend the surrounding work lives in. The built-in store is embedded and dependency-free. For a dedicated graph engine, the recommended pairing is **[Graphiti](https://github.com/getzep/graphiti) as the graph database server** and **[LadybugDB](https://github.com/LadybugDB) as the embedded graph database**: `ats kg export --cypher` emits a LadybugDB-loadable script, and `ats kg export` (JSON, full provenance) is ready for a Graphiti ingest pipeline.
+
 ```bash
 npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
 ats config use ticktick
