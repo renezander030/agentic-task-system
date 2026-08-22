@@ -16,6 +16,8 @@
 
 **Adapter, not migration.** Your task app, repository, or vault remains authoritative. ATS maps that source into a common task contract; optional caches and vector indexes improve retrieval but never become a second record that people must edit. It is **task-first**: the task is the spine, while supporting material such as GitHub issues and Notion specs is retrieved as context behind it.
 
+**Two layers, one CLI: tasks and a knowledge graph.** The task layer is record-based on purpose — every entry lives in one backend's projects and fields, and that backend stays authoritative. A record-based layer structurally cannot hold the other thing agents accumulate: durable knowledge **written from any source, about mixed subjects, into one space**. The knowledge-graph layer — **`ats kg`** (kg = knowledge graph) — is ATS's answer to exactly that: subject–predicate–object facts with provenance and temporal validity, proposed by agents from anywhere (a call, a task, a repo, a chat), ratified by a human, and queried in one place no matter which backend the surrounding work lives in. The built-in store is embedded and dependency-free. For a dedicated graph engine, the recommended pairing is **[Graphiti](https://github.com/getzep/graphiti) as the graph database server** and **[LadybugDB](https://github.com/LadybugDB) as the embedded graph database**: `ats kg export --cypher` emits a LadybugDB-loadable script, and `ats kg export` (JSON, full provenance) is ready for a Graphiti ingest pipeline.
+
 ```bash
 npm install -g @reneza/ats-cli @reneza/ats-adapter-ticktick
 ats config use ticktick
@@ -89,6 +91,7 @@ ATS is a good fit when operational context already lives in task systems or conn
 - **Execution context.** `ats intent` captures outcome/why/done-when; `ats lifecycle` keeps stale context from steering current work; `ats security` records scoped allow/deny decisions for cooperating clients; `ats ledger` records what an agent did and whether the task advanced; `ats promote` turns exploration into a committed goal; `ats hierarchy evaluate` checks local work still supports its parent.
 - **Bounded events.** `ats events watch --json` emits deterministic `task.created/updated/completed/...` NDJSON, spooled `0600` with pending/ack recovery and stable dedup IDs. ATS only emits observations — a consumer still evaluates intent, validity, and security before acting.
 - **Task graph for agents.** Tasks become structured nodes with proof, writeback, review, lifecycle, and link edges instead of free-form memory text; see [`docs/task-graph-for-agents.md`](docs/task-graph-for-agents.md).
+- **A facts layer.** `ats kg` keeps durable subject–predicate–object knowledge beside the tasks: agents **propose**, a human **ratifies** (the only write path), and `ats kg ask` answers with deterministic lexical scoring plus full provenance — no LLM, no graph server, an append-only file that travels with `ats state export`. Retraction closes a fact's validity interval instead of deleting it, and `ats kg export --cypher` loads the graph into embedded engines (LadybugDB/Kùzu).
 - **Session-index handoff.** Coding-agent session browsers can keep raw transcript analytics while ATS stores the durable task-linked summary; see [`docs/agent-session-index.md`](docs/agent-session-index.md).
 
 ATS-managed execution metadata can be encoded in the task body, with typed links under `## Related` and consulted sources under `## References`. Managed helpers are designed to preserve human-authored rows and links, but a direct content update can replace the complete body; callers should read first, write the smallest intended change, and verify the result. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the execution-context path.
@@ -137,20 +140,21 @@ ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 
 ## Tradeoffs and limits
 
-- **Freshness is adapter-dependent.** Core's corpus cache has a five-minute default TTL. Backend sync behavior, pagination, and inclusion of completed work vary by adapter; ATS does not promise universal real-time reads.
+- **Freshness is adapter-dependent.** Core's corpus cache has a five-minute default TTL. Backend sync behavior, pagination, and inclusion of completed work vary by adapter; ATS does not promise universal real-time reads. `ats cache sync` refreshes the cache on demand (cron-friendly) — incrementally when the adapter implements `bulkFetchDelta()`, as a full refetch otherwise.
 - **Dense retrieval adds infrastructure.** Qdrant and Ollama can improve semantic recall, but they add indexing, persistence, resource, and backup work. Baseline `find` still returns keyword/native results when vectors are unavailable, although an attempted vector branch can make the response degraded; vector-only `hybrid` and `similar` operations still require that infrastructure.
 - **The common contract is intentionally small.** The adapter interface defines six storage methods plus authentication lifecycle hooks, while practical write coverage, richer fields, and native search vary. Check the adapter README before assuming parity across backends.
-- **Degraded results are still partial results.** ATS reports failed or timed-out Core branches and top-level composite child corpus failures, but the caller must decide whether partial context is acceptable. Current gaps remain: per-project failures inside a composite fallback fetch, child native-search failures, and some TickTick project fetch failures can be omitted without reaching `warnings`.
-- **Composite search is not semantic deduplication.** `ats dedup` is a separate analysis command. Fusion currently keys identity by task ID, so backends that emit the same task ID can collide even though their project IDs are namespaced.
+- **Degraded results are still partial results.** ATS reports failed or timed-out Core branches, dropped corpus sources — including per-project failures inside a composite fallback fetch and TickTick project fetches — and native-search sources a backend could not read. The caller must still decide whether partial context is acceptable; `warnings` says what is missing, not whether it mattered.
+- **Composite search is not semantic deduplication.** `ats dedup` is a separate analysis command. Fusion identity is namespaced per backend (`<backend>:<taskId>`), so identical raw ids from different backends stay distinct results; semantically duplicate tasks still appear separately until you link them.
 - **The hosted blueprint is a reference deployment, not a managed service.** One bearer token grants the full MCP tool surface; the blueprint does not provide per-user or per-tool scopes, multi-tenant RBAC, high availability, or an SLA.
 - **Hosted ATS runtime state is ephemeral by default.** The blueprint persists Qdrant and Ollama, but does not mount a disk for `ats-mcp`; its cache, query log, action ledger and undo before-images, event spool, and vector-sync metadata disappear on a restart or redeploy.
 - **Events are observations, not authorization.** `ats events watch` can report task changes, but a consumer must still evaluate intent, validity, and security before taking an external action.
-- **ATS policy is not a sandbox or automatic write interceptor.** `ats security check` is an application-level decision point for cooperating clients; ordinary create/update calls do not invoke it automatically, and it does not intercept shell, filesystem, network, model, or secret access outside ATS.
+- **The facts layer is lexical and human-gated.** `ats kg ask` is deterministic keyword scoring with provenance, not semantic search, and nothing reaches the fact store without human ratification — a burst of agent proposals waits for review by design.
+- **ATS policy is not a sandbox.** The CLI enforces the declared approval metadata — a write whose target sets `intent.approvalRequired` or lists the action in `security.approvalRequiredFor` stages into `ats review` instead of reaching the backend (`ATS_REVIEW_ALL=1` gates every write) — but this guards ATS's own write path only. `ats security check` remains an application-level decision point for cooperating clients, and nothing here intercepts shell, filesystem, network, model, or secret access outside ATS. A client calling an adapter directly bypasses the CLI gate.
 
 ## Verification and operational evidence
 
 - [CI](https://github.com/renezander030/agentic-task-system/actions/workflows/ci.yml) runs the full repository gate on Node 20 and 22: lint, public-claim checks, PII checks, unit tests, adapter and intent proofs, and the progress benchmark.
-- The [publish-safety gate](scripts/check-no-pii.mjs) scans both the repository surface and npm package tarballs for secrets, personal paths, configured personal-data patterns, and locally configured denylist terms. It protects publication surfaces; it is not runtime redaction or data-loss prevention between adapters.
+- The [publish-safety gate](scripts/check-no-pii.mjs) scans both the repository surface and npm package tarballs for secrets, personal paths, configured personal-data patterns, and locally configured denylist terms. It protects publication surfaces. At runtime, the composite adapter can additionally enforce per-backend trust levels with configured redaction patterns — a write routed to a `"trust": "public"` child that matches a pattern is blocked, not silently stripped (see the composite README). That screen guards ATS's own composite write path; it is not general data-loss prevention.
 - [State-integrity tests and conventions](docs/state-integrity.md) cover patch-style writes, preservation of unknown fields, explicit store-to-`Task` mapping, result provenance, and explainable RRF contributions.
 - [Retrieval behavior](docs/retrieval.md) documents Core's branches, the corpus cache, time budgets, graceful branch failure, usage logging, and what affects latency.
 
@@ -191,12 +195,21 @@ ats lifecycle set <project> <task> --status active --valid-until 2026-12-31
 ats link add <src-proj> <src-task> <dst-proj> <dst-task> --type decision
 ats graph <project> <task>
 ats context <project> <task>
+
+# Facts layer (proposed by agents, ratified by you)
+ats kg propose "Acme GmbH" "prefers" "invoices as PDF" --domain sales --source "call 2026-08-01"
+ats review approve <id> && ats kg ratify --all
+ats kg ask "what does Acme prefer" --domain sales --json
+ats kg export --cypher > facts.cypher      # load into LadybugDB / Kùzu
 ats ledger record <project> <task> --action release.verified --advanced true
 ats security set <project> <task> --trust trusted --allow-actions read --allow-resources task:self
 ats security check <project> <task> --action read --resource task:self --reason "load context"
 ats events watch --json            # NDJSON observations; never launches agents
 
 # Ops
+ats review list                 # writes staged by approvalRequired targets
+ats review approve ID && ats review apply --all
+ats cache sync                  # refresh the corpus cache (cron-friendly)
 ats bench run
 ats bench score
 ats bench progress --json

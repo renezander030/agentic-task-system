@@ -1,6 +1,31 @@
 export { validateAdapter, adapterCapabilities } from './adapter-interface.js';
-export { rrf, fuse, find, loadCorpus, similar, RRF_K } from './retrieval.js';
+export { withLock, withLockSync, writeFileAtomicSync } from './fs-lock.js';
+export {
+  REVIEW_QUEUE_VERSION,
+  reviewQueuePath,
+  readReviewQueue,
+  stageReviewItem,
+  listReviewItems,
+  findReviewItem,
+  decideReviewItem,
+  markReviewItemApplied,
+  writeRequiresApproval,
+} from './review-queue.js';
+export { STATE_BUNDLE_VERSION, stateFileRegistry, exportState, importState } from './state-bundle.js';
+export {
+  kgFactsPath,
+  loadFacts,
+  proposeFact,
+  proposeRetract,
+  ratifyFactItem,
+  listKgFacts,
+  askFacts,
+  kgStats,
+  exportFactsCypher,
+} from './kg.js';
+export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';
+export { gardenSweep, formatGarden } from './garden.js';
 export {
   read as readCorpus,
   write as writeCorpus,

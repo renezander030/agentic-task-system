@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
 import { loadCorpus } from './retrieval.js';
 import { evaluateLifecycle, taskMetadataForRead } from './task-context.js';
 
@@ -144,11 +145,7 @@ export function readTaskEventCheckpoint({ statePath = taskEventStatePath() } = {
 
 export function writeTaskEventCheckpoint(checkpoint, { statePath = taskEventStatePath() } = {}) {
   if (!checkpoint || checkpoint.version !== TASK_EVENT_STATE_VERSION) throw new Error('Invalid task event checkpoint.');
-  fs.mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 });
-  const temp = `${statePath}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(checkpoint, null, 2) + '\n', { mode: 0o600 });
-  fs.renameSync(temp, statePath);
-  fs.chmodSync(statePath, 0o600);
+  writeFileAtomicSync(statePath, JSON.stringify(checkpoint, null, 2) + '\n');
   return { statePath, cursor: checkpoint.cursor, generatedAt: checkpoint.generatedAt, taskCount: Object.keys(checkpoint.tasks).length };
 }
 
@@ -174,54 +171,11 @@ export function readTaskEventSpool({ spoolPath = taskEventSpoolPath() } = {}) {
 }
 
 function writeTaskEventSpoolUnlocked(spool, spoolPath) {
-  fs.mkdirSync(path.dirname(spoolPath), { recursive: true, mode: 0o700 });
-  const temp = `${spoolPath}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(spool, null, 2) + '\n', { mode: 0o600 });
-  fs.renameSync(temp, spoolPath);
-  fs.chmodSync(spoolPath, 0o600);
+  writeFileAtomicSync(spoolPath, JSON.stringify(spool, null, 2) + '\n');
 }
 
 function withSpoolLock(spoolPath, run) {
-  fs.mkdirSync(path.dirname(spoolPath), { recursive: true, mode: 0o700 });
-  const lockPath = `${spoolPath}.lock`;
-  const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
-  let lock;
-  for (let attempt = 0; attempt < 80; attempt++) {
-    try {
-      lock = fs.openSync(lockPath, 'wx', 0o600);
-      break;
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      try {
-        if (Date.now() - fs.statSync(lockPath).mtimeMs > 30000) fs.unlinkSync(lockPath);
-      } catch (statError) {
-        if (statError.code !== 'ENOENT') throw statError;
-      }
-      Atomics.wait(waitBuffer, 0, 0, 25);
-    }
-  }
-  if (lock === undefined) throw new Error(`Timed out waiting for task event spool lock: ${lockPath}`);
-  let result;
-  let runError;
-  try {
-    result = run();
-  } catch (error) {
-    runError = error;
-  }
-  let cleanupError;
-  try {
-    fs.closeSync(lock);
-  } catch (error) {
-    cleanupError = error;
-  }
-  try {
-    fs.unlinkSync(lockPath);
-  } catch (error) {
-    if (error.code !== 'ENOENT' && !cleanupError) cleanupError = error;
-  }
-  if (runError) throw runError;
-  if (cleanupError) throw cleanupError;
-  return result;
+  return withLockSync(spoolPath, run, { label: 'task event spool' });
 }
 
 export function stageTaskEvents(events, { spoolPath = taskEventSpoolPath(), now = new Date() } = {}) {

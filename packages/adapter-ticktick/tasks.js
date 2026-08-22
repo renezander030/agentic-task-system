@@ -285,6 +285,7 @@ export async function search(keyword, options = {}, deps = {}) {
   } = deps;
   const projects = await apiRequest('GET', '/project', undefined, deps);
   const results = [];
+  const failedProjects = [];
 
   for (const project of projects) {
     try {
@@ -322,8 +323,10 @@ export async function search(keyword, options = {}, deps = {}) {
           status: task.status === 2 ? 'completed' : 'active',
         });
       }
-    } catch {
-      // Skip projects we can't access
+    } catch (err) {
+      // A project we can't read must not silently shrink the result set —
+      // report it so callers can mark the search partial.
+      failedProjects.push({ projectId: shortId(project.id), name: project.name, error: err.message });
     }
   }
 
@@ -338,6 +341,7 @@ export async function search(keyword, options = {}, deps = {}) {
     keyword,
     count: results.length,
     tasks: results,
+    ...(failedProjects.length ? { failedProjects } : {}),
   };
 }
 
@@ -518,7 +522,7 @@ export async function priority(deps = {}) {
  * @returns {Promise<{ query, mode, count, elapsedMs, branches, tasks }>}
  */
 export async function find(query, options = {}, deps = {}) {
-  const { limit = 5, budgetMs = 3000, explain = false } = options;
+  const { limit = 5, budgetMs = 3000, explain = false, includeCompleted = false } = options;
   const {
     apiRequest = coreFunctions.apiRequest,
     formatPriority = coreFunctions.formatPriority,
@@ -531,13 +535,18 @@ export async function find(query, options = {}, deps = {}) {
   // loadCorpus() would also work, but this preserves the exact TickTick shape
   // (id === fullId, fullProjectId, projectName) the branches below rely on.
   const loadCorpus = loadCorpusOverride || (async () => {
-    const cached = corpusCache.read();
-    if (cached) {
-      const m = corpusCache.meta();
-      return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null };
+    // Completed history is appended per query and must never enter the shared
+    // corpus cache, so an --include-completed query bypasses the cache both ways.
+    if (!includeCompleted) {
+      const cached = corpusCache.read();
+      if (cached) {
+        const m = corpusCache.meta();
+        return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null };
+      }
     }
     const projects = await apiRequest('GET', '/project', undefined, deps);
     const tasks = [];
+    const sourcesFailed = [];
     for (const p of projects) {
       try {
         const data = await apiRequest('GET', `/project/${encodeURIComponent(p.id)}/data`, undefined, deps);
@@ -555,12 +564,40 @@ export async function find(query, options = {}, deps = {}) {
             dueDate: t.dueDate,
           });
         }
-      } catch {
-        // skip projects that fail individually
+      } catch (err) {
+        // A failing project must surface in `warnings`/`degraded` (core rolls
+        // sourcesFailed up), and a known-partial corpus must never be cached
+        // as complete for the whole TTL.
+        sourcesFailed.push({ source: p.id, name: p.name, error: err.message });
       }
     }
-    corpusCache.write(tasks);
-    return { corpus: tasks, fromCache: false, ageMs: null };
+    if (includeCompleted) {
+      try {
+        const done = await listCompleted({}, deps);
+        const seen = new Set(tasks.map((t) => t.id));
+        for (const t of done.tasks) {
+          if (seen.has(t.fullId)) continue;
+          tasks.push({
+            id: t.fullId,
+            fullId: t.fullId,
+            title: t.title,
+            content: t.content,
+            projectId: t.fullProjectId,
+            fullProjectId: t.fullProjectId,
+            projectName: '(completed)',
+            priority: t.priority,
+            tags: t.tags,
+            dueDate: t.dueDate,
+            status: 'completed',
+            completedTime: t.completedTime,
+          });
+        }
+      } catch (err) {
+        sourcesFailed.push({ source: 'completed', name: 'completed history', error: err.message });
+      }
+    }
+    if (sourcesFailed.length === 0 && !includeCompleted) corpusCache.write(tasks);
+    return { corpus: tasks, fromCache: false, ageMs: null, sourcesFailed };
   });
 
   // TickTick-specific retriever: token-aware match restricted to the wiki/notes
@@ -623,6 +660,7 @@ export async function hybridSearch(query, options = {}, deps = {}) {
 
   // Build a flat list of all tasks across projects for the keyword side.
   // Cached only within this single CLI invocation.
+  const fetchWarnings = [];
   const fetchTasksForKeyword = async () => {
     const projects = await apiRequest('GET', '/project', undefined, deps);
     const out = [];
@@ -641,8 +679,10 @@ export async function hybridSearch(query, options = {}, deps = {}) {
             dueDate: t.dueDate,
           });
         }
-      } catch {
-        // skip projects that fail to fetch
+      } catch (err) {
+        // The keyword side of the hybrid pool is smaller than it should be —
+        // mark the response degraded instead of serving the subset silently.
+        fetchWarnings.push(`project "${p.name}" failed to fetch: ${err.message}`);
       }
     }
     return out;
@@ -660,6 +700,7 @@ export async function hybridSearch(query, options = {}, deps = {}) {
       query,
       mode: 'hybrid',
       count: results.length,
+      ...(fetchWarnings.length ? { degraded: true, warnings: fetchWarnings } : {}),
       tasks: results,
     };
   } catch (err) {
@@ -748,6 +789,7 @@ export async function vectorSync(options = {}, deps = {}) {
     vectorSyncFn = vectorFunctions.sync,
   } = deps;
 
+  const skippedProjects = [];
   async function fetchAllTasks() {
     const projects = await apiRequest('GET', '/project', undefined, deps);
     const allTasks = [];
@@ -767,12 +809,51 @@ export async function vectorSync(options = {}, deps = {}) {
             dueDate: t.dueDate || '',
           });
         }
-      } catch { /* skip inaccessible projects */ }
+      } catch (err) {
+        // A skipped project means its tasks are absent from the vector index —
+        // say so in the sync report instead of under-indexing silently.
+        skippedProjects.push({ projectId: project.id, name: project.name, error: err.message });
+      }
     }
     return allTasks;
   }
 
-  return await vectorSyncFn(fetchAllTasks, options);
+  const result = await vectorSyncFn(fetchAllTasks, options);
+  if (!skippedProjects.length) return result;
+  return {
+    ...result,
+    skippedProjects,
+    warning: `${skippedProjects.length} project(s) could not be fetched; their tasks are missing from the vector index`,
+  };
+}
+
+/**
+ * Run vectorSync repeatedly until the backfill is drained.
+ *
+ * Each round embeds at most `maxEmbeddings` (default 200) — the per-run cap
+ * that protects Ollama. Rounds continue while the previous round reported
+ * `skippedLimit > 0` AND made forward progress (indexed or reindexed
+ * something), so a wedged embedder cannot spin forever.
+ */
+export async function vectorSyncDrain(options = {}, deps = {}) {
+  const maxRounds = options.maxRounds || 50;
+  const totals = { indexed: 0, reindexed: 0, rounds: 0 };
+  let last = null;
+  for (let i = 0; i < maxRounds; i++) {
+    last = await vectorSync(options, deps);
+    totals.rounds += 1;
+    totals.indexed += last.indexed || 0;
+    totals.reindexed += last.reindexed || 0;
+    const progress = (last.indexed || 0) + (last.reindexed || 0) > 0;
+    if (!(last.skippedLimit > 0) || !progress) break;
+  }
+  return {
+    ...last,
+    rounds: totals.rounds,
+    indexedTotal: totals.indexed,
+    reindexedTotal: totals.reindexed,
+    drained: !(last?.skippedLimit > 0),
+  };
 }
 
 /**

@@ -7,8 +7,11 @@
  * child keeps its own config/auth; the composite only namespaces ids and routes.
  *
  * Project ids are namespaced `<backendKey>:<childProjectId>` (e.g. `github:owner/repo`,
- * `notion:db-1111`). Every returned Task is tagged with `source: <backendKey>` so
- * the originating backend is visible in results and deep links.
+ * `notion:db-1111`) and task ids `<backendKey>:<childTaskId>`, so two backends that
+ * emit the same raw task id can never collide in the fused ranking. Every returned
+ * Task is additionally tagged with `source: <backendKey>` so the originating backend
+ * is visible in results and deep links. Routing accepts both namespaced and raw
+ * task ids.
  *
  * Zero runtime deps.
  */
@@ -42,13 +45,34 @@ export function loadConfig() {
     .map((entry) => {
       if (typeof entry === 'string') {
         const pkg = entry.trim();
-        return pkg ? { package: pkg, key: backendKeyFor(pkg) } : null;
+        return pkg ? { package: pkg, key: backendKeyFor(pkg), trust: 'private' } : null;
       }
-      if (entry && entry.package) return { package: String(entry.package).trim(), key: entry.key || backendKeyFor(entry.package) };
+      if (entry && entry.package) {
+        return {
+          package: String(entry.package).trim(),
+          key: entry.key || backendKeyFor(entry.package),
+          // Trust level of the backend: content screening applies to writes
+          // routed to 'public' children. Unlisted/unknown values mean private.
+          trust: entry.trust === 'public' ? 'public' : 'private',
+        };
+      }
       return null;
     })
     .filter(Boolean);
-  return { specs };
+  // Redaction rules screen composite writes to public children. An invalid
+  // pattern fails LOUDLY: silently dropping a protective rule would weaken
+  // the boundary invisibly.
+  const redact = (Array.isArray(file.redact) ? file.redact : []).map((rule) => {
+    if (!rule || !rule.pattern) {
+      throw new Error('composite: each redact rule needs a "pattern" (and ideally a "label").');
+    }
+    try {
+      return { label: rule.label || rule.pattern, regex: new RegExp(rule.pattern, rule.flags ?? 'i') };
+    } catch (error) {
+      throw new Error(`composite: invalid redact pattern "${rule.label || rule.pattern}": ${error.message}`, { cause: error });
+    }
+  });
+  return { specs, redact };
 }
 
 /** Derive a short backend key from a package name or path: `@reneza/ats-adapter-github` -> `github`. */
@@ -76,7 +100,7 @@ export async function loadChildren(cfg = loadConfig()) {
       const mod = await import(spec.package);
       const adapter = mod.default || mod.adapter || mod;
       if (adapter && typeof adapter.listProjects === 'function') {
-        children.push({ key, package: spec.package, adapter });
+        children.push({ key, package: spec.package, trust: spec.trust || 'private', adapter });
       }
     } catch {
       // child not installed / failed to import — skip it
@@ -91,6 +115,16 @@ export function makeProjectId(key, childProjectId) {
   return `${key}${SEP}${childProjectId}`;
 }
 
+export function makeTaskId(key, childTaskId) {
+  return `${key}${SEP}${childTaskId}`;
+}
+
+/** Strip this child's namespace from a task id; raw/foreign ids pass through. */
+export function childTaskIdFor(key, taskId) {
+  const s = String(taskId);
+  return s.startsWith(`${key}${SEP}`) ? s.slice(String(key).length + 1) : s;
+}
+
 /** Split a namespaced project id back into { key, childProjectId }. */
 export function splitProjectId(projectId) {
   const s = String(projectId);
@@ -99,11 +133,17 @@ export function splitProjectId(projectId) {
   return { key: s.slice(0, i), childProjectId: s.slice(i + 1) };
 }
 
-/** Re-stamp a child's Task so its projectId is namespaced and its backend is tagged. */
+/**
+ * Re-stamp a child's Task so its ids are namespaced and its backend is tagged.
+ * The task id is namespaced too: fusion keys identity by id, so raw ids that
+ * repeat across backends (two stores both counting 1, 2, 3...) would otherwise
+ * merge into one result.
+ */
 export function remapTask(key, task) {
   if (!task) return task;
   return {
     ...task,
+    id: makeTaskId(key, task.id),
     projectId: makeProjectId(key, task.projectId),
     source: key,
   };

@@ -55,9 +55,36 @@ claude mcp add ats -e ATS_ADAPTER=@reneza/ats-adapter-composite -- ats-mcp
 | ATS        | Composite                                                        |
 | ---------- | --------------------------------------------------------------- |
 | Project    | a child project, id namespaced `<backend>:<projectId>` (e.g. `github:owner/repo`, `notion:db-1111`) |
-| Task       | a child record, re-stamped with `source: <backend>`             |
+| Task       | a child record, id namespaced `<backend>:<taskId>`, re-stamped with `source: <backend>` |
 | `find`     | `bulkFetch()` concatenates every child's corpus → Core runs hybrid + RRF over the union |
 | writes     | routed to the child named by the project id's `<backend>:` prefix |
+
+## Trust levels and redaction
+
+Backends differ in who can read them. Mark a child `"trust": "public"` and give
+the composite redaction rules, and any `createTask`/`updateTask` routed to that
+child is screened first — a match **blocks the write with a clear error** (never
+a silent strip), so content an agent picked up from a private backend cannot
+flow into a public one through ATS unnoticed:
+
+```json
+{
+  "adapters": [
+    { "package": "@reneza/ats-adapter-ticktick", "trust": "private" },
+    { "package": "@reneza/ats-adapter-github", "trust": "public" }
+  ],
+  "redact": [
+    { "label": "street address", "pattern": "\\b\\d{1,4}\\s+[A-Za-z]+\\s+(Street|St|Ave|Road|Rd)\\b" },
+    { "label": "internal hostname", "pattern": "\\b[a-z0-9-]+\\.internal\\b" }
+  ]
+}
+```
+
+`trust` defaults to `private` (no screening between private backends). An
+invalid pattern fails loudly at load — a protective rule is never dropped
+silently. Scope honestly: this guards the composite's **own write path**; a
+client that calls a child adapter directly bypasses it, and it is not
+general data-loss prevention.
 
 ## FAQ
 

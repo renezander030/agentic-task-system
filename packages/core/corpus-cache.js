@@ -13,6 +13,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
 
 const CACHE_PATH = process.env.ATS_CORPUS_CACHE ||
   path.join(os.homedir(), '.config', 'ats', 'corpus-cache.json');
@@ -45,18 +46,43 @@ export function read() {
 }
 
 /**
- * Persist corpus + timestamp.
+ * Persist corpus + timestamp. An optional sync cursor (from an adapter's
+ * `bulkFetchDelta`) rides along so the next delta sync can resume from it.
  */
-export function write(tasks) {
+export function write(tasks, { cursor = null } = {}) {
   if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return;
   ensureDir();
   try {
-    fs.writeFileSync(
-      CACHE_PATH,
-      JSON.stringify({ timestamp: Date.now(), count: tasks.length, tasks }),
-      { mode: 0o600 }
-    );
+    // Atomic replace under the cache lock: concurrent `ats` processes finishing
+    // a fetch at the same time must not interleave into a torn cache file.
+    withLockSync(CACHE_PATH, () => {
+      writeFileAtomicSync(
+        CACHE_PATH,
+        JSON.stringify({
+          timestamp: Date.now(),
+          count: tasks.length,
+          ...(cursor != null ? { cursor } : {}),
+          tasks,
+        })
+      );
+    }, { label: 'corpus cache' });
   } catch {}
+}
+
+/**
+ * Read the cached corpus regardless of TTL — for delta sync, which updates a
+ * stale cache instead of discarding it. Returns null when missing/corrupt.
+ */
+export function readAny() {
+  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
+  try {
+    if (!fs.existsSync(CACHE_PATH)) return null;
+    const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+    if (!Array.isArray(parsed.tasks)) return null;
+    return { tasks: parsed.tasks, timestamp: parsed.timestamp ?? null, cursor: parsed.cursor ?? null };
+  } catch {
+    return null;
+  }
 }
 
 export function meta() {

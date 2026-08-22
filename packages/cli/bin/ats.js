@@ -27,6 +27,9 @@ import {
   getOpenHelp,
   getConfigHelp,
   getCacheHelp,
+  getReviewHelp,
+  getStateHelp,
+  getKgHelp,
   getBenchHelp,
   getCompletionHelp,
   getEventsHelp,
@@ -78,7 +81,27 @@ import {
   collectAndSpoolTaskEvents,
   normalizeTaskBody,
   TRIAGE_TAG,
+  syncCorpusCache,
+  stageReviewItem,
+  listReviewItems,
+  findReviewItem,
+  decideReviewItem,
+  markReviewItemApplied,
+  writeRequiresApproval,
+  exportState,
+  importState,
+  gardenSweep,
+  formatGarden,
+  loadFacts,
+  proposeFact,
+  proposeRetract,
+  ratifyFactItem,
+  listKgFacts,
+  askFacts,
+  kgStats,
+  exportFactsCypher,
 } from '@reneza/ats-core';
+import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
 import { resolveOpen, formatOpenResult, launchUrl, shouldLaunch } from '../open.js';
@@ -222,9 +245,25 @@ async function main() {
         args.subcommand = 'analyze-usage';
         handleBench();
         return;
+      case 'review':
+        result = await handleReview();
+        break;
+      case 'state':
+        result = await handleState();
+        break;
+      case 'agent-setup':
+        result = await handleAgentSetup();
+        break;
       case 'dedup':
-        await handleDedup();
-        return;
+        result = await handleDedup();
+        if (result === undefined) return;
+        break;
+      case 'garden':
+        result = await handleGarden();
+        break;
+      case 'kg':
+        result = await handleKg();
+        break;
       case 'fmt':
         handleFmt();
         return;
@@ -370,6 +409,9 @@ function helpFor(command) {
     case 'open': return getOpenHelp();
     case 'config': return getConfigHelp();
     case 'cache': return getCacheHelp();
+    case 'review': return getReviewHelp();
+    case 'state': return getStateHelp();
+    case 'kg': return getKgHelp();
     case 'bench': return getBenchHelp();
     case 'completion': return getCompletionHelp();
     case 'events': return getEventsHelp();
@@ -391,7 +433,7 @@ function helpFor(command) {
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
-  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth',
+  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'agent-setup', 'garden', 'kg',
   'projects', 'tasks', 'notes', 'help', 'completion', 'undo',
 ];
 
@@ -519,12 +561,24 @@ async function handleAdapter() {
 async function handleCache() {
   const adapter = await loadAdapter();
   const cache = adapter.__ext?.cache;
-  if (!cache) throw new Error("'ats cache' is not supported by the active adapter.");
+  // Adapters with their own centralized cache (e.g. ticktick-cache) keep it;
+  // every other adapter gets Core's corpus cache, so `ats cache sync` works
+  // everywhere instead of erroring on adapters without a cache extension.
   switch (args.subcommand) {
-    case 'status': return cache.status();
-    case 'sync': return cache.sync();
+    case 'status': {
+      if (cache?.status) return cache.status();
+      return corpusMeta();
+    }
+    case 'sync': {
+      if (cache?.sync) return cache.sync();
+      return syncCorpusCache(adapter, { full: !!args.options.full });
+    }
+    case 'clear': {
+      if (cache?.clear) return cache.clear();
+      return { cleared: corpusClear() };
+    }
     default:
-      console.log('Usage: ats cache <status|sync>');
+      console.log('Usage: ats cache <status|sync|clear>  (sync takes --full to skip delta)');
   }
 }
 
@@ -561,8 +615,63 @@ function handleBench() {
 // `ats dedup [--threshold 0.6] [--max-corpus N] [--no-cache] [--json]` — scan the
 // corpus for near-duplicate (and disagreeing) tasks so an agent can link/merge
 // them instead of recalling contradictory copies. Detection only; it never edits.
+// "project/task" ref — split on the LAST slash so namespaced project ids
+// that contain slashes (github:owner/repo) survive.
+function splitTaskRef(ref) {
+  const i = String(ref).lastIndexOf('/');
+  if (i <= 0 || i === ref.length - 1) throw new Error(`Expected PROJECT/TASK, got "${ref}".`);
+  return [ref.slice(0, i), ref.slice(i + 1)];
+}
+
 async function handleDedup() {
   const adapter = await loadAdapter();
+  if (args.subcommand === 'apply') {
+    // Turn a detected cluster into typed links (and optionally close the
+    // duplicates) through the normal write path: ledgered, undoable, and
+    // subject to the review gate like any other write.
+    const keep = args.options.keep;
+    const dupes = tagsToArray(args.options.dupes);
+    if (!keep || !dupes?.length) {
+      console.error('Usage: ats dedup apply --keep PROJECT/TASK --dupes PROJECT/TASK,... [--type supersedes|conflicts-with] [--close]');
+      process.exit(1);
+    }
+    const type = args.options.type || 'supersedes';
+    const [keepProject, keepTask] = splitTaskRef(keep);
+    const t = adapter.__ext?.tasks;
+    const applied = [];
+    for (const dupe of dupes) {
+      const [dupeProject, dupeTask] = splitTaskRef(dupe);
+      const link = await addTaskLink(
+        adapter,
+        { projectId: keepProject, taskId: keepTask },
+        { projectId: dupeProject, taskId: dupeTask },
+        type,
+        {}
+      );
+      auditCliWrite('task.link.added', link, { projectId: keepProject, taskId: keepTask }, {
+        type,
+        target: { projectId: dupeProject, taskId: dupeTask },
+        via: 'dedup-apply',
+      });
+      const entry = { dupe, linked: type };
+      if (args.options.close) {
+        let current;
+        try { current = t?.get ? await t.get(dupeProject, dupeTask) : await adapter.getTask(dupeProject, dupeTask); } catch { current = null; }
+        const gate = reviewGate('task.completed', current, { projectId: dupeProject, taskId: dupeTask });
+        if (gate) {
+          entry.closed = `staged for review: ${gate.reviewId.slice(0, 8)}`;
+        } else if (t?.complete) {
+          const result = await t.complete(dupeProject, dupeTask);
+          auditCliWrite('task.completed', result, { projectId: dupeProject, taskId: dupeTask }, { via: 'dedup-apply' }, true);
+          entry.closed = true;
+        } else {
+          entry.closed = 'adapter cannot complete tasks';
+        }
+      }
+      applied.push(entry);
+    }
+    return { keep, type, applied };
+  }
   const { corpus } = await coreLoadCorpus(adapter, { cache: !args.options['no-cache'] });
   const threshold = args.options.threshold !== undefined ? parseFloat(args.options.threshold) : 0.6;
   const report = detectDuplicates(corpus, {
@@ -573,12 +682,25 @@ async function handleDedup() {
     console.log(JSON.stringify(report, null, 2));
   } else {
     console.log(formatDedup(report));
+    console.log('\nAct on a cluster: ats dedup apply --keep P/T --dupes P/T,... [--close]');
   }
+  return undefined;
+}
+
+async function handleGarden() {
+  const adapter = await loadAdapter();
+  const { corpus } = await coreLoadCorpus(adapter, { cache: !args.options['no-cache'] });
+  const report = gardenSweep(corpus, {
+    staleDays: parseInt(args.options['stale-days']) || 60,
+    limit: parseInt(args.options.limit) || 50,
+  });
+  if (args.options.format === 'json') return report;
+  return { __raw: formatGarden(report) };
 }
 
 async function handleSync() {
   if (args.subcommand !== 'vector') {
-    console.log('Usage: ats sync vector [--full] [--max N]');
+    console.log('Usage: ats sync vector [--full] [--max N] [--all]');
     return;
   }
   args.subcommand = 'vector-sync';
@@ -675,7 +797,7 @@ function taskRefFromResult(result, fallback = {}) {
   };
 }
 
-function auditCliWrite(action, result, fallback, metadata, advanced = false, before = undefined) {
+function auditCliWrite(action, result, fallback, metadata, advanced = false, before = undefined, approvals = undefined) {
   const task = taskRefFromResult(result, fallback);
   if (!task.projectId || !task.taskId) return;
   try {
@@ -686,9 +808,288 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false, bef
       advanced,
       metadata,
       ...(before !== undefined ? { before } : {}),
+      ...(approvals ? { approvals } : {}),
     });
   } catch (err) {
     console.error(`Warning: action ledger write failed: ${err.message}`);
+  }
+}
+
+// Enforcement half of the declared approval metadata: a write whose target
+// carries intent.approvalRequired (or lists the action / generic 'write' in
+// security.approvalRequiredFor), or ANY write when ATS_REVIEW_ALL=1, stages
+// into the review queue instead of reaching the backend. The gate reads the
+// target's metadata; an unreadable target is not gated — set ATS_REVIEW_ALL
+// for a hard gate.
+function reviewGate(action, currentTask, payload) {
+  const forced = process.env.ATS_REVIEW_ALL === '1';
+  if (!forced && !writeRequiresApproval(currentTask, action)) return null;
+  const item = stageReviewItem({
+    kind: 'task.write',
+    payload: { action, ...payload },
+    by: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+    note: forced ? 'staged by ATS_REVIEW_ALL' : 'approvalRequired on target',
+  });
+  return {
+    staged: true,
+    reviewId: item.id,
+    action,
+    message: `Write staged for review as ${item.id.slice(0, 8)}. Decide with: ats review approve ${item.id.slice(0, 8)}  (then: ats review apply --all)`,
+  };
+}
+
+const summarizeReviewItem = (i) => ({
+  id: i.id.slice(0, 8),
+  kind: i.kind,
+  action: i.payload?.action,
+  target: i.payload?.taskId ? `${i.payload.projectId}/${i.payload.taskId}` : (i.payload?.title || ''),
+  status: i.status,
+  stagedBy: i.stagedBy,
+  stagedAt: i.stagedAt,
+  ...(i.note ? { note: i.note } : {}),
+  ...(i.decidedBy ? { decidedBy: i.decidedBy } : {}),
+  ...(i.applyError ? { applyError: i.applyError } : {}),
+});
+
+async function applyReviewedWrite(item, adapter, t) {
+  const p = item.payload;
+  const approvals = [item.decidedBy].filter(Boolean);
+  switch (p.action) {
+    case 'task.updated': {
+      let before;
+      try {
+        const cur = t?.get ? await t.get(p.projectId, p.taskId) : await adapter.getTask(p.projectId, p.taskId);
+        before = snapshotTask(cur?.task || cur);
+      } catch { before = undefined; }
+      const result = t?.update
+        ? await t.update(p.projectId, p.taskId, p.patch)
+        : await adapter.updateTask(p.projectId, p.taskId, { ...p.patch, tags: tagsToArray(p.patch?.tags) });
+      auditCliWrite('task.updated', result, { projectId: p.projectId, taskId: p.taskId }, { fields: Object.keys(p.patch || {}), reviewId: item.id }, false, before, approvals);
+      return result;
+    }
+    case 'task.completed': {
+      const result = t?.complete ? await t.complete(p.projectId, p.taskId) : needsTaskExt('complete', 'complete');
+      auditCliWrite('task.completed', result, { projectId: p.projectId, taskId: p.taskId }, { reviewId: item.id }, true, undefined, approvals);
+      return result;
+    }
+    case 'task.deleted': {
+      const result = t?.remove ? await t.remove(p.projectId, p.taskId) : needsTaskExt('remove', 'delete');
+      auditCliWrite('task.deleted', result, { projectId: p.projectId, taskId: p.taskId }, { reviewId: item.id }, false, undefined, approvals);
+      return result;
+    }
+    case 'task.created': {
+      const result = t?.create
+        ? await t.create(p.projectId || '', p.title, p.opts || {})
+        : await adapter.createTask({
+          title: p.title,
+          projectId: p.projectId || undefined,
+          content: p.opts?.content,
+          dueDate: p.opts?.dueDate,
+          tags: tagsToArray(p.opts?.tags),
+        });
+      auditCliWrite('task.created', result, { projectId: p.projectId }, { title: p.title, reviewId: item.id }, false, undefined, approvals);
+      return result;
+    }
+    default:
+      throw new Error(`Unknown staged write action: ${p.action}`);
+  }
+}
+
+async function handleKg() {
+  const agentId = args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli';
+  switch (args.subcommand) {
+    case 'propose': {
+      const [subject, predicate, object] = args.positional;
+      if (!subject || !predicate || !object) {
+        console.error('Usage: ats kg propose SUBJECT PREDICATE OBJECT [--domain D --source REF --confidence low|medium|high --task PROJECT/TASK]');
+        process.exit(1);
+      }
+      let taskRef;
+      if (args.options.task) {
+        const [tp, tt] = splitTaskRef(args.options.task);
+        taskRef = { projectId: tp, taskId: tt };
+      }
+      const item = proposeFact({
+        subject, predicate, object,
+        domain: args.options.domain,
+        source: args.options.source,
+        confidence: args.options.confidence,
+        taskRef,
+        by: agentId,
+      });
+      return {
+        staged: true,
+        reviewId: item.id,
+        message: `Fact proposed as ${item.id.slice(0, 8)}. Ratify with: ats review approve ${item.id.slice(0, 8)} && ats kg ratify --all`,
+      };
+    }
+    case 'retract': {
+      if (!args.positional[0]) { console.error('Usage: ats kg retract FACT_ID [--reason "..."]'); process.exit(1); }
+      const item = proposeRetract({ factId: args.positional[0], reason: args.options.reason, by: agentId });
+      return {
+        staged: true,
+        reviewId: item.id,
+        message: `Retraction proposed as ${item.id.slice(0, 8)}. Ratify with: ats review approve ${item.id.slice(0, 8)} && ats kg ratify --all`,
+      };
+    }
+    case 'ratify': {
+      let targets;
+      if (args.options.all) {
+        targets = listReviewItems({ status: 'approved', kind: 'kg.fact' });
+      } else if (args.positional.length) {
+        targets = args.positional.map((id) => findReviewItem(id));
+      } else {
+        console.error('Usage: ats kg ratify <ID...|--all>   (approve first: ats review approve ID)');
+        process.exit(1);
+      }
+      const ratified = [];
+      for (const item of targets) {
+        try {
+          const outcome = ratifyFactItem(item);
+          const result = outcome.op === 'add' ? { factId: outcome.fact.id } : { retracted: outcome.factId };
+          markReviewItemApplied(item.id, { result });
+          ratified.push({ id: item.id.slice(0, 8), ok: true, ...result });
+        } catch (err) {
+          try { markReviewItemApplied(item.id, { error: err.message }); } catch {}
+          ratified.push({ id: item.id.slice(0, 8), ok: false, error: err.message });
+        }
+      }
+      return { ratified };
+    }
+    case 'ask': {
+      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted]'); process.exit(1); }
+      return askFacts(args.positional.join(' '), {
+        domain: args.options.domain,
+        limit: parseInt(args.options.limit) || 8,
+        includeRetracted: !!args.options['include-retracted'],
+      });
+    }
+    case 'facts':
+      return {
+        facts: listKgFacts({
+          domain: args.options.domain,
+          subject: args.options.subject,
+          predicate: args.options.predicate,
+          status: args.options.all ? 'all' : 'active',
+        }),
+      };
+    case 'stats':
+      return kgStats({ listReviewItems });
+    case 'export': {
+      if (args.options.cypher) return { __raw: exportFactsCypher({ domain: args.options.domain }) };
+      const { facts } = loadFacts();
+      const selected = args.options.domain ? facts.filter((f) => f.domain === args.options.domain) : facts;
+      return { __raw: JSON.stringify({ exportedAt: new Date().toISOString(), facts: selected }, null, 2) };
+    }
+    default:
+      console.log(getKgHelp());
+  }
+}
+
+async function handleState() {
+  switch (args.subcommand) {
+    case 'export': {
+      const bundle = exportState();
+      const out = args.options.out;
+      if (out && out !== '-') {
+        fs.writeFileSync(out, JSON.stringify(bundle, null, 2) + '\n', { mode: 0o600 });
+        return { exported: Object.keys(bundle.files).length, skippedMissing: bundle.skipped, out };
+      }
+      return { __raw: JSON.stringify(bundle, null, 2) };
+    }
+    case 'import': {
+      if (!args.positional[0]) { console.error('Usage: ats state import FILE [--force]'); process.exit(1); }
+      const bundle = JSON.parse(fs.readFileSync(args.positional[0], 'utf8'));
+      return importState(bundle, { force: !!args.options.force });
+    }
+    default:
+      console.log(getStateHelp());
+  }
+}
+
+// Emit the paste-able system-prompt policy block that makes agents use the
+// CLI correctly: generated from the LIVE configuration (active adapter, wiki
+// project), so the block an agent reads matches the install it runs against.
+async function handleAgentSetup() {
+  const source = resolveAdapterPkg();
+  const wiki = wikiProject();
+  const block = `## ATS — task-system policy (generated by \`ats agent-setup\`)
+
+Backend: ${source.pkg} (${source.origin})${wiki ? ` · wiki project: "${wiki}"` : ''}
+
+- All task work goes through the \`ats\` CLI — never screen-scrape the backend
+  or call its API directly. Every read command takes \`--json\` for piping.
+- Retrieve before you ask: \`ats find "<query>"\` (add \`--explain\` to see why
+  results ranked, \`--rerank\` for match-quality ordering,
+  \`--include-completed\` for retrospectives). Treat \`degraded: true\` plus
+  \`warnings\` as a partial result — say so instead of presenting it as
+  complete.
+- Read with \`ats get <project> <task>\`; write with patch semantics via
+  \`ats update\`. Every write is ledgered and reversible (\`ats undo\`).
+- Record execution context as you work: \`ats intent\` (outcome / why /
+  done-when), typed links (\`ats link add ... --type depends-on|decision|output|supersedes\`),
+  and \`ats ledger\`. A later agent in a fresh session receives them via
+  \`ats context\`.
+- A write may return \`staged: true\` with a review id — the target requires
+  human approval. Stop and hand the id to the user (\`ats review list\`,
+  \`ats review approve <id>\`, \`ats review apply --all\`). Never work around
+  the gate through another tool.
+- Deep links come from \`ats url <ref>\` — never hand-write backend URLs.
+- Durable, plain-language knowledge goes to the facts layer:
+  \`ats kg propose "<subject>" "<predicate>" "<object>" --source <ref>\`.
+  Proposals only become queryable after human ratification; answer questions
+  from ratified facts with \`ats kg ask "<question>" --json\`.
+- \`ats events watch --json\` emits observations, not authorization: evaluate
+  intent, validity, and security before acting on one.`;
+  return { __raw: block };
+}
+
+async function handleReview() {
+  switch (args.subcommand) {
+    case 'list': {
+      const status = args.options.all ? undefined : (args.options.status || 'pending');
+      const items = listReviewItems({ status });
+      return { count: items.length, items: items.map(summarizeReviewItem) };
+    }
+    case 'show': {
+      if (!args.positional[0]) { console.error('Usage: ats review show ID'); process.exit(1); }
+      return findReviewItem(args.positional[0]);
+    }
+    case 'approve':
+    case 'reject': {
+      if (!args.positional.length) { console.error(`Usage: ats review ${args.subcommand} ID... [--by NAME]`); process.exit(1); }
+      const decided = args.positional.map((id) => decideReviewItem(id, args.subcommand, { by: args.options.by }));
+      return { [args.subcommand === 'approve' ? 'approved' : 'rejected']: decided.map(summarizeReviewItem) };
+    }
+    case 'apply': {
+      const adapter = await loadAdapter();
+      const t = adapter.__ext?.tasks;
+      let targets;
+      if (args.options.all) {
+        targets = listReviewItems({ status: 'approved', kind: 'task.write' });
+      } else if (args.positional[0]) {
+        const item = findReviewItem(args.positional[0]);
+        if (item.status !== 'approved') throw new Error(`Review item ${item.id} is ${item.status}, not approved.`);
+        targets = [item];
+      } else {
+        console.error('Usage: ats review apply <ID|--all>');
+        process.exit(1);
+      }
+      const applied = [];
+      for (const item of targets) {
+        try {
+          const result = await applyReviewedWrite(item, adapter, t);
+          markReviewItemApplied(item.id, { result: taskRefFromResult(result, item.payload) });
+          applied.push({ id: item.id.slice(0, 8), ok: true });
+        } catch (err) {
+          markReviewItemApplied(item.id, { error: err.message });
+          applied.push({ id: item.id.slice(0, 8), ok: false, error: err.message });
+        }
+      }
+      return { applied };
+    }
+    default:
+      console.log(getReviewHelp());
   }
 }
 
@@ -859,6 +1260,10 @@ async function handleTasks() {
       // format-skip.txt projects keep the body verbatim (id-based match — a project
       // passed by NAME is not recognized by the skip).
       if (opts.content && !formatSkipped(projectId)) opts.content = normalizeTaskBody(opts.content).content;
+      // Creates have no target metadata to consult; they stage only under the
+      // global ATS_REVIEW_ALL=1 gate.
+      const createGate = reviewGate('task.created', null, { projectId, title, opts });
+      if (createGate) return createGate;
       const result = t?.create
         ? await t.create(projectId, title, opts)
         : await adapter.createTask({
@@ -904,10 +1309,13 @@ async function handleTasks() {
       if (patch.content !== undefined && !formatSkipped(args.positional[0])) patch.content = normalizeTaskBody(patch.content).content;
       // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
       let before;
+      let current = null;
       try {
-        const cur = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
-        before = snapshotTask(cur?.task || cur);
+        current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
+        before = snapshotTask(current?.task || current);
       } catch { before = undefined; }
+      const gate = reviewGate('task.updated', current, { projectId: args.positional[0], taskId: args.positional[1], patch });
+      if (gate) return gate;
       const result = t?.update
         ? await t.update(args.positional[0], args.positional[1], patch)
         : await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
@@ -916,12 +1324,24 @@ async function handleTasks() {
     }
     case 'complete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
+      let current = null;
+      if (process.env.ATS_REVIEW_ALL !== '1') {
+        try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
+      }
+      const gate = reviewGate('task.completed', current, { projectId: args.positional[0], taskId: args.positional[1] });
+      if (gate) return gate;
       const result = t?.complete ? await t.complete(args.positional[0], args.positional[1]) : needsTaskExt('complete', 'complete');
       auditCliWrite('task.completed', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, true);
       return result;
     }
     case 'delete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks delete PROJECT_ID TASK_ID'); process.exit(1); }
+      let current = null;
+      if (process.env.ATS_REVIEW_ALL !== '1') {
+        try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
+      }
+      const gate = reviewGate('task.deleted', current, { projectId: args.positional[0], taskId: args.positional[1] });
+      if (gate) return gate;
       const result = t?.remove ? await t.remove(args.positional[0], args.positional[1]) : needsTaskExt('remove', 'delete');
       auditCliWrite('task.deleted', result, { projectId: args.positional[0], taskId: args.positional[1] });
       return result;
@@ -934,6 +1354,7 @@ async function handleTasks() {
         explain: !!args.options.explain,
         rerank: !!args.options.rerank,
         rerankDepth: parseInt(args.options['rerank-depth']) || undefined,
+        includeCompleted: !!args.options['include-completed'],
       };
       // Rich adapters bring their own embedder-backed find; generic adapters get
       // core's storage-agnostic keyword + native + RRF fan-out over the contract.
@@ -987,8 +1408,15 @@ async function handleTasks() {
         endDate: args.options.to,
       }) : needsTaskExt('listCompleted', 'completed');
     }
-    case 'vector-sync':
-      return t?.vectorSync ? await t.vectorSync({ forceFull: !!args.options.full, maxEmbeddings: parseInt(args.options.max) || 200 }) : needsTaskExt('vectorSync', 'vector-sync');
+    case 'vector-sync': {
+      const opts = { forceFull: !!args.options.full, maxEmbeddings: parseInt(args.options.max) || 200 };
+      if (args.options.all) {
+        // Drain mode: loop rounds of the per-run embedding cap until the
+        // backfill is exhausted, instead of leaving the tail to manual reruns.
+        return t?.vectorSyncDrain ? await t.vectorSyncDrain(opts) : needsTaskExt('vectorSyncDrain', 'vector-sync');
+      }
+      return t?.vectorSync ? await t.vectorSync(opts) : needsTaskExt('vectorSync', 'vector-sync');
+    }
     case 'vector-status':
       return t?.vectorStatus ? await t.vectorStatus() : needsTaskExt('vectorStatus', 'vector-status');
     default:

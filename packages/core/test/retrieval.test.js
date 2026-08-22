@@ -269,6 +269,46 @@ test('find flags degraded + warns when a corpus source fails to load', async () 
   assert.equal(res.tasks[0].id, 't1');
 });
 
+test('find surfaces native-search sources the adapter could not read', async () => {
+  const adapter = {
+    listProjects: async () => [{ id: 'p1', name: 'Work' }],
+    listTasksInProject: async (pid) => [
+      { id: 't1', title: 'ffmpeg', content: 'video re-encode recipe', projectId: pid, tags: [], modifiedTime: NOW },
+    ],
+    searchByQuery: async () => {
+      // The adapter stamps per-call which sources its native search had to drop.
+      adapter.__searchWarnings = [{ source: 'Locked Project', error: '403 forbidden' }];
+      return [{ id: 't1', title: 'ffmpeg', content: '', projectId: 'p1' }];
+    },
+  };
+  const res = await find('ffmpeg', { adapter, cache: false });
+  assert.equal(res.degraded, true);
+  assert.ok(res.warnings.some((w) => w.includes('native search source') && w.includes('Locked Project') && w.includes('403')));
+  // The native branch itself still succeeded with partial results.
+  assert.ok(res.branches.some((b) => b.name === 'native' && b.ok));
+  assert.ok(res.tasks.length > 0);
+});
+
+test('find --include-completed appends completed history from the adapter', async () => {
+  const adapter = {
+    ...fakeAdapter,
+    listCompletedTasks: async () => [
+      { id: 'done1', title: 'ffmpeg migration retro', content: 'finished', projectId: 'p1', tags: [] },
+    ],
+  };
+  const res = await find('ffmpeg', { adapter, cache: false, includeCompleted: true, limit: 10 });
+  const done = res.tasks.find((t) => t.id === 'done1');
+  assert.ok(done, 'completed task should be searchable');
+  assert.equal(done.status, 'completed');
+  assert.equal(res.degraded, false);
+});
+
+test('find --include-completed on an adapter without history warns instead of pretending', async () => {
+  const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false, includeCompleted: true });
+  assert.equal(res.degraded, true);
+  assert.ok(res.warnings.some((w) => w.includes('completed history is not supported')));
+});
+
 test('find is not degraded and omits warnings on a healthy run', async () => {
   const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false });
   assert.equal(res.degraded, false);

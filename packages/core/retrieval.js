@@ -148,6 +148,65 @@ export async function loadCorpus(adapter, { cache = true } = {}) {
   return { corpus, fromCache: false, ageMs: null, sourcesFailed };
 }
 
+/**
+ * Explicitly refresh the on-disk corpus cache (`ats cache sync`).
+ *
+ * When the adapter implements the optional `bulkFetchDelta({ cursor, since })`
+ * hook and a cached corpus exists (fresh or stale), only changes are fetched
+ * and applied as whole-task replacements over the prior corpus — items are
+ * replaced or removed by id, never field-merged, which is how stale-cache
+ * corruption starts. Otherwise a full fetch runs; a partial full fetch
+ * (sourcesFailed non-empty) is reported and NOT cached.
+ *
+ * bulkFetchDelta contract: `({ cursor, since }) -> { tasks: Task[],
+ * removedIds?: string[], cursor?: any } | null`. `cursor` is whatever the
+ * adapter returned last time (persisted with the cache); `since` is the cache
+ * timestamp (ms epoch). Returning null requests a full refresh.
+ *
+ * @param {object} adapter
+ * @param {{full?: boolean}} [opts] - force a full refresh
+ */
+export async function syncCorpusCache(adapter, { full = false } = {}) {
+  const t0 = Date.now();
+  if (!full && adapter && typeof adapter.bulkFetchDelta === 'function') {
+    const prior = corpusCache.readAny();
+    if (prior) {
+      const delta = await adapter.bulkFetchDelta({ cursor: prior.cursor, since: prior.timestamp });
+      if (delta && Array.isArray(delta.tasks)) {
+        const removed = new Set(delta.removedIds || []);
+        const byId = new Map();
+        for (const t of prior.tasks) {
+          if (!removed.has(t.id)) byId.set(t.id, t);
+        }
+        for (const t of delta.tasks) byId.set(t.id, t);
+        const corpus = [...byId.values()];
+        corpusCache.write(corpus, { cursor: delta.cursor ?? prior.cursor ?? null });
+        return {
+          mode: 'delta',
+          size: corpus.length,
+          changed: delta.tasks.length,
+          removed: removed.size,
+          cached: true,
+          sourcesFailed: [],
+          elapsedMs: Date.now() - t0,
+          path: corpusCache.cachePath,
+        };
+      }
+    }
+  }
+  const { corpus, sourcesFailed } = await loadCorpus(adapter, { cache: false });
+  const cached = sourcesFailed.length === 0;
+  if (cached) corpusCache.write(corpus);
+  return {
+    mode: 'full',
+    size: corpus.length,
+    cached,
+    sourcesFailed,
+    elapsedMs: Date.now() - t0,
+    path: corpusCache.cachePath,
+  };
+}
+
 /** Built-in substring keyword retriever. Pure CPU over the corpus. */
 function keywordBranch(query, corpus, { limit = 20 } = {}) {
   const lower = (query || '').toLowerCase();
@@ -174,6 +233,7 @@ function keywordBranch(query, corpus, { limit = 20 } = {}) {
       projectName: t.projectName,
       tags: t.tags,
       dueDate: t.dueDate,
+      ...(t.status !== undefined ? { status: t.status } : {}),
     }));
 }
 
@@ -347,6 +407,7 @@ export async function find(query, cfg = {}) {
     candidatesPerSource = 20,
     includeKeyword = true,
     includeNative = true,
+    includeCompleted = false,
     explain = false,
     rerank = false,
     rerankDepth,
@@ -383,8 +444,35 @@ export async function find(query, cfg = {}) {
       tasks: [],
     };
   }
-  const { corpus, fromCache, ageMs } = corpusInfo;
+  let { corpus } = corpusInfo;
+  const { fromCache, ageMs } = corpusInfo;
   const sourcesFailed = corpusInfo.sourcesFailed || [];
+
+  // Completed-task history: appended per query AFTER the corpus load, so the
+  // shared corpus cache never absorbs completed items. Retrospective queries
+  // ("what was actually done") need them; everyday queries stay lean.
+  const completedWarnings = [];
+  if (includeCompleted) {
+    if (adapter && typeof adapter.listCompletedTasks === 'function') {
+      try {
+        const done = (await adapter.listCompletedTasks({})) || [];
+        const seen = new Set(corpus.map((t) => t.id));
+        const extra = done
+          .filter((t) => t && t.id && !seen.has(t.id))
+          .map((t) => ({ ...t, status: t.status || 'completed' }));
+        corpus = corpus.concat(extra);
+        // A multi-source adapter records children whose history it could not
+        // read (or that cannot answer at all) — surface them.
+        for (const w of adapter.__completedWarnings || []) {
+          completedWarnings.push(`completed history source "${w.source}": ${w.error}`);
+        }
+      } catch (err) {
+        completedWarnings.push(`completed history failed to load: ${err.message}`);
+      }
+    } else {
+      completedWarnings.push('completed history is not supported by this adapter');
+    }
+  }
 
   // Assemble branches. Branches are pure CPU over the shared corpus (plus the
   // optional hybrid call), so we can always run them all in parallel.
@@ -406,6 +494,7 @@ export async function find(query, cfg = {}) {
               content: t.content,
               projectId: t.projectId,
               projectName: t.project ?? t.projectName,
+              ...(t.status !== undefined ? { status: t.status } : {}),
             }))
           ),
     });
@@ -484,10 +573,17 @@ export async function find(query, cfg = {}) {
   }));
 
   // Roll partial failures up into one signal the caller can branch on without
-  // hand-walking `branches`: a dropped corpus source, or a retrieval branch that
-  // errored/timed out, means the result set is incomplete — say so.
+  // hand-walking `branches`: a dropped corpus source, a native-search source the
+  // adapter could not read (adapter.__searchWarnings, stamped per call), or a
+  // retrieval branch that errored/timed out, means the result set is incomplete
+  // — say so.
+  const nativeWarnings = branchDefs.some((b) => b.name === 'native') && Array.isArray(adapter?.__searchWarnings)
+    ? adapter.__searchWarnings
+    : [];
   const warnings = [
     ...sourcesFailed.map((s) => `source "${s.name || s.source}" failed to load: ${s.error}`),
+    ...completedWarnings,
+    ...nativeWarnings.map((w) => `native search source "${w.source}" failed: ${w.error}`),
     ...settled.filter((b) => !b.ok).map((b) => `retrieval branch "${b.name}" failed: ${b.error}`),
   ];
   const degraded = warnings.length > 0;

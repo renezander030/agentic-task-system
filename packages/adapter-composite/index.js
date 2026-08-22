@@ -19,16 +19,39 @@ import {
   loadChildren,
   makeProjectId,
   splitProjectId,
+  childTaskIdFor,
   remapTask,
   remapProject,
   childForProject,
 } from './api.js';
 
 /**
- * Build a composite adapter over a resolver that returns [{key, adapter}].
- * Exposed so tests (and embedders) can supply children directly.
+ * Content screen for writes crossing a trust boundary: a write routed to a
+ * child marked `trust: "public"` is checked against the configured redaction
+ * patterns and BLOCKED (never silently stripped) on a match. This guards the
+ * composite's own write path — content an agent read from a private backend
+ * cannot flow to a public one through ATS unnoticed.
  */
-export function buildAdapter(getChildren) {
+function screenOutboundWrite(redact, child, input) {
+  if (!redact?.length) return;
+  if ((child.trust || 'private') !== 'public') return;
+  const text = [input?.title, input?.content, ...(Array.isArray(input?.tags) ? input.tags : [])]
+    .filter(Boolean)
+    .join('\n');
+  if (!text) return;
+  for (const rule of redact) {
+    if (rule.regex.test(text)) {
+      throw new Error(`composite: write to public backend "${child.key}" blocked — content matches redaction pattern "${rule.label}"`);
+    }
+  }
+}
+
+/**
+ * Build a composite adapter over a resolver that returns [{key, adapter,
+ * trust?}]. Exposed so tests (and embedders) can supply children directly.
+ * `getPolicy` supplies `{ redact }` (defaults to the on-disk config).
+ */
+export function buildAdapter(getChildren, getPolicy = () => loadConfig()) {
   const settle = (arr) => Promise.allSettled(arr).then((rs) => rs.filter((r) => r.status === 'fulfilled').map((r) => r.value));
 
   const adapter = {
@@ -52,7 +75,7 @@ export function buildAdapter(getChildren) {
       const children = await getChildren();
       const { child, childProjectId, key } = childForProject(children, projectId);
       if (!child) throw new Error(`composite: no child backend "${key}" for project "${projectId}"`);
-      const t = await child.adapter.getTask(childProjectId, taskId);
+      const t = await child.adapter.getTask(childProjectId, childTaskIdFor(key, taskId));
       return remapTask(key, t);
     },
 
@@ -61,6 +84,7 @@ export function buildAdapter(getChildren) {
       if (!input.projectId) throw new Error('composite createTask: projectId is required (namespaced "<backend>:<projectId>")');
       const { child, childProjectId, key } = childForProject(children, input.projectId);
       if (!child) throw new Error(`composite: no child backend "${key}"`);
+      screenOutboundWrite(getPolicy().redact, child, input);
       const t = await child.adapter.createTask({ ...input, projectId: childProjectId });
       return remapTask(key, t);
     },
@@ -70,7 +94,8 @@ export function buildAdapter(getChildren) {
       const { child, childProjectId, key } = childForProject(children, projectId);
       if (!child) throw new Error(`composite: no child backend "${key}" for project "${projectId}"`);
       const next = patch && patch.projectId ? { ...patch, projectId: splitProjectId(patch.projectId).childProjectId } : patch;
-      const t = await child.adapter.updateTask(childProjectId, taskId, next);
+      screenOutboundWrite(getPolicy().redact, child, next);
+      const t = await child.adapter.updateTask(childProjectId, childTaskIdFor(key, taskId), next);
       return remapTask(key, t);
     },
 
@@ -78,11 +103,12 @@ export function buildAdapter(getChildren) {
       // Synchronous per the contract: parse the key, find the child synchronously
       // from the last-resolved set, fall back to a generic string if unknown.
       const { key, childProjectId } = splitProjectId(projectId);
+      const childTaskId = childTaskIdFor(key, taskId);
       const child = (adapter.__children || []).find((c) => c.key === key);
       if (child && typeof child.adapter.urlFor === 'function') {
-        return child.adapter.urlFor({ projectId: childProjectId, taskId });
+        return child.adapter.urlFor({ projectId: childProjectId, taskId: childTaskId });
       }
-      return `ats://${key || 'composite'}/${childProjectId}/${taskId}`;
+      return `ats://${key || 'composite'}/${childProjectId}/${childTaskId}`;
     },
 
     // ---- optional: this is what makes `ats find` fuse across backends ----------
@@ -94,9 +120,17 @@ export function buildAdapter(getChildren) {
       const corpora = await Promise.all(
         children.map(async (c) => {
           try {
-            const tasks = typeof c.adapter.bulkFetch === 'function'
-              ? await c.adapter.bulkFetch()
-              : await fallbackFetch(c.adapter);
+            let tasks;
+            if (typeof c.adapter.bulkFetch === 'function') {
+              tasks = await c.adapter.bulkFetch();
+              // A child that reports its own partial fetch (e.g. a nested
+              // multi-source adapter) bubbles up namespaced.
+              for (const w of c.adapter.__fetchWarnings || []) {
+                adapter.__fetchWarnings.push({ source: `${c.key}:${w.source}`, error: w.error });
+              }
+            } else {
+              tasks = await fallbackFetch(c.adapter, c.key, adapter.__fetchWarnings);
+            }
             return (tasks || []).map((t) => remapTask(c.key, t));
           } catch (e) {
             // A child backend that fails must not vanish from the fused corpus
@@ -113,12 +147,46 @@ export function buildAdapter(getChildren) {
 
     async searchByQuery(query) {
       const children = await getChildren();
-      const hits = await settle(
+      adapter.__searchWarnings = [];
+      const hits = await Promise.all(
         children
           .filter((c) => typeof c.adapter.searchByQuery === 'function')
-          .map((c) => c.adapter.searchByQuery(query).then((r) => (r || []).map((t) => remapTask(c.key, t))))
+          .map((c) => c.adapter.searchByQuery(query)
+            .then((r) => {
+              // A child that reports partial native results bubbles up namespaced.
+              for (const w of c.adapter.__searchWarnings || []) {
+                adapter.__searchWarnings.push({ source: `${c.key}:${w.source}`, error: w.error });
+              }
+              return (r || []).map((t) => remapTask(c.key, t));
+            })
+            .catch((e) => {
+              // A child whose native search fails must not shrink the branch
+              // silently — record it for the retrieval layer's warnings.
+              adapter.__searchWarnings.push({ source: c.key, error: e.message });
+              return [];
+            }))
       );
       return hits.flat();
+    },
+
+    async listCompletedTasks(opts = {}) {
+      const children = await getChildren();
+      adapter.__completedWarnings = [];
+      const lists = await Promise.all(children.map(async (c) => {
+        if (typeof c.adapter.listCompletedTasks !== 'function') {
+          // Retrospectives must say which backend cannot answer, not just
+          // return the union of the ones that can.
+          adapter.__completedWarnings.push({ source: c.key, error: 'completed history not supported' });
+          return [];
+        }
+        try {
+          return ((await c.adapter.listCompletedTasks(opts)) || []).map((t) => remapTask(c.key, t));
+        } catch (e) {
+          adapter.__completedWarnings.push({ source: c.key, error: e.message });
+          return [];
+        }
+      }));
+      return lists.flat();
     },
 
     // ---- auth: aggregate across children --------------------------------------
@@ -157,28 +225,32 @@ export function buildAdapter(getChildren) {
 
     __children: [],
     __fetchWarnings: [],
+    __searchWarnings: [],
+    __completedWarnings: [],
   };
 
   return adapter;
 }
 
-async function fallbackFetch(child) {
+async function fallbackFetch(child, key, warnings) {
   const projects = await child.listProjects();
   const out = [];
   for (const p of projects || []) {
     try {
       const tasks = await child.listTasksInProject(p.id);
       out.push(...(tasks || []));
-    } catch {
-      /* skip a project that fails */
+    } catch (e) {
+      // A project that fails to list must leave a trace: the retrieval layer
+      // rolls these into `warnings` instead of serving a silently smaller corpus.
+      warnings.push({ source: `${key}:${p.id}`, error: e.message });
     }
   }
   return out;
 }
 
 /** Build composite children directly (used by tests/embedders). */
-export function createComposite(children) {
-  return buildAdapter(async () => children);
+export function createComposite(children, policy = { redact: [] }) {
+  return buildAdapter(async () => children, () => policy);
 }
 
 // Default export: lazily load children from config, memoized.

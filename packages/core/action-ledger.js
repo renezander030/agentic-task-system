@@ -2,14 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { withLock, withLockSync } from './fs-lock.js';
 
 export function actionLogPath() {
   const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   return process.env.ATS_ACTION_LOG || path.join(configBase, 'ats', 'action-log.jsonl');
 }
 
-export function recordAction(entry, { logPath = actionLogPath() } = {}) {
-  if (process.env.ATS_ACTION_DISABLE === '1') return null;
+function buildRecord(entry) {
   if (!entry || typeof entry !== 'object') throw new Error('Action ledger entry must be an object.');
   if (!entry.action || typeof entry.action !== 'string') throw new Error('Action ledger entry requires an action.');
   if (entry.task !== undefined && entry.task !== null && (
@@ -45,9 +45,21 @@ export function recordAction(entry, { logPath = actionLogPath() } = {}) {
   // Before-image: the pre-write snapshot that makes a write reversible via `ats undo`.
   // Only stored when supplied (updates), so the ledger stays lean for reads/creates.
   if (entry.before !== undefined) record.before = entry.before || null;
+  return record;
+}
+
+function appendRecordUnlocked(record, logPath) {
   fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
   fs.appendFileSync(logPath, JSON.stringify(record) + '\n', { mode: 0o600 });
   fs.chmodSync(logPath, 0o600);
+}
+
+export function recordAction(entry, { logPath = actionLogPath() } = {}) {
+  if (process.env.ATS_ACTION_DISABLE === '1') return null;
+  const record = buildRecord(entry);
+  // Locked append: before-image lines can exceed what the OS appends atomically,
+  // and the undo path's read-verify-append must not interleave with new writes.
+  withLockSync(logPath, () => appendRecordUnlocked(record, logPath), { label: 'action ledger' });
   return record;
 }
 
@@ -141,37 +153,59 @@ export function mostRecentUndoable({ logPath = actionLogPath() } = {}) {
  * @param {boolean} [opts.apply=true] - false = dry-run (return the plan, write nothing)
  * @returns {Promise<{plan:object, applied:boolean, result?:object, compensation?:object}>}
  */
-export async function revertAction(adapter, id, { logPath = actionLogPath(), apply = true } = {}) {
-  const records = actionsInAppendOrder({ logPath });
-  const target = id ? records.find((e) => e.id === id) : mostRecentUndoable({ logPath });
-  if (!target) throw new Error(id ? `No action ${id} in the ledger.` : 'No undoable write found in the ledger.');
+function planRevert(id, records) {
   const undone = revertedIds(records);
+  let target = null;
+  if (id) {
+    target = records.find((e) => e.id === id) || null;
+  } else {
+    for (let i = records.length - 1; i >= 0; i -= 1) {
+      if (undoableKind(records[i]) && !undone.has(records[i].id)) { target = records[i]; break; }
+    }
+  }
+  if (!target) throw new Error(id ? `No action ${id} in the ledger.` : 'No undoable write found in the ledger.');
   if (undone.has(target.id)) throw new Error(`Action ${target.id} was already undone.`);
   const kind = undoableKind(target);
   if (!kind) throw new Error(`Action ${target.id} (${target.action}) is not undoable — no before-image was captured.`);
-
-  const { projectId, taskId } = target.task;
   const plan = kind === 'restore'
     ? { op: 'restore', id: target.id, action: target.action, task: target.task, patch: target.before }
     : { op: 'delete', id: target.id, action: target.action, task: target.task };
-  if (!apply) return { plan, applied: false };
+  return { target, kind, plan };
+}
 
-  let result;
-  if (kind === 'restore') {
-    if (typeof adapter?.updateTask !== 'function') throw new Error('Adapter has no updateTask — cannot restore.');
-    result = await adapter.updateTask(projectId, taskId, target.before);
-  } else {
-    const del = typeof adapter?.deleteTask === 'function'
-      ? adapter.deleteTask.bind(adapter)
-      : adapter?.__ext?.tasks?.remove?.bind(adapter.__ext.tasks);
-    if (!del) throw new Error('Adapter cannot delete — a created task cannot be undone here. Delete it manually.');
-    result = await del(projectId, taskId);
+export async function revertAction(adapter, id, { logPath = actionLogPath(), apply = true } = {}) {
+  if (!apply) {
+    const { plan } = planRevert(id, actionsInAppendOrder({ logPath }));
+    return { plan, applied: false };
   }
-  const compensation = recordAction({
-    agent: process.env.ATS_AGENT_ID || 'ats-undo',
-    action: 'action.reverted',
-    task: target.task,
-    metadata: { revertedId: target.id, of: target.action, op: kind },
-  }, { logPath });
-  return { plan, applied: true, result, compensation };
+  // Undo is check-then-act across the ledger and the backend. The whole section
+  // holds the ledger lock so two concurrent undos of the same action can never
+  // both pass the already-undone check and double-apply. staleMs is generous
+  // because a slow adapter write must not get its lock stolen mid-undo.
+  return withLock(logPath, async () => {
+    const { target, kind, plan } = planRevert(id, actionsInAppendOrder({ logPath }));
+    const { projectId, taskId } = target.task;
+    let result;
+    if (kind === 'restore') {
+      if (typeof adapter?.updateTask !== 'function') throw new Error('Adapter has no updateTask — cannot restore.');
+      result = await adapter.updateTask(projectId, taskId, target.before);
+    } else {
+      const del = typeof adapter?.deleteTask === 'function'
+        ? adapter.deleteTask.bind(adapter)
+        : adapter?.__ext?.tasks?.remove?.bind(adapter.__ext.tasks);
+      if (!del) throw new Error('Adapter cannot delete — a created task cannot be undone here. Delete it manually.');
+      result = await del(projectId, taskId);
+    }
+    let compensation = null;
+    if (process.env.ATS_ACTION_DISABLE !== '1') {
+      compensation = buildRecord({
+        agent: process.env.ATS_AGENT_ID || 'ats-undo',
+        action: 'action.reverted',
+        task: target.task,
+        metadata: { revertedId: target.id, of: target.action, op: kind },
+      });
+      appendRecordUnlocked(compensation, logPath);
+    }
+    return { plan, applied: true, result, compensation };
+  }, { label: 'action ledger', staleMs: 120_000 });
 }

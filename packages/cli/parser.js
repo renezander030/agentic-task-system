@@ -435,6 +435,7 @@ Quick start:
   ats init ticktick                  # Select an adapter + health-check
   ats find "deployment runbook"      # Parallel retrieval over your store
   ats find "deployment runbook" --explain   # ...and show why each result ranked
+  ats find "release retro" --include-completed  # search completed history too
   ats open "deployment runbook"      # Jump straight to it in your task app
 
 Write an adapter for any store:
@@ -629,14 +630,82 @@ Environment:
 }
 
 export function getCacheHelp() {
-  return `ats cache — inspect or refresh the active adapter cache
+  return `ats cache — inspect or refresh the retrieval cache
 
 Usage:
   ats cache status
-  ats cache sync
+  ats cache sync [--full]
+  ats cache clear
 
-This command is available when the active adapter exposes centralized-cache
-operations. Generic filesystem adapters may not need it.`;
+Adapters with their own centralized cache handle these natively; for every
+other adapter the commands operate on Core's on-disk corpus cache. \`sync\`
+refetches and rewrites the cache on demand (cron-friendly) — incrementally
+when the adapter implements the optional bulkFetchDelta() hook, as a full
+refresh otherwise or with --full. A fetch with failing sources is reported
+and never cached as complete.`;
+}
+
+export function getReviewHelp() {
+  return `ats review — the staging queue for gated writes
+
+A write whose target task declares approval (\`intent.approvalRequired\`, or
+the action / generic "write" listed in \`security.approvalRequiredFor\`) —
+or ANY write while ATS_REVIEW_ALL=1 — stages here instead of reaching the
+backend. A human reviews and applies; applied writes go through the normal
+adapter path with the approver recorded in the action ledger, so they stay
+undoable like any other write.
+
+Usage:
+  ats review list [--all|--status S]    Pending items (default) or all
+  ats review show ID                    Full payload of one item
+  ats review approve ID... [--by NAME]  Approve pending items
+  ats review reject ID...  [--by NAME]  Reject pending items
+  ats review apply <ID|--all>           Execute approved writes
+
+Ids may be unambiguous prefixes. A failed apply keeps the item approved
+with its error recorded, ready to retry or reject.`;
+}
+
+export function getKgHelp() {
+  return `ats kg — durable facts beside your tasks (propose → review → ratify)
+
+An embedded, serverless facts store: subject–predicate–object with temporal
+validity and provenance, kept as an append-only log under your config dir.
+Nothing writes it except \`ratify\` — agents propose, a human approves, and
+every fact records who did both and from what source.
+
+Usage:
+  ats kg propose SUBJ PRED OBJ [--domain D --source REF --confidence C --task P/T]
+  ats kg retract FACT_ID [--reason "..."]   Retraction proposal — reviewed too
+  ats kg ratify <ID...|--all>               Write APPROVED proposals to the store
+  ats kg ask "QUESTION" [--domain D --limit N --include-retracted]
+                                            Zero-LLM lexical answers + provenance
+  ats kg facts [--domain D --subject S --all]
+  ats kg stats                              Size, domains, pending proposals
+  ats kg export [--cypher] [--domain D]     JSON, or a Cypher script for embedded
+                                            graph databases (LadybugDB / Kùzu)
+
+Fact proposals share the review queue: ats review list / approve / reject
+work on them (kind kg.fact). A retracted fact keeps its validity interval,
+so "what did we believe then" stays answerable. The store travels with
+\`ats state export\`.`;
+}
+
+export function getStateHelp() {
+  return `ats state — move ATS derived state between machines
+
+Usage:
+  ats state export [--out FILE]   Bundle the ledger, undo before-images,
+                                  review queue, event checkpoint + spool,
+                                  usage log, caches, and index metadata into
+                                  one JSON document (stdout by default)
+  ats state import FILE [--force] Restore a bundle. Existing files are kept
+                                  unless --force; import writes only to the
+                                  known state paths on THIS machine, never
+                                  to paths named inside the bundle.
+
+Credentials are never bundled: adapter configs, tokens, and .env files are
+outside the whitelist. Re-authenticate on the target machine.`;
 }
 
 export function getBenchHelp() {
@@ -872,7 +941,7 @@ Subcommands:
   due [days]                       Tasks due within N days (default: 7)
   priority                         High priority tasks
   completed                        List completed tasks in a date range
-  vector-sync                      Sync tasks into vector index
+  vector-sync [--all]              Sync tasks into vector index (--all drains the whole backfill)
   vector-status                    Check vector index health
 
 Create/Update options:
