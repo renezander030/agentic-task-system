@@ -137,7 +137,7 @@ ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 
 ## Tradeoffs and limits
 
-- **Freshness is adapter-dependent.** Core's corpus cache has a five-minute default TTL. Backend sync behavior, pagination, and inclusion of completed work vary by adapter; ATS does not promise universal real-time reads.
+- **Freshness is adapter-dependent.** Core's corpus cache has a five-minute default TTL. Backend sync behavior, pagination, and inclusion of completed work vary by adapter; ATS does not promise universal real-time reads. `ats cache sync` refreshes the cache on demand (cron-friendly) — incrementally when the adapter implements `bulkFetchDelta()`, as a full refetch otherwise.
 - **Dense retrieval adds infrastructure.** Qdrant and Ollama can improve semantic recall, but they add indexing, persistence, resource, and backup work. Baseline `find` still returns keyword/native results when vectors are unavailable, although an attempted vector branch can make the response degraded; vector-only `hybrid` and `similar` operations still require that infrastructure.
 - **The common contract is intentionally small.** The adapter interface defines six storage methods plus authentication lifecycle hooks, while practical write coverage, richer fields, and native search vary. Check the adapter README before assuming parity across backends.
 - **Degraded results are still partial results.** ATS reports failed or timed-out Core branches, dropped corpus sources — including per-project failures inside a composite fallback fetch and TickTick project fetches — and native-search sources a backend could not read. The caller must still decide whether partial context is acceptable; `warnings` says what is missing, not whether it mattered.

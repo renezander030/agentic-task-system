@@ -799,6 +799,35 @@ export async function vectorSync(options = {}, deps = {}) {
 }
 
 /**
+ * Run vectorSync repeatedly until the backfill is drained.
+ *
+ * Each round embeds at most `maxEmbeddings` (default 200) — the per-run cap
+ * that protects Ollama. Rounds continue while the previous round reported
+ * `skippedLimit > 0` AND made forward progress (indexed or reindexed
+ * something), so a wedged embedder cannot spin forever.
+ */
+export async function vectorSyncDrain(options = {}, deps = {}) {
+  const maxRounds = options.maxRounds || 50;
+  const totals = { indexed: 0, reindexed: 0, rounds: 0 };
+  let last = null;
+  for (let i = 0; i < maxRounds; i++) {
+    last = await vectorSync(options, deps);
+    totals.rounds += 1;
+    totals.indexed += last.indexed || 0;
+    totals.reindexed += last.reindexed || 0;
+    const progress = (last.indexed || 0) + (last.reindexed || 0) > 0;
+    if (!(last.skippedLimit > 0) || !progress) break;
+  }
+  return {
+    ...last,
+    rounds: totals.rounds,
+    indexedTotal: totals.indexed,
+    reindexedTotal: totals.reindexed,
+    drained: !(last?.skippedLimit > 0),
+  };
+}
+
+/**
  * Get vector index statistics.
  */
 export async function vectorStatus(deps = {}) {

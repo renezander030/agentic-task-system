@@ -148,6 +148,65 @@ export async function loadCorpus(adapter, { cache = true } = {}) {
   return { corpus, fromCache: false, ageMs: null, sourcesFailed };
 }
 
+/**
+ * Explicitly refresh the on-disk corpus cache (`ats cache sync`).
+ *
+ * When the adapter implements the optional `bulkFetchDelta({ cursor, since })`
+ * hook and a cached corpus exists (fresh or stale), only changes are fetched
+ * and applied as whole-task replacements over the prior corpus — items are
+ * replaced or removed by id, never field-merged, which is how stale-cache
+ * corruption starts. Otherwise a full fetch runs; a partial full fetch
+ * (sourcesFailed non-empty) is reported and NOT cached.
+ *
+ * bulkFetchDelta contract: `({ cursor, since }) -> { tasks: Task[],
+ * removedIds?: string[], cursor?: any } | null`. `cursor` is whatever the
+ * adapter returned last time (persisted with the cache); `since` is the cache
+ * timestamp (ms epoch). Returning null requests a full refresh.
+ *
+ * @param {object} adapter
+ * @param {{full?: boolean}} [opts] - force a full refresh
+ */
+export async function syncCorpusCache(adapter, { full = false } = {}) {
+  const t0 = Date.now();
+  if (!full && adapter && typeof adapter.bulkFetchDelta === 'function') {
+    const prior = corpusCache.readAny();
+    if (prior) {
+      const delta = await adapter.bulkFetchDelta({ cursor: prior.cursor, since: prior.timestamp });
+      if (delta && Array.isArray(delta.tasks)) {
+        const removed = new Set(delta.removedIds || []);
+        const byId = new Map();
+        for (const t of prior.tasks) {
+          if (!removed.has(t.id)) byId.set(t.id, t);
+        }
+        for (const t of delta.tasks) byId.set(t.id, t);
+        const corpus = [...byId.values()];
+        corpusCache.write(corpus, { cursor: delta.cursor ?? prior.cursor ?? null });
+        return {
+          mode: 'delta',
+          size: corpus.length,
+          changed: delta.tasks.length,
+          removed: removed.size,
+          cached: true,
+          sourcesFailed: [],
+          elapsedMs: Date.now() - t0,
+          path: corpusCache.cachePath,
+        };
+      }
+    }
+  }
+  const { corpus, sourcesFailed } = await loadCorpus(adapter, { cache: false });
+  const cached = sourcesFailed.length === 0;
+  if (cached) corpusCache.write(corpus);
+  return {
+    mode: 'full',
+    size: corpus.length,
+    cached,
+    sourcesFailed,
+    elapsedMs: Date.now() - t0,
+    path: corpusCache.cachePath,
+  };
+}
+
 /** Built-in substring keyword retriever. Pure CPU over the corpus. */
 function keywordBranch(query, corpus, { limit = 20 } = {}) {
   const lower = (query || '').toLowerCase();

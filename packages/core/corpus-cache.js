@@ -46,9 +46,10 @@ export function read() {
 }
 
 /**
- * Persist corpus + timestamp.
+ * Persist corpus + timestamp. An optional sync cursor (from an adapter's
+ * `bulkFetchDelta`) rides along so the next delta sync can resume from it.
  */
-export function write(tasks) {
+export function write(tasks, { cursor = null } = {}) {
   if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return;
   ensureDir();
   try {
@@ -57,10 +58,31 @@ export function write(tasks) {
     withLockSync(CACHE_PATH, () => {
       writeFileAtomicSync(
         CACHE_PATH,
-        JSON.stringify({ timestamp: Date.now(), count: tasks.length, tasks })
+        JSON.stringify({
+          timestamp: Date.now(),
+          count: tasks.length,
+          ...(cursor != null ? { cursor } : {}),
+          tasks,
+        })
       );
     }, { label: 'corpus cache' });
   } catch {}
+}
+
+/**
+ * Read the cached corpus regardless of TTL — for delta sync, which updates a
+ * stale cache instead of discarding it. Returns null when missing/corrupt.
+ */
+export function readAny() {
+  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
+  try {
+    if (!fs.existsSync(CACHE_PATH)) return null;
+    const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+    if (!Array.isArray(parsed.tasks)) return null;
+    return { tasks: parsed.tasks, timestamp: parsed.timestamp ?? null, cursor: parsed.cursor ?? null };
+  } catch {
+    return null;
+  }
 }
 
 export function meta() {

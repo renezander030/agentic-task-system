@@ -78,7 +78,9 @@ import {
   collectAndSpoolTaskEvents,
   normalizeTaskBody,
   TRIAGE_TAG,
+  syncCorpusCache,
 } from '@reneza/ats-core';
+import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
 import { resolveOpen, formatOpenResult, launchUrl, shouldLaunch } from '../open.js';
@@ -519,12 +521,24 @@ async function handleAdapter() {
 async function handleCache() {
   const adapter = await loadAdapter();
   const cache = adapter.__ext?.cache;
-  if (!cache) throw new Error("'ats cache' is not supported by the active adapter.");
+  // Adapters with their own centralized cache (e.g. ticktick-cache) keep it;
+  // every other adapter gets Core's corpus cache, so `ats cache sync` works
+  // everywhere instead of erroring on adapters without a cache extension.
   switch (args.subcommand) {
-    case 'status': return cache.status();
-    case 'sync': return cache.sync();
+    case 'status': {
+      if (cache?.status) return cache.status();
+      return corpusMeta();
+    }
+    case 'sync': {
+      if (cache?.sync) return cache.sync();
+      return syncCorpusCache(adapter, { full: !!args.options.full });
+    }
+    case 'clear': {
+      if (cache?.clear) return cache.clear();
+      return { cleared: corpusClear() };
+    }
     default:
-      console.log('Usage: ats cache <status|sync>');
+      console.log('Usage: ats cache <status|sync|clear>  (sync takes --full to skip delta)');
   }
 }
 
@@ -578,7 +592,7 @@ async function handleDedup() {
 
 async function handleSync() {
   if (args.subcommand !== 'vector') {
-    console.log('Usage: ats sync vector [--full] [--max N]');
+    console.log('Usage: ats sync vector [--full] [--max N] [--all]');
     return;
   }
   args.subcommand = 'vector-sync';
@@ -987,8 +1001,15 @@ async function handleTasks() {
         endDate: args.options.to,
       }) : needsTaskExt('listCompleted', 'completed');
     }
-    case 'vector-sync':
-      return t?.vectorSync ? await t.vectorSync({ forceFull: !!args.options.full, maxEmbeddings: parseInt(args.options.max) || 200 }) : needsTaskExt('vectorSync', 'vector-sync');
+    case 'vector-sync': {
+      const opts = { forceFull: !!args.options.full, maxEmbeddings: parseInt(args.options.max) || 200 };
+      if (args.options.all) {
+        // Drain mode: loop rounds of the per-run embedding cap until the
+        // backfill is exhausted, instead of leaving the tail to manual reruns.
+        return t?.vectorSyncDrain ? await t.vectorSyncDrain(opts) : needsTaskExt('vectorSyncDrain', 'vector-sync');
+      }
+      return t?.vectorSync ? await t.vectorSync(opts) : needsTaskExt('vectorSync', 'vector-sync');
+    }
     case 'vector-status':
       return t?.vectorStatus ? await t.vectorStatus() : needsTaskExt('vectorStatus', 'vector-status');
     default:

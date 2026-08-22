@@ -629,14 +629,19 @@ Environment:
 }
 
 export function getCacheHelp() {
-  return `ats cache — inspect or refresh the active adapter cache
+  return `ats cache — inspect or refresh the retrieval cache
 
 Usage:
   ats cache status
-  ats cache sync
+  ats cache sync [--full]
+  ats cache clear
 
-This command is available when the active adapter exposes centralized-cache
-operations. Generic filesystem adapters may not need it.`;
+Adapters with their own centralized cache handle these natively; for every
+other adapter the commands operate on Core's on-disk corpus cache. \`sync\`
+refetches and rewrites the cache on demand (cron-friendly) — incrementally
+when the adapter implements the optional bulkFetchDelta() hook, as a full
+refresh otherwise or with --full. A fetch with failing sources is reported
+and never cached as complete.`;
 }
 
 export function getBenchHelp() {
@@ -872,7 +877,7 @@ Subcommands:
   due [days]                       Tasks due within N days (default: 7)
   priority                         High priority tasks
   completed                        List completed tasks in a date range
-  vector-sync                      Sync tasks into vector index
+  vector-sync [--all]              Sync tasks into vector index (--all drains the whole backfill)
   vector-status                    Check vector index health
 
 Create/Update options:
