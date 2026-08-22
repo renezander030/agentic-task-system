@@ -27,6 +27,7 @@ import {
   getOpenHelp,
   getConfigHelp,
   getCacheHelp,
+  getReviewHelp,
   getBenchHelp,
   getCompletionHelp,
   getEventsHelp,
@@ -79,6 +80,12 @@ import {
   normalizeTaskBody,
   TRIAGE_TAG,
   syncCorpusCache,
+  stageReviewItem,
+  listReviewItems,
+  findReviewItem,
+  decideReviewItem,
+  markReviewItemApplied,
+  writeRequiresApproval,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -224,6 +231,9 @@ async function main() {
         args.subcommand = 'analyze-usage';
         handleBench();
         return;
+      case 'review':
+        result = await handleReview();
+        break;
       case 'dedup':
         await handleDedup();
         return;
@@ -372,6 +382,7 @@ function helpFor(command) {
     case 'open': return getOpenHelp();
     case 'config': return getConfigHelp();
     case 'cache': return getCacheHelp();
+    case 'review': return getReviewHelp();
     case 'bench': return getBenchHelp();
     case 'completion': return getCompletionHelp();
     case 'events': return getEventsHelp();
@@ -393,7 +404,7 @@ function helpFor(command) {
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
-  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth',
+  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review',
   'projects', 'tasks', 'notes', 'help', 'completion', 'undo',
 ];
 
@@ -689,7 +700,7 @@ function taskRefFromResult(result, fallback = {}) {
   };
 }
 
-function auditCliWrite(action, result, fallback, metadata, advanced = false, before = undefined) {
+function auditCliWrite(action, result, fallback, metadata, advanced = false, before = undefined, approvals = undefined) {
   const task = taskRefFromResult(result, fallback);
   if (!task.projectId || !task.taskId) return;
   try {
@@ -700,9 +711,139 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false, bef
       advanced,
       metadata,
       ...(before !== undefined ? { before } : {}),
+      ...(approvals ? { approvals } : {}),
     });
   } catch (err) {
     console.error(`Warning: action ledger write failed: ${err.message}`);
+  }
+}
+
+// Enforcement half of the declared approval metadata: a write whose target
+// carries intent.approvalRequired (or lists the action / generic 'write' in
+// security.approvalRequiredFor), or ANY write when ATS_REVIEW_ALL=1, stages
+// into the review queue instead of reaching the backend. The gate reads the
+// target's metadata; an unreadable target is not gated — set ATS_REVIEW_ALL
+// for a hard gate.
+function reviewGate(action, currentTask, payload) {
+  const forced = process.env.ATS_REVIEW_ALL === '1';
+  if (!forced && !writeRequiresApproval(currentTask, action)) return null;
+  const item = stageReviewItem({
+    kind: 'task.write',
+    payload: { action, ...payload },
+    by: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+    note: forced ? 'staged by ATS_REVIEW_ALL' : 'approvalRequired on target',
+  });
+  return {
+    staged: true,
+    reviewId: item.id,
+    action,
+    message: `Write staged for review as ${item.id.slice(0, 8)}. Decide with: ats review approve ${item.id.slice(0, 8)}  (then: ats review apply --all)`,
+  };
+}
+
+const summarizeReviewItem = (i) => ({
+  id: i.id.slice(0, 8),
+  kind: i.kind,
+  action: i.payload?.action,
+  target: i.payload?.taskId ? `${i.payload.projectId}/${i.payload.taskId}` : (i.payload?.title || ''),
+  status: i.status,
+  stagedBy: i.stagedBy,
+  stagedAt: i.stagedAt,
+  ...(i.note ? { note: i.note } : {}),
+  ...(i.decidedBy ? { decidedBy: i.decidedBy } : {}),
+  ...(i.applyError ? { applyError: i.applyError } : {}),
+});
+
+async function applyReviewedWrite(item, adapter, t) {
+  const p = item.payload;
+  const approvals = [item.decidedBy].filter(Boolean);
+  switch (p.action) {
+    case 'task.updated': {
+      let before;
+      try {
+        const cur = t?.get ? await t.get(p.projectId, p.taskId) : await adapter.getTask(p.projectId, p.taskId);
+        before = snapshotTask(cur?.task || cur);
+      } catch { before = undefined; }
+      const result = t?.update
+        ? await t.update(p.projectId, p.taskId, p.patch)
+        : await adapter.updateTask(p.projectId, p.taskId, { ...p.patch, tags: tagsToArray(p.patch?.tags) });
+      auditCliWrite('task.updated', result, { projectId: p.projectId, taskId: p.taskId }, { fields: Object.keys(p.patch || {}), reviewId: item.id }, false, before, approvals);
+      return result;
+    }
+    case 'task.completed': {
+      const result = t?.complete ? await t.complete(p.projectId, p.taskId) : needsTaskExt('complete', 'complete');
+      auditCliWrite('task.completed', result, { projectId: p.projectId, taskId: p.taskId }, { reviewId: item.id }, true, undefined, approvals);
+      return result;
+    }
+    case 'task.deleted': {
+      const result = t?.remove ? await t.remove(p.projectId, p.taskId) : needsTaskExt('remove', 'delete');
+      auditCliWrite('task.deleted', result, { projectId: p.projectId, taskId: p.taskId }, { reviewId: item.id }, false, undefined, approvals);
+      return result;
+    }
+    case 'task.created': {
+      const result = t?.create
+        ? await t.create(p.projectId || '', p.title, p.opts || {})
+        : await adapter.createTask({
+          title: p.title,
+          projectId: p.projectId || undefined,
+          content: p.opts?.content,
+          dueDate: p.opts?.dueDate,
+          tags: tagsToArray(p.opts?.tags),
+        });
+      auditCliWrite('task.created', result, { projectId: p.projectId }, { title: p.title, reviewId: item.id }, false, undefined, approvals);
+      return result;
+    }
+    default:
+      throw new Error(`Unknown staged write action: ${p.action}`);
+  }
+}
+
+async function handleReview() {
+  switch (args.subcommand) {
+    case 'list': {
+      const status = args.options.all ? undefined : (args.options.status || 'pending');
+      const items = listReviewItems({ status });
+      return { count: items.length, items: items.map(summarizeReviewItem) };
+    }
+    case 'show': {
+      if (!args.positional[0]) { console.error('Usage: ats review show ID'); process.exit(1); }
+      return findReviewItem(args.positional[0]);
+    }
+    case 'approve':
+    case 'reject': {
+      if (!args.positional.length) { console.error(`Usage: ats review ${args.subcommand} ID... [--by NAME]`); process.exit(1); }
+      const decided = args.positional.map((id) => decideReviewItem(id, args.subcommand, { by: args.options.by }));
+      return { [args.subcommand === 'approve' ? 'approved' : 'rejected']: decided.map(summarizeReviewItem) };
+    }
+    case 'apply': {
+      const adapter = await loadAdapter();
+      const t = adapter.__ext?.tasks;
+      let targets;
+      if (args.options.all) {
+        targets = listReviewItems({ status: 'approved', kind: 'task.write' });
+      } else if (args.positional[0]) {
+        const item = findReviewItem(args.positional[0]);
+        if (item.status !== 'approved') throw new Error(`Review item ${item.id} is ${item.status}, not approved.`);
+        targets = [item];
+      } else {
+        console.error('Usage: ats review apply <ID|--all>');
+        process.exit(1);
+      }
+      const applied = [];
+      for (const item of targets) {
+        try {
+          const result = await applyReviewedWrite(item, adapter, t);
+          markReviewItemApplied(item.id, { result: taskRefFromResult(result, item.payload) });
+          applied.push({ id: item.id.slice(0, 8), ok: true });
+        } catch (err) {
+          markReviewItemApplied(item.id, { error: err.message });
+          applied.push({ id: item.id.slice(0, 8), ok: false, error: err.message });
+        }
+      }
+      return { applied };
+    }
+    default:
+      console.log(getReviewHelp());
   }
 }
 
@@ -873,6 +1014,10 @@ async function handleTasks() {
       // format-skip.txt projects keep the body verbatim (id-based match — a project
       // passed by NAME is not recognized by the skip).
       if (opts.content && !formatSkipped(projectId)) opts.content = normalizeTaskBody(opts.content).content;
+      // Creates have no target metadata to consult; they stage only under the
+      // global ATS_REVIEW_ALL=1 gate.
+      const createGate = reviewGate('task.created', null, { projectId, title, opts });
+      if (createGate) return createGate;
       const result = t?.create
         ? await t.create(projectId, title, opts)
         : await adapter.createTask({
@@ -918,10 +1063,13 @@ async function handleTasks() {
       if (patch.content !== undefined && !formatSkipped(args.positional[0])) patch.content = normalizeTaskBody(patch.content).content;
       // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
       let before;
+      let current = null;
       try {
-        const cur = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
-        before = snapshotTask(cur?.task || cur);
+        current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
+        before = snapshotTask(current?.task || current);
       } catch { before = undefined; }
+      const gate = reviewGate('task.updated', current, { projectId: args.positional[0], taskId: args.positional[1], patch });
+      if (gate) return gate;
       const result = t?.update
         ? await t.update(args.positional[0], args.positional[1], patch)
         : await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
@@ -930,12 +1078,24 @@ async function handleTasks() {
     }
     case 'complete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
+      let current = null;
+      if (process.env.ATS_REVIEW_ALL !== '1') {
+        try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
+      }
+      const gate = reviewGate('task.completed', current, { projectId: args.positional[0], taskId: args.positional[1] });
+      if (gate) return gate;
       const result = t?.complete ? await t.complete(args.positional[0], args.positional[1]) : needsTaskExt('complete', 'complete');
       auditCliWrite('task.completed', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, true);
       return result;
     }
     case 'delete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks delete PROJECT_ID TASK_ID'); process.exit(1); }
+      let current = null;
+      if (process.env.ATS_REVIEW_ALL !== '1') {
+        try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
+      }
+      const gate = reviewGate('task.deleted', current, { projectId: args.positional[0], taskId: args.positional[1] });
+      if (gate) return gate;
       const result = t?.remove ? await t.remove(args.positional[0], args.positional[1]) : needsTaskExt('remove', 'delete');
       auditCliWrite('task.deleted', result, { projectId: args.positional[0], taskId: args.positional[1] });
       return result;

@@ -645,6 +645,27 @@ refresh otherwise or with --full. A fetch with failing sources is reported
 and never cached as complete.`;
 }
 
+export function getReviewHelp() {
+  return `ats review — the staging queue for gated writes
+
+A write whose target task declares approval (\`intent.approvalRequired\`, or
+the action / generic "write" listed in \`security.approvalRequiredFor\`) —
+or ANY write while ATS_REVIEW_ALL=1 — stages here instead of reaching the
+backend. A human reviews and applies; applied writes go through the normal
+adapter path with the approver recorded in the action ledger, so they stay
+undoable like any other write.
+
+Usage:
+  ats review list [--all|--status S]    Pending items (default) or all
+  ats review show ID                    Full payload of one item
+  ats review approve ID... [--by NAME]  Approve pending items
+  ats review reject ID...  [--by NAME]  Reject pending items
+  ats review apply <ID|--all>           Execute approved writes
+
+Ids may be unambiguous prefixes. A failed apply keeps the item approved
+with its error recorded, ready to retry or reject.`;
+}
+
 export function getBenchHelp() {
   return `ats bench — retrieval quality and usage analysis
 

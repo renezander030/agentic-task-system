@@ -145,7 +145,7 @@ ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 - **The hosted blueprint is a reference deployment, not a managed service.** One bearer token grants the full MCP tool surface; the blueprint does not provide per-user or per-tool scopes, multi-tenant RBAC, high availability, or an SLA.
 - **Hosted ATS runtime state is ephemeral by default.** The blueprint persists Qdrant and Ollama, but does not mount a disk for `ats-mcp`; its cache, query log, action ledger and undo before-images, event spool, and vector-sync metadata disappear on a restart or redeploy.
 - **Events are observations, not authorization.** `ats events watch` can report task changes, but a consumer must still evaluate intent, validity, and security before taking an external action.
-- **ATS policy is not a sandbox or automatic write interceptor.** `ats security check` is an application-level decision point for cooperating clients; ordinary create/update calls do not invoke it automatically, and it does not intercept shell, filesystem, network, model, or secret access outside ATS.
+- **ATS policy is not a sandbox.** The CLI enforces the declared approval metadata — a write whose target sets `intent.approvalRequired` or lists the action in `security.approvalRequiredFor` stages into `ats review` instead of reaching the backend (`ATS_REVIEW_ALL=1` gates every write) — but this guards ATS's own write path only. `ats security check` remains an application-level decision point for cooperating clients, and nothing here intercepts shell, filesystem, network, model, or secret access outside ATS. A client calling an adapter directly bypasses the CLI gate.
 
 ## Verification and operational evidence
 
@@ -197,6 +197,9 @@ ats security check <project> <task> --action read --resource task:self --reason 
 ats events watch --json            # NDJSON observations; never launches agents
 
 # Ops
+ats review list                 # writes staged by approvalRequired targets
+ats review approve ID && ats review apply --all
+ats cache sync                  # refresh the corpus cache (cron-friendly)
 ats bench run
 ats bench score
 ats bench progress --json

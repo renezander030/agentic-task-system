@@ -1,5 +1,16 @@
 export { validateAdapter, adapterCapabilities } from './adapter-interface.js';
 export { withLock, withLockSync, writeFileAtomicSync } from './fs-lock.js';
+export {
+  REVIEW_QUEUE_VERSION,
+  reviewQueuePath,
+  readReviewQueue,
+  stageReviewItem,
+  listReviewItems,
+  findReviewItem,
+  decideReviewItem,
+  markReviewItemApplied,
+  writeRequiresApproval,
+} from './review-queue.js';
 export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';
 export {
