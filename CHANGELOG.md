@@ -3,7 +3,7 @@
 
 ## 0.11.0 - Facts layer, reviewed writes, delta sync, no silently dropped sources
 
-Unreleased — version bump, date, tag, and npm publish follow review.
+Released 2026-08-22.
 
 - **A facts layer: `ats kg`.** Durable subject–predicate–object knowledge beside the tasks, in an embedded append-only log (no graph server). Agents **propose** facts and retractions; a human **ratifies** — the only write path — and every fact carries proposer, ratifier, source, and temporal validity. `ats kg ask` answers with deterministic lexical scoring plus provenance (zero LLM); retraction closes a fact's validity interval instead of deleting it, so "what did we believe then" stays answerable. `ats kg export --cypher` emits a load script for embedded graph engines (LadybugDB/Kùzu dialect); the store travels with `ats state export`. Recommended pairing for dedicated graph engines, stated in the README: Graphiti as the graph database server, LadybugDB as the embedded graph database.
 - **Reviewed writes: `approvalRequired` is now enforced.** A write whose target task declares `intent.approvalRequired` — or lists the action (or generic `write`) in `security.approvalRequiredFor` — stages into a review queue instead of reaching the backend; `ATS_REVIEW_ALL=1` gates every write, including creates. `ats review list/show/approve/reject/apply` runs the queue; applied writes go through the normal adapter path with the approver recorded in the action ledger, so they stay undoable. A failed apply keeps the item approved with its error — never silently lost.

@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-adapter-taskmaster",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Local Taskmaster adapter for Agentic Task System: cross-tag search, task context, and field-preserving writes over tasks.json.",
   "type": "module",
   "main": "index.js",
@@ -12,7 +12,7 @@
     "prepublishOnly": "node ../../scripts/check-no-pii.mjs --self"
   },
   "peerDependencies": {
-    "@reneza/ats-core": "^0.10.1"
+    "@reneza/ats-core": "^0.11.0"
   },
   "dependencies": {},
   "repository": {
