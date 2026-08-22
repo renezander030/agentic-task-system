@@ -13,6 +13,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
 
 const CACHE_PATH = process.env.ATS_CORPUS_CACHE ||
   path.join(os.homedir(), '.config', 'ats', 'corpus-cache.json');
@@ -51,11 +52,14 @@ export function write(tasks) {
   if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return;
   ensureDir();
   try {
-    fs.writeFileSync(
-      CACHE_PATH,
-      JSON.stringify({ timestamp: Date.now(), count: tasks.length, tasks }),
-      { mode: 0o600 }
-    );
+    // Atomic replace under the cache lock: concurrent `ats` processes finishing
+    // a fetch at the same time must not interleave into a torn cache file.
+    withLockSync(CACHE_PATH, () => {
+      writeFileAtomicSync(
+        CACHE_PATH,
+        JSON.stringify({ timestamp: Date.now(), count: tasks.length, tasks })
+      );
+    }, { label: 'corpus cache' });
   } catch {}
 }
 
