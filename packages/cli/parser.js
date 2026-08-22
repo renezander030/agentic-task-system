@@ -666,6 +666,23 @@ Ids may be unambiguous prefixes. A failed apply keeps the item approved
 with its error recorded, ready to retry or reject.`;
 }
 
+export function getStateHelp() {
+  return `ats state — move ATS derived state between machines
+
+Usage:
+  ats state export [--out FILE]   Bundle the ledger, undo before-images,
+                                  review queue, event checkpoint + spool,
+                                  usage log, caches, and index metadata into
+                                  one JSON document (stdout by default)
+  ats state import FILE [--force] Restore a bundle. Existing files are kept
+                                  unless --force; import writes only to the
+                                  known state paths on THIS machine, never
+                                  to paths named inside the bundle.
+
+Credentials are never bundled: adapter configs, tokens, and .env files are
+outside the whitelist. Re-authenticate on the target machine.`;
+}
+
 export function getBenchHelp() {
   return `ats bench — retrieval quality and usage analysis
 

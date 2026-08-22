@@ -11,6 +11,7 @@ export {
   markReviewItemApplied,
   writeRequiresApproval,
 } from './review-queue.js';
+export { STATE_BUNDLE_VERSION, stateFileRegistry, exportState, importState } from './state-bundle.js';
 export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';
 export {
