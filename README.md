@@ -150,7 +150,7 @@ ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 ## Verification and operational evidence
 
 - [CI](https://github.com/renezander030/agentic-task-system/actions/workflows/ci.yml) runs the full repository gate on Node 20 and 22: lint, public-claim checks, PII checks, unit tests, adapter and intent proofs, and the progress benchmark.
-- The [publish-safety gate](scripts/check-no-pii.mjs) scans both the repository surface and npm package tarballs for secrets, personal paths, configured personal-data patterns, and locally configured denylist terms. It protects publication surfaces; it is not runtime redaction or data-loss prevention between adapters.
+- The [publish-safety gate](scripts/check-no-pii.mjs) scans both the repository surface and npm package tarballs for secrets, personal paths, configured personal-data patterns, and locally configured denylist terms. It protects publication surfaces. At runtime, the composite adapter can additionally enforce per-backend trust levels with configured redaction patterns — a write routed to a `"trust": "public"` child that matches a pattern is blocked, not silently stripped (see the composite README). That screen guards ATS's own composite write path; it is not general data-loss prevention.
 - [State-integrity tests and conventions](docs/state-integrity.md) cover patch-style writes, preservation of unknown fields, explicit store-to-`Task` mapping, result provenance, and explainable RRF contributions.
 - [Retrieval behavior](docs/retrieval.md) documents Core's branches, the corpus cache, time budgets, graceful branch failure, usage logging, and what affects latency.
 

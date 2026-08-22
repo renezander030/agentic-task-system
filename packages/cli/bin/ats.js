@@ -89,6 +89,8 @@ import {
   writeRequiresApproval,
   exportState,
   importState,
+  gardenSweep,
+  formatGarden,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -244,8 +246,12 @@ async function main() {
         result = await handleAgentSetup();
         break;
       case 'dedup':
-        await handleDedup();
-        return;
+        result = await handleDedup();
+        if (result === undefined) return;
+        break;
+      case 'garden':
+        result = await handleGarden();
+        break;
       case 'fmt':
         handleFmt();
         return;
@@ -414,7 +420,7 @@ function helpFor(command) {
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
-  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'agent-setup',
+  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'agent-setup', 'garden',
   'projects', 'tasks', 'notes', 'help', 'completion', 'undo',
 ];
 
@@ -596,8 +602,63 @@ function handleBench() {
 // `ats dedup [--threshold 0.6] [--max-corpus N] [--no-cache] [--json]` — scan the
 // corpus for near-duplicate (and disagreeing) tasks so an agent can link/merge
 // them instead of recalling contradictory copies. Detection only; it never edits.
+// "project/task" ref — split on the LAST slash so namespaced project ids
+// that contain slashes (github:owner/repo) survive.
+function splitTaskRef(ref) {
+  const i = String(ref).lastIndexOf('/');
+  if (i <= 0 || i === ref.length - 1) throw new Error(`Expected PROJECT/TASK, got "${ref}".`);
+  return [ref.slice(0, i), ref.slice(i + 1)];
+}
+
 async function handleDedup() {
   const adapter = await loadAdapter();
+  if (args.subcommand === 'apply') {
+    // Turn a detected cluster into typed links (and optionally close the
+    // duplicates) through the normal write path: ledgered, undoable, and
+    // subject to the review gate like any other write.
+    const keep = args.options.keep;
+    const dupes = tagsToArray(args.options.dupes);
+    if (!keep || !dupes?.length) {
+      console.error('Usage: ats dedup apply --keep PROJECT/TASK --dupes PROJECT/TASK,... [--type supersedes|conflicts-with] [--close]');
+      process.exit(1);
+    }
+    const type = args.options.type || 'supersedes';
+    const [keepProject, keepTask] = splitTaskRef(keep);
+    const t = adapter.__ext?.tasks;
+    const applied = [];
+    for (const dupe of dupes) {
+      const [dupeProject, dupeTask] = splitTaskRef(dupe);
+      const link = await addTaskLink(
+        adapter,
+        { projectId: keepProject, taskId: keepTask },
+        { projectId: dupeProject, taskId: dupeTask },
+        type,
+        {}
+      );
+      auditCliWrite('task.link.added', link, { projectId: keepProject, taskId: keepTask }, {
+        type,
+        target: { projectId: dupeProject, taskId: dupeTask },
+        via: 'dedup-apply',
+      });
+      const entry = { dupe, linked: type };
+      if (args.options.close) {
+        let current;
+        try { current = t?.get ? await t.get(dupeProject, dupeTask) : await adapter.getTask(dupeProject, dupeTask); } catch { current = null; }
+        const gate = reviewGate('task.completed', current, { projectId: dupeProject, taskId: dupeTask });
+        if (gate) {
+          entry.closed = `staged for review: ${gate.reviewId.slice(0, 8)}`;
+        } else if (t?.complete) {
+          const result = await t.complete(dupeProject, dupeTask);
+          auditCliWrite('task.completed', result, { projectId: dupeProject, taskId: dupeTask }, { via: 'dedup-apply' }, true);
+          entry.closed = true;
+        } else {
+          entry.closed = 'adapter cannot complete tasks';
+        }
+      }
+      applied.push(entry);
+    }
+    return { keep, type, applied };
+  }
   const { corpus } = await coreLoadCorpus(adapter, { cache: !args.options['no-cache'] });
   const threshold = args.options.threshold !== undefined ? parseFloat(args.options.threshold) : 0.6;
   const report = detectDuplicates(corpus, {
@@ -608,7 +669,20 @@ async function handleDedup() {
     console.log(JSON.stringify(report, null, 2));
   } else {
     console.log(formatDedup(report));
+    console.log('\nAct on a cluster: ats dedup apply --keep P/T --dupes P/T,... [--close]');
   }
+  return undefined;
+}
+
+async function handleGarden() {
+  const adapter = await loadAdapter();
+  const { corpus } = await coreLoadCorpus(adapter, { cache: !args.options['no-cache'] });
+  const report = gardenSweep(corpus, {
+    staleDays: parseInt(args.options['stale-days']) || 60,
+    limit: parseInt(args.options.limit) || 50,
+  });
+  if (args.options.format === 'json') return report;
+  return { __raw: formatGarden(report) };
 }
 
 async function handleSync() {

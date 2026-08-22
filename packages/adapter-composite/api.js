@@ -45,13 +45,34 @@ export function loadConfig() {
     .map((entry) => {
       if (typeof entry === 'string') {
         const pkg = entry.trim();
-        return pkg ? { package: pkg, key: backendKeyFor(pkg) } : null;
+        return pkg ? { package: pkg, key: backendKeyFor(pkg), trust: 'private' } : null;
       }
-      if (entry && entry.package) return { package: String(entry.package).trim(), key: entry.key || backendKeyFor(entry.package) };
+      if (entry && entry.package) {
+        return {
+          package: String(entry.package).trim(),
+          key: entry.key || backendKeyFor(entry.package),
+          // Trust level of the backend: content screening applies to writes
+          // routed to 'public' children. Unlisted/unknown values mean private.
+          trust: entry.trust === 'public' ? 'public' : 'private',
+        };
+      }
       return null;
     })
     .filter(Boolean);
-  return { specs };
+  // Redaction rules screen composite writes to public children. An invalid
+  // pattern fails LOUDLY: silently dropping a protective rule would weaken
+  // the boundary invisibly.
+  const redact = (Array.isArray(file.redact) ? file.redact : []).map((rule) => {
+    if (!rule || !rule.pattern) {
+      throw new Error('composite: each redact rule needs a "pattern" (and ideally a "label").');
+    }
+    try {
+      return { label: rule.label || rule.pattern, regex: new RegExp(rule.pattern, rule.flags ?? 'i') };
+    } catch (error) {
+      throw new Error(`composite: invalid redact pattern "${rule.label || rule.pattern}": ${error.message}`, { cause: error });
+    }
+  });
+  return { specs, redact };
 }
 
 /** Derive a short backend key from a package name or path: `@reneza/ats-adapter-github` -> `github`. */
@@ -79,7 +100,7 @@ export async function loadChildren(cfg = loadConfig()) {
       const mod = await import(spec.package);
       const adapter = mod.default || mod.adapter || mod;
       if (adapter && typeof adapter.listProjects === 'function') {
-        children.push({ key, package: spec.package, adapter });
+        children.push({ key, package: spec.package, trust: spec.trust || 'private', adapter });
       }
     } catch {
       // child not installed / failed to import — skip it

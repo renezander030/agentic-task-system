@@ -142,6 +142,29 @@ test('routing throws a clear error for an unknown backend', async () => {
   await assert.rejects(() => mk().listTasksInProject('slack:C123'), /no child backend "slack"/);
 });
 
+test('a write to a public child matching a redaction pattern is blocked, private child is not', async () => {
+  const mkChild = () => fakeChild({ projectId: 'p', projectName: 'P', url: 'https://x', tasks: [{ id: '1', title: 'x', content: '', projectId: 'p', tags: [], modifiedTime: 'T' }] });
+  const policy = { redact: [{ label: 'internal hostname', regex: /\b[a-z0-9-]+\.internal\b/i }] };
+  const c = createComposite(
+    [{ key: 'pub', adapter: mkChild(), trust: 'public' }, { key: 'priv', adapter: mkChild(), trust: 'private' }],
+    policy
+  );
+  await assert.rejects(
+    () => c.createTask({ projectId: 'pub:p', title: 'deploy to build-3.internal today' }),
+    /blocked — content matches redaction pattern "internal hostname"/
+  );
+  await assert.rejects(
+    () => c.updateTask('pub:p', '1', { content: 'ssh into db-1.internal' }),
+    /blocked/
+  );
+  // Same content to the private child passes the screen.
+  const ok = await c.createTask({ projectId: 'priv:p', title: 'deploy to build-3.internal today' });
+  assert.equal(ok.source, 'priv');
+  // Clean content to the public child passes too.
+  const clean = await c.createTask({ projectId: 'pub:p', title: 'update the changelog' });
+  assert.equal(clean.source, 'pub');
+});
+
 test('a child without bulkFetch that has a failing project is fetched partially and reported', async () => {
   const flaky = {
     async listProjects() {

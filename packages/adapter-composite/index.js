@@ -26,10 +26,32 @@ import {
 } from './api.js';
 
 /**
- * Build a composite adapter over a resolver that returns [{key, adapter}].
- * Exposed so tests (and embedders) can supply children directly.
+ * Content screen for writes crossing a trust boundary: a write routed to a
+ * child marked `trust: "public"` is checked against the configured redaction
+ * patterns and BLOCKED (never silently stripped) on a match. This guards the
+ * composite's own write path — content an agent read from a private backend
+ * cannot flow to a public one through ATS unnoticed.
  */
-export function buildAdapter(getChildren) {
+function screenOutboundWrite(redact, child, input) {
+  if (!redact?.length) return;
+  if ((child.trust || 'private') !== 'public') return;
+  const text = [input?.title, input?.content, ...(Array.isArray(input?.tags) ? input.tags : [])]
+    .filter(Boolean)
+    .join('\n');
+  if (!text) return;
+  for (const rule of redact) {
+    if (rule.regex.test(text)) {
+      throw new Error(`composite: write to public backend "${child.key}" blocked — content matches redaction pattern "${rule.label}"`);
+    }
+  }
+}
+
+/**
+ * Build a composite adapter over a resolver that returns [{key, adapter,
+ * trust?}]. Exposed so tests (and embedders) can supply children directly.
+ * `getPolicy` supplies `{ redact }` (defaults to the on-disk config).
+ */
+export function buildAdapter(getChildren, getPolicy = () => loadConfig()) {
   const settle = (arr) => Promise.allSettled(arr).then((rs) => rs.filter((r) => r.status === 'fulfilled').map((r) => r.value));
 
   const adapter = {
@@ -62,6 +84,7 @@ export function buildAdapter(getChildren) {
       if (!input.projectId) throw new Error('composite createTask: projectId is required (namespaced "<backend>:<projectId>")');
       const { child, childProjectId, key } = childForProject(children, input.projectId);
       if (!child) throw new Error(`composite: no child backend "${key}"`);
+      screenOutboundWrite(getPolicy().redact, child, input);
       const t = await child.adapter.createTask({ ...input, projectId: childProjectId });
       return remapTask(key, t);
     },
@@ -71,6 +94,7 @@ export function buildAdapter(getChildren) {
       const { child, childProjectId, key } = childForProject(children, projectId);
       if (!child) throw new Error(`composite: no child backend "${key}" for project "${projectId}"`);
       const next = patch && patch.projectId ? { ...patch, projectId: splitProjectId(patch.projectId).childProjectId } : patch;
+      screenOutboundWrite(getPolicy().redact, child, next);
       const t = await child.adapter.updateTask(childProjectId, childTaskIdFor(key, taskId), next);
       return remapTask(key, t);
     },
@@ -225,8 +249,8 @@ async function fallbackFetch(child, key, warnings) {
 }
 
 /** Build composite children directly (used by tests/embedders). */
-export function createComposite(children) {
-  return buildAdapter(async () => children);
+export function createComposite(children, policy = { redact: [] }) {
+  return buildAdapter(async () => children, () => policy);
 }
 
 // Default export: lazily load children from config, memoized.
