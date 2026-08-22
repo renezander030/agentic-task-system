@@ -484,10 +484,16 @@ export async function find(query, cfg = {}) {
   }));
 
   // Roll partial failures up into one signal the caller can branch on without
-  // hand-walking `branches`: a dropped corpus source, or a retrieval branch that
-  // errored/timed out, means the result set is incomplete — say so.
+  // hand-walking `branches`: a dropped corpus source, a native-search source the
+  // adapter could not read (adapter.__searchWarnings, stamped per call), or a
+  // retrieval branch that errored/timed out, means the result set is incomplete
+  // — say so.
+  const nativeWarnings = branchDefs.some((b) => b.name === 'native') && Array.isArray(adapter?.__searchWarnings)
+    ? adapter.__searchWarnings
+    : [];
   const warnings = [
     ...sourcesFailed.map((s) => `source "${s.name || s.source}" failed to load: ${s.error}`),
+    ...nativeWarnings.map((w) => `native search source "${w.source}" failed: ${w.error}`),
     ...settled.filter((b) => !b.ok).map((b) => `retrieval branch "${b.name}" failed: ${b.error}`),
   ];
   const degraded = warnings.length > 0;

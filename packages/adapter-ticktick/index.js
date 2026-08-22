@@ -29,7 +29,7 @@ function contractTask(task, fallback = {}) {
 }
 
 // Required: 6 methods + auth lifecycle.
-export default {
+const adapter = {
   // --- Storage ---
   listProjects: () => projects.list(),
 
@@ -63,7 +63,14 @@ export default {
   },
 
   // --- Optional ---
-  searchByQuery: async (query) => (await tasks.search(query)).tasks.map((task) => contractTask(task)),
+  searchByQuery: async (query) => {
+    const result = await tasks.search(query);
+    // Projects the search could not read make the native branch partial; the
+    // retrieval layer reads __searchWarnings and rolls them into `warnings`.
+    adapter.__searchWarnings = (result.failedProjects || [])
+      .map((p) => ({ source: p.name || p.projectId, error: p.error }));
+    return result.tasks.map((task) => contractTask(task));
+  },
 
   // --- Auth ---
   authStatus: () => auth.status(),
@@ -81,3 +88,5 @@ export default {
     setup,
   },
 };
+
+export default adapter;

@@ -19,6 +19,7 @@ import {
   loadChildren,
   makeProjectId,
   splitProjectId,
+  childTaskIdFor,
   remapTask,
   remapProject,
   childForProject,
@@ -52,7 +53,7 @@ export function buildAdapter(getChildren) {
       const children = await getChildren();
       const { child, childProjectId, key } = childForProject(children, projectId);
       if (!child) throw new Error(`composite: no child backend "${key}" for project "${projectId}"`);
-      const t = await child.adapter.getTask(childProjectId, taskId);
+      const t = await child.adapter.getTask(childProjectId, childTaskIdFor(key, taskId));
       return remapTask(key, t);
     },
 
@@ -70,7 +71,7 @@ export function buildAdapter(getChildren) {
       const { child, childProjectId, key } = childForProject(children, projectId);
       if (!child) throw new Error(`composite: no child backend "${key}" for project "${projectId}"`);
       const next = patch && patch.projectId ? { ...patch, projectId: splitProjectId(patch.projectId).childProjectId } : patch;
-      const t = await child.adapter.updateTask(childProjectId, taskId, next);
+      const t = await child.adapter.updateTask(childProjectId, childTaskIdFor(key, taskId), next);
       return remapTask(key, t);
     },
 
@@ -78,11 +79,12 @@ export function buildAdapter(getChildren) {
       // Synchronous per the contract: parse the key, find the child synchronously
       // from the last-resolved set, fall back to a generic string if unknown.
       const { key, childProjectId } = splitProjectId(projectId);
+      const childTaskId = childTaskIdFor(key, taskId);
       const child = (adapter.__children || []).find((c) => c.key === key);
       if (child && typeof child.adapter.urlFor === 'function') {
-        return child.adapter.urlFor({ projectId: childProjectId, taskId });
+        return child.adapter.urlFor({ projectId: childProjectId, taskId: childTaskId });
       }
-      return `ats://${key || 'composite'}/${childProjectId}/${taskId}`;
+      return `ats://${key || 'composite'}/${childProjectId}/${childTaskId}`;
     },
 
     // ---- optional: this is what makes `ats find` fuse across backends ----------
@@ -94,9 +96,17 @@ export function buildAdapter(getChildren) {
       const corpora = await Promise.all(
         children.map(async (c) => {
           try {
-            const tasks = typeof c.adapter.bulkFetch === 'function'
-              ? await c.adapter.bulkFetch()
-              : await fallbackFetch(c.adapter);
+            let tasks;
+            if (typeof c.adapter.bulkFetch === 'function') {
+              tasks = await c.adapter.bulkFetch();
+              // A child that reports its own partial fetch (e.g. a nested
+              // multi-source adapter) bubbles up namespaced.
+              for (const w of c.adapter.__fetchWarnings || []) {
+                adapter.__fetchWarnings.push({ source: `${c.key}:${w.source}`, error: w.error });
+              }
+            } else {
+              tasks = await fallbackFetch(c.adapter, c.key, adapter.__fetchWarnings);
+            }
             return (tasks || []).map((t) => remapTask(c.key, t));
           } catch (e) {
             // A child backend that fails must not vanish from the fused corpus
@@ -113,10 +123,24 @@ export function buildAdapter(getChildren) {
 
     async searchByQuery(query) {
       const children = await getChildren();
-      const hits = await settle(
+      adapter.__searchWarnings = [];
+      const hits = await Promise.all(
         children
           .filter((c) => typeof c.adapter.searchByQuery === 'function')
-          .map((c) => c.adapter.searchByQuery(query).then((r) => (r || []).map((t) => remapTask(c.key, t))))
+          .map((c) => c.adapter.searchByQuery(query)
+            .then((r) => {
+              // A child that reports partial native results bubbles up namespaced.
+              for (const w of c.adapter.__searchWarnings || []) {
+                adapter.__searchWarnings.push({ source: `${c.key}:${w.source}`, error: w.error });
+              }
+              return (r || []).map((t) => remapTask(c.key, t));
+            })
+            .catch((e) => {
+              // A child whose native search fails must not shrink the branch
+              // silently — record it for the retrieval layer's warnings.
+              adapter.__searchWarnings.push({ source: c.key, error: e.message });
+              return [];
+            }))
       );
       return hits.flat();
     },
@@ -157,20 +181,23 @@ export function buildAdapter(getChildren) {
 
     __children: [],
     __fetchWarnings: [],
+    __searchWarnings: [],
   };
 
   return adapter;
 }
 
-async function fallbackFetch(child) {
+async function fallbackFetch(child, key, warnings) {
   const projects = await child.listProjects();
   const out = [];
   for (const p of projects || []) {
     try {
       const tasks = await child.listTasksInProject(p.id);
       out.push(...(tasks || []));
-    } catch {
-      /* skip a project that fails */
+    } catch (e) {
+      // A project that fails to list must leave a trace: the retrieval layer
+      // rolls these into `warnings` instead of serving a silently smaller corpus.
+      warnings.push({ source: `${key}:${p.id}`, error: e.message });
     }
   }
   return out;

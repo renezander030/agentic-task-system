@@ -7,8 +7,11 @@
  * child keeps its own config/auth; the composite only namespaces ids and routes.
  *
  * Project ids are namespaced `<backendKey>:<childProjectId>` (e.g. `github:owner/repo`,
- * `notion:db-1111`). Every returned Task is tagged with `source: <backendKey>` so
- * the originating backend is visible in results and deep links.
+ * `notion:db-1111`) and task ids `<backendKey>:<childTaskId>`, so two backends that
+ * emit the same raw task id can never collide in the fused ranking. Every returned
+ * Task is additionally tagged with `source: <backendKey>` so the originating backend
+ * is visible in results and deep links. Routing accepts both namespaced and raw
+ * task ids.
  *
  * Zero runtime deps.
  */
@@ -91,6 +94,16 @@ export function makeProjectId(key, childProjectId) {
   return `${key}${SEP}${childProjectId}`;
 }
 
+export function makeTaskId(key, childTaskId) {
+  return `${key}${SEP}${childTaskId}`;
+}
+
+/** Strip this child's namespace from a task id; raw/foreign ids pass through. */
+export function childTaskIdFor(key, taskId) {
+  const s = String(taskId);
+  return s.startsWith(`${key}${SEP}`) ? s.slice(String(key).length + 1) : s;
+}
+
 /** Split a namespaced project id back into { key, childProjectId }. */
 export function splitProjectId(projectId) {
   const s = String(projectId);
@@ -99,11 +112,17 @@ export function splitProjectId(projectId) {
   return { key: s.slice(0, i), childProjectId: s.slice(i + 1) };
 }
 
-/** Re-stamp a child's Task so its projectId is namespaced and its backend is tagged. */
+/**
+ * Re-stamp a child's Task so its ids are namespaced and its backend is tagged.
+ * The task id is namespaced too: fusion keys identity by id, so raw ids that
+ * repeat across backends (two stores both counting 1, 2, 3...) would otherwise
+ * merge into one result.
+ */
 export function remapTask(key, task) {
   if (!task) return task;
   return {
     ...task,
+    id: makeTaskId(key, task.id),
     projectId: makeProjectId(key, task.projectId),
     source: key,
   };
