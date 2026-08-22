@@ -87,6 +87,8 @@ interface KnowledgeAdapter {
   bulkFetchDelta?(opts: { cursor: any, since: number | null }):
     Promise<{ tasks: Task[], removedIds?: string[], cursor?: any } | null>
                                                       // incremental corpus refresh
+  listCompletedTasks?(opts: { since?: string, until?: string, projectIds?: string[] }):
+    Promise<Task[]>                                   // completed-task history
   embeddings?(texts: string[]): Promise<number[][]>  // adapter-supplied embeddings
 }
 ```
@@ -96,6 +98,8 @@ interface KnowledgeAdapter {
 **`bulkFetch()`** — single-call corpus refresh. Cheaper than per-project iteration when the adapter supports it (Notion's database queries, TickTick's v2 batch sync, filesystem walk). Without it, Core iterates `listProjects` → `listTasksInProject`.
 
 **`bulkFetchDelta({ cursor, since })`** — incremental corpus refresh, used by `ats cache sync` when a cached corpus already exists. Implement it when the backend can answer "what changed since X" (an updated-since query, a sync token, file mtimes). Return changed tasks as whole items plus `removedIds`; Core applies them as replace-by-id over the prior corpus — never a field merge — and persists your returned `cursor` for the next call. Return `null` to request a full refresh. Backends without a changes API (TickTick's open API, for one) simply skip this hook and get the full-refresh path.
+
+**`listCompletedTasks(opts)`** — completed-task history for retrospective queries. `ats find --include-completed` appends these per query (they are never written into the corpus cache), each carrying `status: 'completed'`. Adapters whose backend cannot list closed items simply omit the method; `find` then reports "completed history is not supported by this adapter" instead of silently answering from active tasks only.
 
 **`embeddings(texts)`** — adapter-supplied vectors. Core uses them for a dense branch, fuses that branch with its token-based sparse branch, and supports generic `similar`. Without this method, Core stays on keyword/native retrieval; it does not silently start an embedding service.
 

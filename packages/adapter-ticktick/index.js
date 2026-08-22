@@ -63,6 +63,18 @@ const adapter = {
   },
 
   // --- Optional ---
+  listCompletedTasks: async (opts = {}) => {
+    const done = await tasks.listCompleted({
+      projectIds: opts.projectIds,
+      startDate: opts.since,
+      endDate: opts.until,
+    });
+    return done.tasks.map((t) => ({
+      ...contractTask({ ...t, status: 'completed' }),
+      completedTime: t.completedTime,
+    }));
+  },
+
   searchByQuery: async (query) => {
     const result = await tasks.search(query);
     // Projects the search could not read make the native branch partial; the

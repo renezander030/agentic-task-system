@@ -948,6 +948,7 @@ async function handleTasks() {
         explain: !!args.options.explain,
         rerank: !!args.options.rerank,
         rerankDepth: parseInt(args.options['rerank-depth']) || undefined,
+        includeCompleted: !!args.options['include-completed'],
       };
       // Rich adapters bring their own embedder-backed find; generic adapters get
       // core's storage-agnostic keyword + native + RRF fan-out over the contract.

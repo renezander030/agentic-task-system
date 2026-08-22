@@ -145,6 +145,26 @@ export function buildAdapter(getChildren) {
       return hits.flat();
     },
 
+    async listCompletedTasks(opts = {}) {
+      const children = await getChildren();
+      adapter.__completedWarnings = [];
+      const lists = await Promise.all(children.map(async (c) => {
+        if (typeof c.adapter.listCompletedTasks !== 'function') {
+          // Retrospectives must say which backend cannot answer, not just
+          // return the union of the ones that can.
+          adapter.__completedWarnings.push({ source: c.key, error: 'completed history not supported' });
+          return [];
+        }
+        try {
+          return ((await c.adapter.listCompletedTasks(opts)) || []).map((t) => remapTask(c.key, t));
+        } catch (e) {
+          adapter.__completedWarnings.push({ source: c.key, error: e.message });
+          return [];
+        }
+      }));
+      return lists.flat();
+    },
+
     // ---- auth: aggregate across children --------------------------------------
 
     async authStatus() {
@@ -182,6 +202,7 @@ export function buildAdapter(getChildren) {
     __children: [],
     __fetchWarnings: [],
     __searchWarnings: [],
+    __completedWarnings: [],
   };
 
   return adapter;

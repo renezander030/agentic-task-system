@@ -522,7 +522,7 @@ export async function priority(deps = {}) {
  * @returns {Promise<{ query, mode, count, elapsedMs, branches, tasks }>}
  */
 export async function find(query, options = {}, deps = {}) {
-  const { limit = 5, budgetMs = 3000, explain = false } = options;
+  const { limit = 5, budgetMs = 3000, explain = false, includeCompleted = false } = options;
   const {
     apiRequest = coreFunctions.apiRequest,
     formatPriority = coreFunctions.formatPriority,
@@ -535,10 +535,14 @@ export async function find(query, options = {}, deps = {}) {
   // loadCorpus() would also work, but this preserves the exact TickTick shape
   // (id === fullId, fullProjectId, projectName) the branches below rely on.
   const loadCorpus = loadCorpusOverride || (async () => {
-    const cached = corpusCache.read();
-    if (cached) {
-      const m = corpusCache.meta();
-      return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null };
+    // Completed history is appended per query and must never enter the shared
+    // corpus cache, so an --include-completed query bypasses the cache both ways.
+    if (!includeCompleted) {
+      const cached = corpusCache.read();
+      if (cached) {
+        const m = corpusCache.meta();
+        return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null };
+      }
     }
     const projects = await apiRequest('GET', '/project', undefined, deps);
     const tasks = [];
@@ -567,7 +571,32 @@ export async function find(query, options = {}, deps = {}) {
         sourcesFailed.push({ source: p.id, name: p.name, error: err.message });
       }
     }
-    if (sourcesFailed.length === 0) corpusCache.write(tasks);
+    if (includeCompleted) {
+      try {
+        const done = await listCompleted({}, deps);
+        const seen = new Set(tasks.map((t) => t.id));
+        for (const t of done.tasks) {
+          if (seen.has(t.fullId)) continue;
+          tasks.push({
+            id: t.fullId,
+            fullId: t.fullId,
+            title: t.title,
+            content: t.content,
+            projectId: t.fullProjectId,
+            fullProjectId: t.fullProjectId,
+            projectName: '(completed)',
+            priority: t.priority,
+            tags: t.tags,
+            dueDate: t.dueDate,
+            status: 'completed',
+            completedTime: t.completedTime,
+          });
+        }
+      } catch (err) {
+        sourcesFailed.push({ source: 'completed', name: 'completed history', error: err.message });
+      }
+    }
+    if (sourcesFailed.length === 0 && !includeCompleted) corpusCache.write(tasks);
     return { corpus: tasks, fromCache: false, ageMs: null, sourcesFailed };
   });
 

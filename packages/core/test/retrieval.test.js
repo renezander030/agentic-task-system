@@ -289,6 +289,26 @@ test('find surfaces native-search sources the adapter could not read', async () 
   assert.ok(res.tasks.length > 0);
 });
 
+test('find --include-completed appends completed history from the adapter', async () => {
+  const adapter = {
+    ...fakeAdapter,
+    listCompletedTasks: async () => [
+      { id: 'done1', title: 'ffmpeg migration retro', content: 'finished', projectId: 'p1', tags: [] },
+    ],
+  };
+  const res = await find('ffmpeg', { adapter, cache: false, includeCompleted: true, limit: 10 });
+  const done = res.tasks.find((t) => t.id === 'done1');
+  assert.ok(done, 'completed task should be searchable');
+  assert.equal(done.status, 'completed');
+  assert.equal(res.degraded, false);
+});
+
+test('find --include-completed on an adapter without history warns instead of pretending', async () => {
+  const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false, includeCompleted: true });
+  assert.equal(res.degraded, true);
+  assert.ok(res.warnings.some((w) => w.includes('completed history is not supported')));
+});
+
 test('find is not degraded and omits warnings on a healthy run', async () => {
   const res = await find('ffmpeg', { adapter: fakeAdapter, cache: false });
   assert.equal(res.degraded, false);

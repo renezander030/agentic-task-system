@@ -233,6 +233,7 @@ function keywordBranch(query, corpus, { limit = 20 } = {}) {
       projectName: t.projectName,
       tags: t.tags,
       dueDate: t.dueDate,
+      ...(t.status !== undefined ? { status: t.status } : {}),
     }));
 }
 
@@ -406,6 +407,7 @@ export async function find(query, cfg = {}) {
     candidatesPerSource = 20,
     includeKeyword = true,
     includeNative = true,
+    includeCompleted = false,
     explain = false,
     rerank = false,
     rerankDepth,
@@ -442,8 +444,35 @@ export async function find(query, cfg = {}) {
       tasks: [],
     };
   }
-  const { corpus, fromCache, ageMs } = corpusInfo;
+  let { corpus } = corpusInfo;
+  const { fromCache, ageMs } = corpusInfo;
   const sourcesFailed = corpusInfo.sourcesFailed || [];
+
+  // Completed-task history: appended per query AFTER the corpus load, so the
+  // shared corpus cache never absorbs completed items. Retrospective queries
+  // ("what was actually done") need them; everyday queries stay lean.
+  const completedWarnings = [];
+  if (includeCompleted) {
+    if (adapter && typeof adapter.listCompletedTasks === 'function') {
+      try {
+        const done = (await adapter.listCompletedTasks({})) || [];
+        const seen = new Set(corpus.map((t) => t.id));
+        const extra = done
+          .filter((t) => t && t.id && !seen.has(t.id))
+          .map((t) => ({ ...t, status: t.status || 'completed' }));
+        corpus = corpus.concat(extra);
+        // A multi-source adapter records children whose history it could not
+        // read (or that cannot answer at all) — surface them.
+        for (const w of adapter.__completedWarnings || []) {
+          completedWarnings.push(`completed history source "${w.source}": ${w.error}`);
+        }
+      } catch (err) {
+        completedWarnings.push(`completed history failed to load: ${err.message}`);
+      }
+    } else {
+      completedWarnings.push('completed history is not supported by this adapter');
+    }
+  }
 
   // Assemble branches. Branches are pure CPU over the shared corpus (plus the
   // optional hybrid call), so we can always run them all in parallel.
@@ -465,6 +494,7 @@ export async function find(query, cfg = {}) {
               content: t.content,
               projectId: t.projectId,
               projectName: t.project ?? t.projectName,
+              ...(t.status !== undefined ? { status: t.status } : {}),
             }))
           ),
     });
@@ -552,6 +582,7 @@ export async function find(query, cfg = {}) {
     : [];
   const warnings = [
     ...sourcesFailed.map((s) => `source "${s.name || s.source}" failed to load: ${s.error}`),
+    ...completedWarnings,
     ...nativeWarnings.map((w) => `native search source "${w.source}" failed: ${w.error}`),
     ...settled.filter((b) => !b.ok).map((b) => `retrieval branch "${b.name}" failed: ${b.error}`),
   ];

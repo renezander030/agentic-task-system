@@ -159,6 +159,26 @@ test('a child without bulkFetch that has a failing project is fetched partially 
   assert.deepEqual(c.__fetchWarnings, [{ source: 'flaky:broken', error: '403 from backend' }]);
 });
 
+test('listCompletedTasks unions children and records the ones that cannot answer', async () => {
+  const withHistory = {
+    async listProjects() { return [{ id: 'p', name: 'P' }]; },
+    async listTasksInProject() { return []; },
+    async listCompletedTasks() {
+      return [{ id: 'd1', title: 'done thing', content: '', projectId: 'p', tags: [], status: 'completed' }];
+    },
+    async authStatus() { return { authenticated: true }; },
+  };
+  const withoutHistory = {
+    async listProjects() { return [{ id: 'q', name: 'Q' }]; },
+    async listTasksInProject() { return []; },
+    async authStatus() { return { authenticated: true }; },
+  };
+  const c = createComposite([{ key: 'a', adapter: withHistory }, { key: 'b', adapter: withoutHistory }]);
+  const done = await c.listCompletedTasks();
+  assert.deepEqual(done.map((t) => t.id), ['a:d1']);
+  assert.deepEqual(c.__completedWarnings, [{ source: 'b', error: 'completed history not supported' }]);
+});
+
 test('a child whose native search fails is recorded instead of silently dropped', async () => {
   const good = fakeChild({ projectId: 'p', projectName: 'P', url: 'https://x', tasks: [{ id: '1', title: 'auth thing', content: '', projectId: 'p', tags: [], modifiedTime: 'T' }] });
   const bad = {

@@ -435,6 +435,7 @@ Quick start:
   ats init ticktick                  # Select an adapter + health-check
   ats find "deployment runbook"      # Parallel retrieval over your store
   ats find "deployment runbook" --explain   # ...and show why each result ranked
+  ats find "release retro" --include-completed  # search completed history too
   ats open "deployment runbook"      # Jump straight to it in your task app
 
 Write an adapter for any store:
