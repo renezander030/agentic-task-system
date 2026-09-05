@@ -92,6 +92,24 @@ test('cypher export emits DDL, escaped entities, and only active facts', () => {
   assert.ok(infraOnly.includes("domain: 'infra'"));
 });
 
+test('cypher export carries the full provenance record, and can include retracted facts with their closed validity', () => {
+  const active = exportFactsCypher({ domain: 'infra' });
+  assert.ok(active.includes('proposedBy STRING, proposalId STRING, ratifiedBy STRING, ratifiedAt STRING, taskRef STRING, retractedBy STRING, retractReason STRING'));
+  assert.ok(active.includes("proposedBy: 'a'"));
+  assert.ok(active.includes("ratifiedBy: 'rene'"));
+  assert.ok(active.includes("status: 'active'"));
+  assert.ok(active.includes("tInvalid: ''"));
+
+  const everything = exportFactsCypher({ includeRetracted: true });
+  assert.ok(everything.includes("O\\'Reilly-style invoices"), 'the retracted fact is present');
+  const retractedLine = everything.split('\n').find((l) => l.includes("status: 'retracted'"));
+  assert.ok(retractedLine, 'retracted status is written');
+  assert.match(retractedLine, /tInvalid: '\d{4}-/);
+  assert.ok(retractedLine.includes("retractedBy: 'rene'"));
+  assert.ok(retractedLine.includes("retractReason: 'client changed policy'"));
+  assert.ok(everything.startsWith('// ats kg export — all facts (active and retracted)'));
+});
+
 test('a malformed log line fails loudly, never silently', () => {
   const badPath = path.join(tmp, 'bad.jsonl');
   fs.writeFileSync(badPath, '{"op":"add","fact":{"id":"1","subject":"s","predicate":"p","object":"o","domain":"d"}}\nnot json\n');

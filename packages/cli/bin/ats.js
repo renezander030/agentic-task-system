@@ -1074,7 +1074,9 @@ async function handleKg() {
     case 'stats':
       return kgStats({ listReviewItems });
     case 'export': {
-      if (args.options.cypher) return { __raw: exportFactsCypher({ domain: args.options.domain }) };
+      if (args.options.cypher) {
+        return { __raw: exportFactsCypher({ domain: args.options.domain, includeRetracted: !!args.options['include-retracted'] }) };
+      }
       const { facts } = loadFacts();
       const selected = args.options.domain ? facts.filter((f) => f.domain === args.options.domain) : facts;
       return { __raw: JSON.stringify({ exportedAt: new Date().toISOString(), facts: selected }, null, 2) };

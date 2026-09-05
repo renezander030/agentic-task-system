@@ -701,7 +701,9 @@ Usage:
   ats kg facts [--domain D --subject S --all]
   ats kg stats                              Size, domains, pending proposals
   ats kg export [--cypher] [--domain D]     JSON, or a Cypher script for embedded
-                                            graph databases (LadybugDB / Kùzu)
+                                            graph databases (LadybugDB / Kùzu) with
+                                            full provenance on every fact;
+                                            --include-retracted adds closed facts
 
 Fact proposals share the review queue: ats review list / approve / reject
 work on them (kind kg.fact). A retracted fact keeps its validity interval,

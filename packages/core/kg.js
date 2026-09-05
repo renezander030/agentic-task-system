@@ -213,18 +213,43 @@ function cypherEscape(value) {
   return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+// Every FACT relationship property in the Cypher export, in DDL order. The
+// whole provenance record travels with the fact: who proposed it, who ratified
+// it and when, the source, the task it came from, and — for a retracted fact —
+// when its validity closed, by whom, and why.
+const CYPHER_FACT_PROPS = [
+  ['id', (f) => f.id],
+  ['predicate', (f) => f.predicate],
+  ['domain', (f) => f.domain],
+  ['status', (f) => f.status || 'active'],
+  ['tValid', (f) => f.tValid],
+  ['tInvalid', (f) => f.tInvalid],
+  ['confidence', (f) => f.confidence],
+  ['source', (f) => f.provenance?.source],
+  ['proposedBy', (f) => f.provenance?.proposedBy],
+  ['proposalId', (f) => f.provenance?.proposalId],
+  ['ratifiedBy', (f) => f.provenance?.ratifiedBy],
+  ['ratifiedAt', (f) => f.provenance?.ratifiedAt],
+  ['taskRef', (f) => f.taskRef],
+  ['retractedBy', (f) => f.retractedBy],
+  ['retractReason', (f) => f.retractReason],
+];
+
 /**
- * Emit a Cypher script that loads the ACTIVE facts into an embedded graph
- * database (LadybugDB / Kùzu dialect: typed node + rel tables, then MERGE
- * entities and CREATE relationships).
+ * Emit a Cypher script that loads the facts into an embedded graph database
+ * (LadybugDB / Kùzu dialect: typed node + rel tables, then MERGE entities and
+ * CREATE relationships). Active facts by default; `includeRetracted` adds the
+ * retracted ones with their closed validity, so the script is a complete
+ * record of what the store believed and why.
  */
-export function exportFactsCypher({ domain, factsPath } = {}) {
-  const facts = listKgFacts({ domain, status: 'active', ...(factsPath ? { factsPath } : {}) });
+export function exportFactsCypher({ domain, factsPath, includeRetracted = false } = {}) {
+  const facts = listKgFacts({ domain, status: includeRetracted ? 'all' : 'active', ...(factsPath ? { factsPath } : {}) });
+  const ddlProps = CYPHER_FACT_PROPS.map(([name]) => `${name} STRING`).join(', ');
   const lines = [
-    '// ats kg export — active facts as a property graph.',
+    `// ats kg export — ${includeRetracted ? 'all facts (active and retracted)' : 'active facts'} as a property graph, full provenance on every FACT.`,
     '// Load with an embedded Cypher engine (LadybugDB / Kùzu): run the DDL once, then the data.',
     "CREATE NODE TABLE IF NOT EXISTS Entity(name STRING, PRIMARY KEY(name));",
-    "CREATE REL TABLE IF NOT EXISTS FACT(FROM Entity TO Entity, id STRING, predicate STRING, domain STRING, tValid STRING, confidence STRING, source STRING);",
+    `CREATE REL TABLE IF NOT EXISTS FACT(FROM Entity TO Entity, ${ddlProps});`,
     '',
   ];
   const entities = new Set();
@@ -237,10 +262,10 @@ export function exportFactsCypher({ domain, factsPath } = {}) {
   }
   lines.push('');
   for (const f of facts) {
+    const props = CYPHER_FACT_PROPS.map(([name, read]) => `${name}: '${cypherEscape(read(f) ?? '')}'`).join(', ');
     lines.push(
       `MATCH (a:Entity {name: '${cypherEscape(f.subject)}'}), (b:Entity {name: '${cypherEscape(f.object)}'}) ` +
-      `CREATE (a)-[:FACT {id: '${cypherEscape(f.id)}', predicate: '${cypherEscape(f.predicate)}', domain: '${cypherEscape(f.domain)}', ` +
-      `tValid: '${cypherEscape(f.tValid)}', confidence: '${cypherEscape(f.confidence)}', source: '${cypherEscape(f.provenance?.source || '')}'}]->(b);`
+      `CREATE (a)-[:FACT {${props}}]->(b);`
     );
   }
   return lines.join('\n') + '\n';
