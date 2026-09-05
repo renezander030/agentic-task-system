@@ -100,16 +100,29 @@ export function fuse(branches, { k = RRF_K, limit = Infinity, explain = false } 
  * Uses adapter.bulkFetch() when available (one shot — beats N project calls on
  * rate-limited APIs), else fans out listProjects() -> listTasksInProject().
  *
+ * With `staleOk`, a cache past its TTL (but within the stale ceiling) is served
+ * immediately, flagged `stale: true`, and a background refresh starts through
+ * `revalidate` — a function the host supplies (the CLI spawns a detached
+ * `ats cache sync`; a server can run `syncCorpusCache` un-awaited). Without
+ * `staleOk`, a stale cache is refetched synchronously as before.
+ *
  * @param {object} adapter
- * @param {{cache?:boolean}} [opts]
- * @returns {Promise<{corpus:Array, fromCache:boolean, ageMs:number|null}>}
+ * @param {{cache?:boolean, staleOk?:boolean, revalidate?:Function|false}} [opts]
+ * @returns {Promise<{corpus:Array, fromCache:boolean, ageMs:number|null, stale?:boolean, revalidating?:boolean, sourcesFailed:Array}>}
  */
-export async function loadCorpus(adapter, { cache = true } = {}) {
+export async function loadCorpus(adapter, { cache = true, staleOk = false, revalidate } = {}) {
   if (cache) {
     const cached = corpusCache.read();
     if (cached) {
       const m = corpusCache.meta();
       return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null, sourcesFailed: [] };
+    }
+    if (staleOk) {
+      const stale = corpusCache.readStale();
+      if (stale) {
+        const revalidating = corpusCache.beginRevalidate(revalidate);
+        return { corpus: stale.tasks, fromCache: true, ageMs: stale.ageMs, stale: true, revalidating, sourcesFailed: [] };
+      }
     }
   }
 
@@ -167,6 +180,15 @@ export async function loadCorpus(adapter, { cache = true } = {}) {
  * @param {{full?: boolean}} [opts] - force a full refresh
  */
 export async function syncCorpusCache(adapter, { full = false } = {}) {
+  try {
+    return await syncCorpusCacheUnleased(adapter, { full });
+  } finally {
+    // A sync is how a background refresh completes; hand the lease back either way.
+    corpusCache.releaseRefresh();
+  }
+}
+
+async function syncCorpusCacheUnleased(adapter, { full = false } = {}) {
   const t0 = Date.now();
   if (!full && adapter && typeof adapter.bulkFetchDelta === 'function') {
     const prior = corpusCache.readAny();
@@ -411,6 +433,8 @@ export async function find(query, cfg = {}) {
     explain = false,
     rerank = false,
     rerankDepth,
+    staleOk = true,
+    revalidate,
     loadCorpus: loadCorpusOverride,
     log,
   } = cfg;
@@ -421,7 +445,7 @@ export async function find(query, cfg = {}) {
   try {
     corpusInfo = loadCorpusOverride
       ? await loadCorpusOverride()
-      : await loadCorpus(adapter, { cache });
+      : await loadCorpus(adapter, { cache, staleOk, revalidate });
   } catch (err) {
     if (typeof log === 'function') {
       log({
@@ -606,7 +630,13 @@ export async function find(query, cfg = {}) {
     degraded,
     ...(rerank ? { reranked } : {}),
     elapsedMs: Date.now() - t0,
-    corpus: { fromCache, ageMs, size: corpus.length, sourcesFailed },
+    corpus: {
+      fromCache,
+      ageMs,
+      size: corpus.length,
+      sourcesFailed,
+      ...(corpusInfo.stale ? { stale: true, revalidating: Boolean(corpusInfo.revalidating) } : {}),
+    },
     branches: branchSummary,
     ...(warnings.length ? { warnings } : {}),
     ...(explain ? { k } : {}),

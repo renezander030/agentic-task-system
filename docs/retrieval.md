@@ -89,11 +89,12 @@ Corpus prefetch is the slow step (full project list + per-project tasks). Cached
 
 - `~/.config/ats/corpus-cache.json` — 5-min TTL by default
 - Override TTL: `ATS_CORPUS_TTL_MS=60000`
+- Stale ceiling: `ATS_CORPUS_STALE_MAX_MS=86400000` (24h by default)
 - Disable: `ATS_CORPUS_CACHE_DISABLE=1`
 
-The first call after expiration refreshes the corpus. Warm calls avoid that store fetch, but total wall-clock time still depends on corpus size, embeddings, native search, and custom branches; ATS does not guarantee a fixed latency.
+Within the TTL a call answers from the cache. Past the TTL, `find` still answers immediately from the stale copy — the result carries `corpus.stale: true` and `corpus.revalidating: true` — and a detached `ats cache sync` refreshes the cache for the next call (stale-while-revalidate). One refresh runs at a time; concurrent calls share it. Past the stale ceiling the next call refreshes first. `ats find ... --fresh` always refreshes first. Total wall-clock time still depends on corpus size, embeddings, native search, and custom branches; ATS does not guarantee a fixed latency.
 
-If the active adapter implements `bulkFetch()`, the prefetch uses it (one call). Otherwise, Core iterates `listProjects` → `listTasksInProject` (N+1 calls).
+If the active adapter implements `bulkFetch()`, the prefetch uses it (one call). Otherwise, Core iterates `listProjects` → `listTasksInProject` (N+1 calls). The TickTick adapter's `bulkFetch()` returns the same shape its own `find` prefetches, so `ats cache sync` and `find` always agree on the cache.
 
 ## Budget
 

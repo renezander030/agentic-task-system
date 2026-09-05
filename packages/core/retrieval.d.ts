@@ -51,10 +51,22 @@ export interface CorpusResult {
   corpus: Task[];
   fromCache: boolean;
   ageMs: number | null;
+  /** Served from a cache past its TTL (stale-while-revalidate). */
+  stale?: boolean;
+  /** A background refresh is in flight. */
+  revalidating?: boolean;
+  sourcesFailed?: { source: string; name?: string; error: string }[];
 }
 
-/** Load the corpus from an adapter (bulkFetch or per-project), TTL-cached. */
-export function loadCorpus(adapter: Adapter, opts?: { cache?: boolean }): Promise<CorpusResult>;
+/**
+ * Load the corpus from an adapter (bulkFetch or per-project), TTL-cached.
+ * With `staleOk`, a stale cache within the stale ceiling is served at once and
+ * refreshed in the background through `revalidate`.
+ */
+export function loadCorpus(
+  adapter: Adapter,
+  opts?: { cache?: boolean; staleOk?: boolean; revalidate?: (() => unknown) | false }
+): Promise<CorpusResult>;
 
 export interface Embedder {
   hybrid?(
@@ -87,6 +99,10 @@ export interface FindOptions {
   includeNative?: boolean;
   /** Attach a per-result rank/contribution breakdown to each fused doc. */
   explain?: boolean;
+  /** Serve a stale cache immediately and refresh in the background (default true). */
+  staleOk?: boolean;
+  /** How the host runs the background refresh (detached process, un-awaited sync). */
+  revalidate?: (() => unknown) | false;
   /** Override the corpus loader (store-specific prefetch). */
   loadCorpus?: () => Promise<CorpusResult>;
   /** Usage-log record callback. */
@@ -106,7 +122,14 @@ export interface FindResult {
   mode: 'find' | 'find-failed';
   count: number;
   elapsedMs: number;
-  corpus?: { fromCache: boolean; ageMs: number | null; size: number };
+  corpus?: {
+    fromCache: boolean;
+    ageMs: number | null;
+    size: number;
+    sourcesFailed?: { source: string; name?: string; error: string }[];
+    stale?: boolean;
+    revalidating?: boolean;
+  };
   error?: string;
   branches: BranchSummary[];
   /** RRF constant; present only when explain=true (contribution = 1/(k+rank)). */

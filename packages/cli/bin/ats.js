@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   parseArgs,
   formatOutput,
@@ -1195,6 +1195,23 @@ function handleFmt() {
   process.stdout.write(content);
 }
 
+// Stale-while-revalidate for the corpus cache: a read past the TTL answers from
+// the stale copy and a detached `ats cache sync` refreshes it for the next
+// call. `--fresh` blocks on the refresh instead.
+function spawnCacheRefresh() {
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'cache', 'sync'], {
+    detached: true,
+    stdio: 'ignore',
+    env: process.env,
+  });
+  child.unref();
+}
+
+function corpusFreshness() {
+  const fresh = args.options.fresh === true;
+  return { staleOk: !fresh, revalidate: fresh ? false : spawnCacheRefresh };
+}
+
 async function handleTasks() {
   const adapter = await loadAdapter();
   const t = adapter.__ext?.tasks; // optional: rich adapters (TickTick) provide it
@@ -1355,6 +1372,7 @@ async function handleTasks() {
         rerank: !!args.options.rerank,
         rerankDepth: parseInt(args.options['rerank-depth']) || undefined,
         includeCompleted: !!args.options['include-completed'],
+        ...corpusFreshness(),
       };
       // Rich adapters bring their own embedder-backed find; generic adapters get
       // core's storage-agnostic keyword + native + RRF fan-out over the contract.
@@ -1379,6 +1397,7 @@ async function handleTasks() {
           limit,
           includeKeyword: false,
           includeNative: false,
+          ...corpusFreshness(),
           log: logUsage,
         })),
         mode: 'hybrid',

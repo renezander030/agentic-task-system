@@ -521,11 +521,80 @@ export async function priority(deps = {}) {
  * @param {object} options - { limit, budgetMs }
  * @returns {Promise<{ query, mode, count, elapsedMs, branches, tasks }>}
  */
-export async function find(query, options = {}, deps = {}) {
-  const { limit = 5, budgetMs = 3000, explain = false, includeCompleted = false } = options;
+/**
+ * Fetch every project's tasks in the shape retrieval works on (id === fullId,
+ * full project id, projectName, formatted priority). One loop serves both the
+ * `find` prefetch and the adapter's `bulkFetch()`, so `ats cache sync` writes
+ * exactly what `find` reads back.
+ *
+ * @returns {Promise<{tasks: object[], sourcesFailed: {source:string,name:string,error:string}[]}>}
+ */
+export async function fetchCorpus(deps = {}, { includeCompleted = false } = {}) {
   const {
     apiRequest = coreFunctions.apiRequest,
     formatPriority = coreFunctions.formatPriority,
+  } = deps;
+  const projects = await apiRequest('GET', '/project', undefined, deps);
+  const tasks = [];
+  const sourcesFailed = [];
+  for (const p of projects) {
+    try {
+      const data = await apiRequest('GET', `/project/${encodeURIComponent(p.id)}/data`, undefined, deps);
+      for (const t of data.tasks || []) {
+        tasks.push({
+          id: t.id,
+          fullId: t.id,
+          title: t.title || '',
+          content: t.content || '',
+          projectId: t.projectId,
+          fullProjectId: t.projectId,
+          projectName: p.name,
+          priority: formatPriority(t.priority),
+          tags: t.tags || [],
+          dueDate: t.dueDate,
+          kind: t.kind || 'TEXT',
+          status: t.status === 2 ? 'completed' : 'active',
+          modifiedTime: t.modifiedTime,
+        });
+      }
+    } catch (err) {
+      // A failing project must surface in `warnings`/`degraded` (core rolls
+      // sourcesFailed up), and a known-partial corpus must never be cached
+      // as complete for the whole TTL.
+      sourcesFailed.push({ source: p.id, name: p.name, error: err.message });
+    }
+  }
+  if (includeCompleted) {
+    try {
+      const done = await listCompleted({}, deps);
+      const seen = new Set(tasks.map((t) => t.id));
+      for (const t of done.tasks) {
+        if (seen.has(t.fullId)) continue;
+        tasks.push({
+          id: t.fullId,
+          fullId: t.fullId,
+          title: t.title,
+          content: t.content,
+          projectId: t.fullProjectId,
+          fullProjectId: t.fullProjectId,
+          projectName: '(completed)',
+          priority: t.priority,
+          tags: t.tags,
+          dueDate: t.dueDate,
+          status: 'completed',
+          completedTime: t.completedTime,
+        });
+      }
+    } catch (err) {
+      sourcesFailed.push({ source: 'completed', name: 'completed history', error: err.message });
+    }
+  }
+  return { tasks, sourcesFailed };
+}
+
+export async function find(query, options = {}, deps = {}) {
+  const { limit = 5, budgetMs = 3000, explain = false, includeCompleted = false, staleOk = true, revalidate } = options;
+  const {
     vectorHybrid = vectorFunctions.hybrid,
     loadCorpus: loadCorpusOverride,
   } = deps;
@@ -543,59 +612,17 @@ export async function find(query, options = {}, deps = {}) {
         const m = corpusCache.meta();
         return { corpus: cached, fromCache: true, ageMs: m.ageMs ?? null };
       }
-    }
-    const projects = await apiRequest('GET', '/project', undefined, deps);
-    const tasks = [];
-    const sourcesFailed = [];
-    for (const p of projects) {
-      try {
-        const data = await apiRequest('GET', `/project/${encodeURIComponent(p.id)}/data`, undefined, deps);
-        for (const t of data.tasks || []) {
-          tasks.push({
-            id: t.id,
-            fullId: t.id,
-            title: t.title || '',
-            content: t.content || '',
-            projectId: t.projectId,
-            fullProjectId: t.projectId,
-            projectName: p.name,
-            priority: formatPriority(t.priority),
-            tags: t.tags || [],
-            dueDate: t.dueDate,
-          });
+      // Stale-while-revalidate: a cache past its TTL answers now; the refresh
+      // runs in the background (see core corpus-cache.beginRevalidate).
+      if (staleOk) {
+        const stale = corpusCache.readStale();
+        if (stale) {
+          const revalidating = corpusCache.beginRevalidate(revalidate);
+          return { corpus: stale.tasks, fromCache: true, ageMs: stale.ageMs, stale: true, revalidating, sourcesFailed: [] };
         }
-      } catch (err) {
-        // A failing project must surface in `warnings`/`degraded` (core rolls
-        // sourcesFailed up), and a known-partial corpus must never be cached
-        // as complete for the whole TTL.
-        sourcesFailed.push({ source: p.id, name: p.name, error: err.message });
       }
     }
-    if (includeCompleted) {
-      try {
-        const done = await listCompleted({}, deps);
-        const seen = new Set(tasks.map((t) => t.id));
-        for (const t of done.tasks) {
-          if (seen.has(t.fullId)) continue;
-          tasks.push({
-            id: t.fullId,
-            fullId: t.fullId,
-            title: t.title,
-            content: t.content,
-            projectId: t.fullProjectId,
-            fullProjectId: t.fullProjectId,
-            projectName: '(completed)',
-            priority: t.priority,
-            tags: t.tags,
-            dueDate: t.dueDate,
-            status: 'completed',
-            completedTime: t.completedTime,
-          });
-        }
-      } catch (err) {
-        sourcesFailed.push({ source: 'completed', name: 'completed history', error: err.message });
-      }
-    }
+    const { tasks, sourcesFailed } = await fetchCorpus(deps, { includeCompleted });
     if (sourcesFailed.length === 0 && !includeCompleted) corpusCache.write(tasks);
     return { corpus: tasks, fromCache: false, ageMs: null, sourcesFailed };
   });

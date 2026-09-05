@@ -107,7 +107,14 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
       add('cache', 'Corpus cache', info(`empty (${m.path || 'default path'})`));
     } else {
       const ageS = m.ageMs != null ? Math.round(m.ageMs / 1000) : '?';
-      add('cache', 'Corpus cache', info(`${m.count ?? '?'} item(s), ${ageS}s old${m.stale ? ' (stale — refresh with: ats cache sync)' : ''}`));
+      const state = !m.stale
+        ? ''
+        : m.revalidating
+          ? ' (stale — background refresh in flight)'
+          : m.servable
+            ? ' (stale — served instantly by find, refreshed in the background; force with: ats cache sync)'
+            : ' (past the stale ceiling — the next find refreshes it first; or: ats cache sync)';
+      add('cache', 'Corpus cache', info(`${m.count ?? '?'} item(s), ${ageS}s old${state}`));
     }
   } catch (e) {
     add('cache', 'Corpus cache', info(`unavailable: ${e?.message || e}`));

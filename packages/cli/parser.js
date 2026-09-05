@@ -305,7 +305,8 @@ function formatFindResults(obj) {
     let c = `corpus: ${obj.corpus.size} items`;
     if (obj.corpus.fromCache) {
       const age = obj.corpus.ageMs != null ? `, ${Math.round(obj.corpus.ageMs / 1000)}s old` : '';
-      c += ` (cached${age})`;
+      const stale = obj.corpus.stale ? (obj.corpus.revalidating ? ', stale — refreshing in background' : ', stale') : '';
+      c += ` (cached${age}${stale})`;
     }
     lines.push(c);
   }
