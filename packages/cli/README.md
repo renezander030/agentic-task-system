@@ -67,8 +67,11 @@ ats config use <adapter>           # set active adapter
 ats auth login                     # delegates to adapter
 ats status                         # active adapter, cache age, retrieval health
 
-ats find <query>                   # parallel + RRF + provenance — DEFAULT
+ats find <query>                   # parallel + RRF + provenance + confidence verdict — DEFAULT
 ats find <query> --explain         # per-result rank + RRF contribution per branch
+ats find <query> --project <id|name>   # bind retrieval to a project (--projects a,b)
+ats find <query> --min-sources 2   # keep only results two branches agree on
+ats find <query> --fresh           # refresh a stale corpus cache before answering
 ats open <id-or-title>             # open it in your task app (urlFor deep link)
 ats get <id-or-title> [--extract raw|json|yaml]
 ats url <id-or-title>              # paste-ready cross-reference link
@@ -77,7 +80,9 @@ ats hybrid <query>                 # dense+sparse RRF when embeddings are availa
 ats similar <id>                   # find related docs when embeddings are available
 
 ats create "<title>" [--content "..."] [--project <id>] [--relevance]
+ats create <project> "<title>" --if-absent --idempotency-key <k>   # never a duplicate on retry
 ats update <project> <task> [--content "..."] [--title "..."]
+ats update <project> <task> --append "..." --if-match <contentHash>   # add to the body; write only if unchanged
 
 ats intent set <project> <task> --outcome "..." --done-when "a,b"
 ats promote <source-project> <source-task> <target-project> --outcome "..." --done-when "a,b"

@@ -8,6 +8,7 @@ import { existsSync as existsSyncFs } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { webcrypto as crypto } from 'node:crypto';
+import { retryingFetch } from '@reneza/ats-core/retry';
 
 // Config paths (XDG-compliant).
 // Prefer ~/.config/ats; fall back to legacy ~/.config/akb if it exists (akb→ats rename migration).
@@ -289,7 +290,10 @@ async function forceRefresh(config, deps = {}) {
  * Make an API request
  */
 export async function apiRequest(method, path, body = undefined, deps = {}) {
-  const { fetchFn = fetch } = deps;
+  // Every call rides core's retry policy: a 429, a gateway 5xx, a 500 whose body
+  // says `exceed_query_limit`, or a dropped connection is retried with backoff
+  // (Retry-After honored) before it can surface as a failure.
+  const fetchFn = retryingFetch(deps.fetchFn || fetch, { label: 'TickTick', sleep: deps.sleep });
   const config = await loadConfig(deps);
   const baseUrl = API_URLS[validateRegion(config.region)];
   const url = `${baseUrl}${path}`;

@@ -13,8 +13,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { retryingFetch } from '@reneza/ats-core/retry';
 
 const DEFAULT_ENDPOINT = 'https://api.airtable.com';
+const airFetch = retryingFetch((...a) => fetch(...a), { label: 'Airtable' });
 const PAGE_SIZE = 100;
 
 /** Per-process schema cache: baseId -> { tables, fetchedAt }. Tables rarely change within a run. */
@@ -50,7 +52,6 @@ export function configPath() {
   );
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Authenticated Airtable request with JSON parsing and 429 backoff.
@@ -73,27 +74,21 @@ export async function air(apiPath, opts = {}) {
     init.body = JSON.stringify(opts.body);
   }
 
-  // Airtable rate-limits at 5 req/sec/base -> 429 with Retry-After. Retry a few times.
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, init);
-    if (res.status === 429 && attempt < 4) {
-      const wait = Number(res.headers.get('retry-after')) * 1000 || 1000 * (attempt + 1);
-      await sleep(wait);
-      continue;
-    }
-    const text = await res.text();
-    let json;
-    try {
-      json = text ? JSON.parse(text) : {};
-    } catch {
-      json = { raw: text };
-    }
-    if (!res.ok) {
-      const msg = json?.error?.message || json?.error?.type || json?.error || text || res.statusText;
-      throw new Error(`Airtable ${res.status} on ${apiPath}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
-    }
-    return json;
+  // Airtable rate-limits at 5 req/sec/base -> 429 with Retry-After; core's retry
+  // policy honors it (plus gateway 5xx and dropped connections) with jittered backoff.
+  const res = await airFetch(url, init);
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
   }
+  if (!res.ok) {
+    const msg = json?.error?.message || json?.error?.type || json?.error || text || res.statusText;
+    throw new Error(`Airtable ${res.status} on ${apiPath}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
+  }
+  return json;
 }
 
 /** List bases the token can see (Meta API), honoring the optional allow-list. */

@@ -13,6 +13,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {string[]} args - process.argv.slice(2)
  * @returns {{ command: string, subcommand: string, positional: string[], options: object }}
  */
+/** `-h`, `-v`, `--anything`: a token that reads as a flag rather than a value. */
+function looksLikeFlag(token) {
+  return /^--?[A-Za-z]/.test(token);
+}
+
 export function parseArgs(args) {
   const result = {
     command: null,
@@ -39,8 +44,13 @@ export function parseArgs(args) {
       // Ergonomic shorthand for `--format json`. Makes every read command emit
       // machine-readable output for piping into jq / agents.
       result.options.format = 'json';
-    } else if (arg.startsWith('--') && args[i + 1] && !args[i + 1].startsWith('-')) {
-      // Generic option with value
+    } else if (arg.startsWith('--') && arg.includes('=')) {
+      // `--key=value` binds the whole remainder, whatever it starts with.
+      const eq = arg.indexOf('=');
+      result.options[arg.slice(2, eq)] = arg.slice(eq + 1);
+    } else if (arg.startsWith('--') && args[i + 1] !== undefined && !looksLikeFlag(args[i + 1])) {
+      // Generic option with value. A value may start with a dash when it is not
+      // flag-shaped: a log bullet ("- 2026-09-05: shipped") or a negative number.
       const key = arg.slice(2);
       result.options[key] = args[++i];
     } else if (arg.startsWith('--')) {
@@ -305,15 +315,25 @@ function formatFindResults(obj) {
     let c = `corpus: ${obj.corpus.size} items`;
     if (obj.corpus.fromCache) {
       const age = obj.corpus.ageMs != null ? `, ${Math.round(obj.corpus.ageMs / 1000)}s old` : '';
-      c += ` (cached${age})`;
+      const stale = obj.corpus.stale ? (obj.corpus.revalidating ? ', stale — refreshing in background' : ', stale') : '';
+      c += ` (cached${age}${stale})`;
     }
     lines.push(c);
+  }
+  if (obj.scope) {
+    const resolved = obj.scope.resolved ? ` → "${obj.scope.resolved}"` : '';
+    const candidates = obj.scope.candidates ? ` — did you mean: ${obj.scope.candidates.map((c) => `"${c}"`).join(', ')}` : '';
+    lines.push(`scope: ${obj.scope.projects.join(', ')}${resolved} (${obj.scope.matched} of ${obj.scope.of} items)${candidates}`);
   }
 
   const branchInfo = (obj.branches || [])
     .map((b) => `${b.name} ${b.ok ? `${b.count}` : '✗'}/${b.elapsedMs}ms${b.error ? ` (${b.error})` : ''}`)
     .join(', ');
   if (branchInfo) lines.push(`branches: ${branchInfo}`);
+  if (obj.confidence) {
+    const gate = obj.minSources ? `, min-sources ${obj.minSources}` : '';
+    lines.push(`confidence: ${obj.confidence.verdict} (${obj.confidence.reason}${gate})`);
+  }
   if (obj.k !== undefined) lines.push(`RRF k=${obj.k} (contribution = 1/(k+rank))`);
   lines.push('');
 
@@ -683,7 +703,9 @@ Usage:
   ats kg facts [--domain D --subject S --all]
   ats kg stats                              Size, domains, pending proposals
   ats kg export [--cypher] [--domain D]     JSON, or a Cypher script for embedded
-                                            graph databases (LadybugDB / Kùzu)
+                                            graph databases (LadybugDB / Kùzu) with
+                                            full provenance on every fact;
+                                            --include-retracted adds closed facts
 
 Fact proposals share the review queue: ats review list / approve / reject
 work on them (kind kg.fact). A retracted fact keeps its validity interval,
@@ -882,7 +904,8 @@ Cross-references use the active adapter's native deep-link markdown form.
 Usage: ats notes <subcommand> [options]
 
 Subcommands:
-  find <query>                          Search note titles (fuzzy match)
+  find <query>                          Search note titles (fuzzy match); an empty
+                                        match answers with the nearest items via find
   get <id-or-title>                     Get note (default: structured object)
   url <id-or-title>                     Emit a markdown link to the note,
                                         ready to paste into a task body
@@ -928,7 +951,8 @@ Subcommands:
   update <project_id> <task_id>    Update task
   complete <project_id> <task_id>  Complete task
   delete <project_id> <task_id>    Delete task
-  search <keyword>                 Search all tasks (keyword match)
+  search <keyword>                 Search all tasks (keyword match); an empty
+                                   match carries the nearest items via find
   semantic <query>                 Semantic search (vector similarity)
   hybrid <query>                   Hybrid retrieval — semantic + keyword fusion (RRF)
   find <query>                     Time-bounded parallel retrieval over every
@@ -937,6 +961,13 @@ Subcommands:
                                    --explain shows per-branch rank + RRF
                                    contribution for each result. --limit,
                                    --budget-ms tune breadth/deadline.
+                                   --project <id|name> (or --projects a,b)
+                                   binds retrieval to those projects.
+                                   --min-sources N keeps only results N
+                                   branches agree on; every result carries
+                                   a confidence verdict.
+                                   --fresh refreshes a stale corpus cache
+                                   before answering.
   similar <task_id>                Find semantically similar tasks
   due [days]                       Tasks due within N days (default: 7)
   priority                         High priority tasks
@@ -952,6 +983,15 @@ Create/Update options:
   --tags <tags>          Comma-separated tags
   --reminder <time>      Reminder: 15m, 1h, 1d (before due)
   --title <text>         New title (update only)
+  --if-absent            (create) Return the active task that already has
+                         this title in the project instead of creating one
+  --idempotency-key <k>  (create) A repeat with the same key returns what the
+                         first call produced instead of creating again
+  --append <text>        (update) Add text after the current body; the body
+                         is never replaced
+  --prepend <text>       (update) Add text before the current body
+  --if-match <hash>      (update) Write only while the body still has this
+                         contentHash (from 'tasks get'); exit 3 if it changed
   --relevance            (create) Append a Relevance Rule instruction block
                          after the result so the active agent can
                          decide a trunk and follow up with 'tasks update'.
@@ -981,7 +1021,9 @@ Examples:
   ats tasks create "Buy groceries" --due 2026-01-30 --priority high
   ats tasks create "Call mom" --tags "personal,family"
   ats tasks create PROJECT_ID "Task in specific project"
+  ats tasks create PROJECT_ID "Weekly review" --if-absent --idempotency-key review-2026-w36
   ats tasks list PROJECT_ID
+  ats tasks update PROJECT_ID TASK_ID --append "- 2026-09-05: shipped" --if-match 3f9c1e2ab7d4
   ats tasks complete PROJECT_ID TASK_ID
   ats tasks search "meeting"
   ats tasks search --tags "work"

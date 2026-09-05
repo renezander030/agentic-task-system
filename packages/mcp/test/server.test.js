@@ -226,6 +226,43 @@ test('create_task and update_task pass through to the adapter', async () => {
   assert.equal(updated.taskId, undefined); // projectId/taskId are positional, not in patch
 });
 
+test('MCP writes honor the same review gate as the CLI', async () => {
+  const queueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-mcp-review-'));
+  const prevQueue = process.env.ATS_REVIEW_QUEUE;
+  const prevAll = process.env.ATS_REVIEW_ALL;
+  process.env.ATS_REVIEW_QUEUE = path.join(queueDir, 'review-queue.json');
+  try {
+    const adapter = fakeAdapter();
+    const { client } = await connect(adapter);
+
+    // A target that declares approvalRequired stages the patch — no adapter write.
+    await client.callTool({ name: 'set_task_intent', arguments: { projectId: 'p1', taskId: 't1', outcome: 'rotate the cert', approvalRequired: true } });
+    const gated = JSON.parse(textOf(await client.callTool({ name: 'update_task', arguments: { projectId: 'p1', taskId: 't1', title: 'Renamed by agent', agent: 'mcp-agent' } })));
+    assert.equal(gated.staged, true);
+    assert.equal(gated.action, 'task.updated');
+    assert.match(gated.message, /ats review approve/);
+    const still = await adapter.getTask('p1', 't1');
+    assert.equal(still.title, 'Renew TLS certificate', 'the backend was not written');
+
+    // ATS_REVIEW_ALL gates every write, creates included.
+    process.env.ATS_REVIEW_ALL = '1';
+    const created = JSON.parse(textOf(await client.callTool({ name: 'create_task', arguments: { title: 'Held for review', projectId: 'p2' } })));
+    assert.equal(created.staged, true);
+    assert.equal(created.action, 'task.created');
+    const listed = await adapter.listTasksInProject('p2');
+    assert.equal(listed.some((t) => t.title === 'Held for review'), false);
+
+    const queue = JSON.parse(fs.readFileSync(process.env.ATS_REVIEW_QUEUE, 'utf8'));
+    assert.equal(queue.items.length, 2);
+    assert.equal(queue.items[0].stagedBy, 'mcp-agent');
+    assert.deepEqual(queue.items[1].payload, { action: 'task.created', projectId: 'p2', title: 'Held for review', opts: {} });
+  } finally {
+    if (prevQueue === undefined) delete process.env.ATS_REVIEW_QUEUE; else process.env.ATS_REVIEW_QUEUE = prevQueue;
+    if (prevAll === undefined) delete process.env.ATS_REVIEW_ALL; else process.env.ATS_REVIEW_ALL = prevAll;
+    fs.rmSync(queueDir, { recursive: true, force: true });
+  }
+});
+
 test('intent, lifecycle, links, graph, context, and ledger work through MCP', async () => {
   const adapter = fakeAdapter();
   const { client } = await connect(adapter);

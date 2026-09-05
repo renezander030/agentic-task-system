@@ -47,6 +47,7 @@ import {
   listActions,
   snapshotTask,
   revertAction,
+  guardWrite,
   snapshotTaskEvents,
   collectAndSpoolTaskEvents,
   listPendingTaskEvents,
@@ -212,6 +213,15 @@ export function createServer(adapter) {
     },
     async ({ agent, ...input }) => {
       try {
+        // The same review gate the CLI enforces: under ATS_REVIEW_ALL a create
+        // stages for human approval instead of reaching the backend.
+        const gate = guardWrite({
+          action: 'task.created',
+          target: null,
+          payload: { projectId: input.projectId || '', title: input.title, opts: { content: input.content, dueDate: input.dueDate, tags: input.tags } },
+          by: agent || process.env.ATS_AGENT_ID || 'ats-mcp',
+        });
+        if (gate) return ok(gate);
         const result = await adapter.createTask(input);
         auditWrite('task.created', result, { projectId: input.projectId }, agent, { title: input.title });
         return ok(result);
@@ -237,7 +247,20 @@ export function createServer(adapter) {
       try {
         // Before-image so `undo_write` / `ats undo` can restore this task after a bad patch.
         let before;
-        try { before = snapshotTask(await adapter.getTask(projectId, taskId)); } catch { before = undefined; }
+        let current = null;
+        try {
+          current = await adapter.getTask(projectId, taskId);
+          before = snapshotTask(current);
+        } catch { before = undefined; }
+        // The same review gate the CLI enforces: a target that declares
+        // approvalRequired (or ATS_REVIEW_ALL) stages the patch for a human.
+        const gate = guardWrite({
+          action: 'task.updated',
+          target: current,
+          payload: { projectId, taskId, patch },
+          by: agent || process.env.ATS_AGENT_ID || 'ats-mcp',
+        });
+        if (gate) return ok(gate);
         const result = await adapter.updateTask(projectId, taskId, patch);
         auditWrite('task.updated', result, { projectId, taskId }, agent, { fields: Object.keys(patch) }, false, before);
         return ok(result);

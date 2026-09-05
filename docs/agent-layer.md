@@ -100,7 +100,7 @@ This is an authorization decision point for clients that cooperate with ATS. It 
 
 ## MCP
 
-The same layer is available through `set_task_intent`, `promote_exploration`, `get_task_hierarchy`, `set_task_hierarchy`, `evaluate_task_hierarchy`, `set_task_lifecycle`, `get_task_security`, `set_task_security`, `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`, `context_for_task`, `record_action`, and `list_actions`. Normal `create_task` and `update_task` calls also emit best-effort audit entries after a successful write.
+The same layer is available through `set_task_intent`, `promote_exploration`, `get_task_hierarchy`, `set_task_hierarchy`, `evaluate_task_hierarchy`, `set_task_lifecycle`, `get_task_security`, `set_task_security`, `check_task_access`, `add_task_link`, `remove_task_link`, `task_graph`, `context_for_task`, `record_action`, and `list_actions`. Normal `create_task` and `update_task` calls also emit best-effort audit entries after a successful write, and they pass the same review gate as the CLI (`guardWrite` in `@reneza/ats-core`): a target with `approvalRequired`, an action listed in `approvalRequiredFor`, or `ATS_REVIEW_ALL=1` stages the write for `ats review` instead of reaching the backend.
 
 ## Observation-only event stream
 

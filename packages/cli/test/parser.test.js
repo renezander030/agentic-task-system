@@ -70,6 +70,19 @@ test('a flag immediately followed by another flag stays boolean', () => {
   assert.equal(r.options.format, 'json');
 });
 
+test('a value that starts with a dash but is not flag-shaped still binds', () => {
+  const r = parseArgs(['update', 'p1', 't1', '--append', '- 2026-09-05: shipped', '--limit', '-1', '--json']);
+  assert.equal(r.options.append, '- 2026-09-05: shipped');
+  assert.equal(r.options.limit, '-1');
+  assert.equal(r.options.format, 'json');
+});
+
+test('--key=value binds the whole remainder', () => {
+  const r = parseArgs(['update', 'p1', 't1', '--prepend=--- divider', '--if-match=abc=def']);
+  assert.equal(r.options.prepend, '--- divider');
+  assert.equal(r.options['if-match'], 'abc=def');
+});
+
 test('formatOutput json mode round-trips the object', () => {
   const obj = { mode: 'find', tasks: [{ id: 't1' }] };
   assert.deepEqual(JSON.parse(formatOutput(obj, 'json')), obj);

@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   parseArgs,
   formatOutput,
@@ -36,6 +36,7 @@ import {
   getAgentLayerHelp,
 } from '../parser.js';
 import { formatSkipped } from '../format-skip.js';
+import { lookupIdempotencyKey, recordIdempotencyKey, findActiveByTitle } from '../idempotency.js';
 import {
   validateAdapter,
   runConformance,
@@ -80,14 +81,14 @@ import {
   snapshotTaskEvents,
   collectAndSpoolTaskEvents,
   normalizeTaskBody,
+  contentHash,
   TRIAGE_TAG,
   syncCorpusCache,
-  stageReviewItem,
+  guardWrite,
   listReviewItems,
   findReviewItem,
   decideReviewItem,
   markReviewItemApplied,
-  writeRequiresApproval,
   exportState,
   importState,
   gardenSweep,
@@ -365,8 +366,99 @@ async function main() {
     }
   } catch (err) {
     console.error(`Error: ${err.message}`);
-    process.exit(1);
+    // Exit codes an agent can branch on: 3 = precondition failed (--if-match).
+    process.exit(Number.isInteger(err?.exitCode) ? err.exitCode : 1);
   }
+}
+
+function withExitCode(err, code) {
+  err.exitCode = code;
+  return err;
+}
+
+// The stable reference a created task leaves behind for an idempotency key.
+function taskRef(result, fallbackProjectId) {
+  const task = result?.task || result || {};
+  return {
+    projectId: task.fullProjectId || task.projectId || fallbackProjectId || '',
+    taskId: task.fullId || task.id || '',
+  };
+}
+
+// Replay what an idempotency key already produced: the task it created (read
+// back when possible), or the review item it staged.
+async function idempotentReplay(key, seen, adapter, t) {
+  if (seen.reviewId && !seen.taskId) {
+    return {
+      created: false,
+      idempotent: true,
+      key,
+      staged: true,
+      reviewId: seen.reviewId,
+      message: `An earlier create with this key is staged for review as ${seen.reviewId.slice(0, 8)}.`,
+    };
+  }
+  let task = { id: seen.taskId, projectId: seen.projectId };
+  try {
+    const got = t?.get ? await t.get(seen.projectId, seen.taskId) : await adapter.getTask(seen.projectId, seen.taskId);
+    task = got?.task || got || task;
+  } catch {}
+  return { created: false, idempotent: true, key, task };
+}
+
+// The active task in `projectId` whose title matches, for `create --if-absent`.
+async function activeTaskWithTitle(adapter, t, projectId, title) {
+  let tasks;
+  if (t?.list) {
+    tasks = await t.list(projectId || 'inbox');
+  } else {
+    if (!projectId) throw new Error('--if-absent needs a project id to look in: ats create PROJECT_ID "title" --if-absent');
+    tasks = await adapter.listTasksInProject(projectId);
+  }
+  return findActiveByTitle(tasks, title);
+}
+
+// Zero-result recovery: an exact-match path that finds nothing (notes find,
+// search, notes get) answers with the fused find's nearest items, so an
+// agent's next call is informed instead of a blind re-query. The recovery
+// never fails the primary call: any error here reads as "nothing nearby".
+async function suggestNearest(adapter, t, query) {
+  try {
+    const opts = { limit: 5, budgetMs: 1500, staleOk: true, revalidate: false };
+    const found = t?.find
+      ? await t.find(query, opts)
+      : await coreFind(query, { adapter, ...opts, log: logUsage });
+    return (found?.tasks || []).map((d) => ({
+      id: d.id,
+      projectId: d.projectId,
+      ...(d.projectName ? { projectName: d.projectName } : {}),
+      title: d.title,
+      ...(Array.isArray(d.sources) ? { sources: d.sources } : {}),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function emptyWithSuggestions(kind, label, query, suggestions) {
+  const hint = suggestions.length
+    ? `No ${label} matched "${query}" exactly; the ${suggestions.length} nearest item(s) via ats find are in suggestions.`
+    : `No ${label} matched "${query}", and ats find found nothing nearby either.`;
+  return { query, count: 0, [kind]: [], suggestions, hint };
+}
+
+function nearestClause(suggestions) {
+  if (!suggestions.length) return '';
+  return ` Nearest via ats find: ${suggestions.map((s) => `"${s.title}" (${s.projectId}/${s.id})`).join(', ')}.`;
+}
+
+// Attach the body fingerprint a later `--if-match` write can present.
+function withContentHash(result) {
+  const task = result?.task || result;
+  if (task && typeof task === 'object' && typeof task.content === 'string') {
+    result.contentHash = contentHash(task.content);
+  }
+  return result;
 }
 
 async function handleConfig() {
@@ -815,27 +907,18 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false, bef
   }
 }
 
-// Enforcement half of the declared approval metadata: a write whose target
-// carries intent.approvalRequired (or lists the action / generic 'write' in
+// Enforcement half of the declared approval metadata, shared with every other
+// write surface through core's guardWrite: a write whose target carries
+// intent.approvalRequired (or lists the action / generic 'write' in
 // security.approvalRequiredFor), or ANY write when ATS_REVIEW_ALL=1, stages
-// into the review queue instead of reaching the backend. The gate reads the
-// target's metadata; an unreadable target is not gated — set ATS_REVIEW_ALL
-// for a hard gate.
+// into the review queue instead of reaching the backend.
 function reviewGate(action, currentTask, payload) {
-  const forced = process.env.ATS_REVIEW_ALL === '1';
-  if (!forced && !writeRequiresApproval(currentTask, action)) return null;
-  const item = stageReviewItem({
-    kind: 'task.write',
-    payload: { action, ...payload },
-    by: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
-    note: forced ? 'staged by ATS_REVIEW_ALL' : 'approvalRequired on target',
-  });
-  return {
-    staged: true,
-    reviewId: item.id,
+  return guardWrite({
     action,
-    message: `Write staged for review as ${item.id.slice(0, 8)}. Decide with: ats review approve ${item.id.slice(0, 8)}  (then: ats review apply --all)`,
-  };
+    target: currentTask,
+    payload,
+    by: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+  });
 }
 
 const summarizeReviewItem = (i) => ({
@@ -857,10 +940,19 @@ async function applyReviewedWrite(item, adapter, t) {
   switch (p.action) {
     case 'task.updated': {
       let before;
+      let curTask = null;
       try {
         const cur = t?.get ? await t.get(p.projectId, p.taskId) : await adapter.getTask(p.projectId, p.taskId);
-        before = snapshotTask(cur?.task || cur);
+        curTask = cur?.task || cur;
+        before = snapshotTask(curTask);
       } catch { before = undefined; }
+      // A staged compare-and-swap write still only lands on the body it was staged against.
+      if (p.ifMatch !== undefined) {
+        const actual = contentHash(curTask?.content || '');
+        if (actual !== String(p.ifMatch)) {
+          throw new Error(`Precondition failed: ${p.projectId}/${p.taskId} changed since the write was staged (content hash ${actual}, expected ${p.ifMatch}).`);
+        }
+      }
       const result = t?.update
         ? await t.update(p.projectId, p.taskId, p.patch)
         : await adapter.updateTask(p.projectId, p.taskId, { ...p.patch, tags: tagsToArray(p.patch?.tags) });
@@ -878,6 +970,12 @@ async function applyReviewedWrite(item, adapter, t) {
       return result;
     }
     case 'task.created': {
+      // A staged idempotent create that already landed (an earlier apply of the
+      // same key) is not created twice.
+      if (p.idempotencyKey !== undefined) {
+        const seen = lookupIdempotencyKey(p.idempotencyKey, { configDir: atsConfigDir() });
+        if (seen?.taskId) return { created: false, idempotent: true, key: p.idempotencyKey, task: seen };
+      }
       const result = t?.create
         ? await t.create(p.projectId || '', p.title, p.opts || {})
         : await adapter.createTask({
@@ -976,7 +1074,9 @@ async function handleKg() {
     case 'stats':
       return kgStats({ listReviewItems });
     case 'export': {
-      if (args.options.cypher) return { __raw: exportFactsCypher({ domain: args.options.domain }) };
+      if (args.options.cypher) {
+        return { __raw: exportFactsCypher({ domain: args.options.domain, includeRetracted: !!args.options['include-retracted'] }) };
+      }
       const { facts } = loadFacts();
       const selected = args.options.domain ? facts.filter((f) => f.domain === args.options.domain) : facts;
       return { __raw: JSON.stringify({ exportedAt: new Date().toISOString(), facts: selected }, null, 2) };
@@ -1021,9 +1121,13 @@ Backend: ${source.pkg} (${source.origin})${wiki ? ` · wiki project: "${wiki}"` 
   or call its API directly. Every read command takes \`--json\` for piping.
 - Retrieve before you ask: \`ats find "<query>"\` (add \`--explain\` to see why
   results ranked, \`--rerank\` for match-quality ordering,
-  \`--include-completed\` for retrospectives). Treat \`degraded: true\` plus
-  \`warnings\` as a partial result — say so instead of presenting it as
-  complete.
+  \`--include-completed\` for retrospectives, \`--project <id|name>\` to stay
+  inside one project). Treat \`degraded: true\` plus \`warnings\` as a partial
+  result — say so instead of presenting it as complete.
+- Read \`confidence.verdict\` before acting on a result: \`strong\` means the
+  branches agree on the top hit; \`weak\` means one branch alone found it —
+  refine the query or scope (or pass \`--min-sources 2\`) before treating it as
+  the answer.
 - Read with \`ats get <project> <task>\`; write with patch semantics via
   \`ats update\`. Every write is ledgered and reversible (\`ats undo\`).
 - Record execution context as you work: \`ats intent\` (outcome / why /
@@ -1195,6 +1299,23 @@ function handleFmt() {
   process.stdout.write(content);
 }
 
+// Stale-while-revalidate for the corpus cache: a read past the TTL answers from
+// the stale copy and a detached `ats cache sync` refreshes it for the next
+// call. `--fresh` blocks on the refresh instead.
+function spawnCacheRefresh() {
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'cache', 'sync'], {
+    detached: true,
+    stdio: 'ignore',
+    env: process.env,
+  });
+  child.unref();
+}
+
+function corpusFreshness() {
+  const fresh = args.options.fresh === true;
+  return { staleOk: !fresh, revalidate: fresh ? false : spawnCacheRefresh };
+}
+
 async function handleTasks() {
   const adapter = await loadAdapter();
   const t = adapter.__ext?.tasks; // optional: rich adapters (TickTick) provide it
@@ -1207,8 +1328,8 @@ async function handleTasks() {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks get PROJECT_ID TASK_ID'); process.exit(1); }
       const [gp, gid] = args.positional;
       const got = t?.get ? await t.get(gp, gid) : await adapter.getTask(gp, gid);
-      if (args.options['no-format'] === true || process.env.ATS_GET_NOFORMAT) return got;
-      return await formatTriageOnGet(t, adapter, gp, gid, got);
+      if (args.options['no-format'] === true || process.env.ATS_GET_NOFORMAT) return withContentHash(got);
+      return withContentHash(await formatTriageOnGet(t, adapter, gp, gid, got));
     }
     case 'normalize': {
       // Structure-only backfill (no triage/LLM): lift Goal, ensure Log, preserve Notes.
@@ -1260,10 +1381,32 @@ async function handleTasks() {
       // format-skip.txt projects keep the body verbatim (id-based match — a project
       // passed by NAME is not recognized by the skip).
       if (opts.content && !formatSkipped(projectId)) opts.content = normalizeTaskBody(opts.content).content;
+      // Idempotent creates: a key that already produced something returns it;
+      // --if-absent returns the active task that already carries this title.
+      const idemKey = typeof args.options['idempotency-key'] === 'string' ? args.options['idempotency-key'] : undefined;
+      if (idemKey !== undefined) {
+        const seen = lookupIdempotencyKey(idemKey, { configDir: atsConfigDir() });
+        if (seen) return await idempotentReplay(idemKey, seen, adapter, t);
+      }
+      if (args.options['if-absent'] === true) {
+        const existing = await activeTaskWithTitle(adapter, t, projectId, title);
+        if (existing) {
+          if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(existing, projectId), { configDir: atsConfigDir() });
+          return {
+            created: false,
+            existing: true,
+            reason: 'if-absent: an active task with this title already exists',
+            task: existing,
+          };
+        }
+      }
       // Creates have no target metadata to consult; they stage only under the
       // global ATS_REVIEW_ALL=1 gate.
-      const createGate = reviewGate('task.created', null, { projectId, title, opts });
-      if (createGate) return createGate;
+      const createGate = reviewGate('task.created', null, { projectId, title, opts, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
+      if (createGate) {
+        if (idemKey !== undefined) recordIdempotencyKey(idemKey, { reviewId: createGate.reviewId, projectId }, { configDir: atsConfigDir() });
+        return createGate;
+      }
       const result = t?.create
         ? await t.create(projectId, title, opts)
         : await adapter.createTask({
@@ -1273,7 +1416,8 @@ async function handleTasks() {
           dueDate: opts.dueDate,
           tags: tagsToArray(opts.tags),
         });
-      auditCliWrite('task.created', result, { projectId }, { title });
+      auditCliWrite('task.created', result, { projectId }, { title, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
+      if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(result, projectId), { configDir: atsConfigDir() });
       const relevance = adapter.__ext?.relevance;
       if (relevance?.isEnabled?.({
         relevance: !!args.options.relevance,
@@ -1296,6 +1440,12 @@ async function handleTasks() {
     }
     case 'update': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
+      const [up, uid] = args.positional;
+      // Body modes: --content replaces, --append/--prepend add to what is there.
+      const bodyModes = ['content', 'append', 'prepend'].filter((k) => args.options[k] !== undefined && args.options[k] !== true);
+      if (bodyModes.length > 1) { console.error('Use one of --content, --append, --prepend.'); process.exit(1); }
+      const bodyMode = bodyModes[0];
+      const ifMatch = args.options['if-match'];
       const patch = {
         title: args.options.title,
         content: args.options.content,
@@ -1304,23 +1454,52 @@ async function handleTasks() {
         tags: args.options.tags,
         reminder: args.options.reminder,
       };
-      // Normalize the body whenever content is being written (no extra fetch when it isn't).
-      // format-skip.txt projects keep the body verbatim (id-based match).
-      if (patch.content !== undefined && !formatSkipped(args.positional[0])) patch.content = normalizeTaskBody(patch.content).content;
       // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
       let before;
       let current = null;
       try {
-        current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
+        current = t?.get ? await t.get(up, uid) : await adapter.getTask(up, uid);
         before = snapshotTask(current?.task || current);
       } catch { before = undefined; }
-      const gate = reviewGate('task.updated', current, { projectId: args.positional[0], taskId: args.positional[1], patch });
+      const currentTask = current?.task || current;
+      const needsBody = ifMatch !== undefined || bodyMode === 'append' || bodyMode === 'prepend';
+      if (needsBody && !currentTask) {
+        throw new Error(`Cannot read ${up}/${uid} — --append, --prepend and --if-match need the current body.`);
+      }
+      // Compare-and-swap: the write only lands on the body the caller read.
+      if (ifMatch !== undefined) {
+        const actual = contentHash(currentTask.content || '');
+        if (String(ifMatch) !== actual) {
+          throw withExitCode(new Error(
+            `Precondition failed: ${up}/${uid} changed since it was read (content hash ${actual}, expected ${ifMatch}). ` +
+            `Re-read it and retry with --if-match ${actual}.`
+          ), 3);
+        }
+      }
+      if (bodyMode === 'append' || bodyMode === 'prepend') {
+        const base = String(currentTask.content || '').replace(/\s+$/, '');
+        const add = String(args.options[bodyMode]);
+        patch.content = !base ? add : bodyMode === 'append' ? `${base}\n\n${add}` : `${add}\n\n${base}`;
+      }
+      // Normalize the body whenever content is being written (no extra fetch when it isn't).
+      // format-skip.txt projects keep the body verbatim (id-based match).
+      if (patch.content !== undefined && !formatSkipped(up)) patch.content = normalizeTaskBody(patch.content).content;
+      const gate = reviewGate('task.updated', current, {
+        projectId: up,
+        taskId: uid,
+        patch,
+        ...(ifMatch !== undefined ? { ifMatch: String(ifMatch) } : {}),
+      });
       if (gate) return gate;
       const result = t?.update
-        ? await t.update(args.positional[0], args.positional[1], patch)
-        : await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
-      auditCliWrite('task.updated', result, { projectId: args.positional[0], taskId: args.positional[1] }, { fields: Object.keys(patch).filter((key) => patch[key] !== undefined) }, false, before);
-      return result;
+        ? await t.update(up, uid, patch)
+        : await adapter.updateTask(up, uid, { ...patch, tags: tagsToArray(patch.tags) });
+      auditCliWrite('task.updated', result, { projectId: up, taskId: uid }, {
+        fields: Object.keys(patch).filter((key) => patch[key] !== undefined),
+        ...(bodyMode && bodyMode !== 'content' ? { mode: bodyMode } : {}),
+        ...(ifMatch !== undefined ? { ifMatch: String(ifMatch) } : {}),
+      }, false, before);
+      return withContentHash(result);
     }
     case 'complete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
@@ -1355,6 +1534,11 @@ async function handleTasks() {
         rerank: !!args.options.rerank,
         rerankDepth: parseInt(args.options['rerank-depth']) || undefined,
         includeCompleted: !!args.options['include-completed'],
+        // --project <id|name> or --projects a,b binds retrieval to those projects.
+        project: args.options.projects !== undefined ? tagsToArray(args.options.projects) : args.options.project,
+        // --min-sources N keeps only results that N branches agree on.
+        minSources: parseInt(args.options['min-sources']) || undefined,
+        ...corpusFreshness(),
       };
       // Rich adapters bring their own embedder-backed find; generic adapters get
       // core's storage-agnostic keyword + native + RRF fan-out over the contract.
@@ -1379,6 +1563,7 @@ async function handleTasks() {
           limit,
           includeKeyword: false,
           includeNative: false,
+          ...corpusFreshness(),
           log: logUsage,
         })),
         mode: 'hybrid',
@@ -1393,7 +1578,15 @@ async function handleTasks() {
         console.error('Usage: ats tasks search [QUERY] [--tags TAGS] [--priority LEVEL]');
         process.exit(1);
       }
-      return t?.search ? await t.search(query, { tags, priority: args.options.priority }) : needsTaskExt('search', 'search');
+      if (!t?.search) return needsTaskExt('search', 'search');
+      const found = await t.search(query, { tags, priority: args.options.priority });
+      // An empty keyword match answers with the nearest items from the fused find.
+      if (query && found && typeof found === 'object' && !Array.isArray(found) && found.count === 0 && !(found.tasks || []).length) {
+        const suggestions = await suggestNearest(adapter, t, query);
+        const { hint } = emptyWithSuggestions('tasks', 'task', query, suggestions);
+        return { ...found, suggestions, hint };
+      }
+      return found;
     }
     case 'due':
       return t?.due ? await t.due(parseInt(args.positional[0]) || 7, { folder: args.options.folder }) : needsTaskExt('due', 'due');
@@ -1847,12 +2040,18 @@ async function handleNotes() {
     );
   }
   switch (args.subcommand) {
-    case 'find':
+    case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats notes find QUERY'); process.exit(1); }
-      return await n.find(args.positional[0], {
+      const notes = await n.find(args.positional[0], {
         project: args.options.project || wikiProject(),
         limit: parseInt(args.options.limit) || 10,
       });
+      const empty = Array.isArray(notes) ? notes.length === 0 : notes?.count === 0;
+      if (!empty) return notes;
+      // An empty title match answers with the nearest items from the fused find.
+      const suggestions = await suggestNearest(adapter, adapter.__ext?.tasks, args.positional[0]);
+      return emptyWithSuggestions('notes', 'note title', args.positional[0], suggestions);
+    }
     case 'get': {
       const ref = args.positional[0];
       if (!ref) { console.error('Usage: ats notes get ID_OR_TITLE [--extract raw|json|yaml]'); process.exit(1); }
@@ -1861,11 +2060,20 @@ async function handleNotes() {
         console.error('--extract must be one of: raw, json, yaml');
         process.exit(1);
       }
-      const result = await n.get(ref, {
-        project: args.options.project || wikiProject(),
-        extract,
-        exact: !!args.options.exact,
-      });
+      let result;
+      try {
+        result = await n.get(ref, {
+          project: args.options.project || wikiProject(),
+          extract,
+          exact: !!args.options.exact,
+        });
+      } catch (err) {
+        // A miss names the nearest items so the next call can be exact.
+        if (/^No (note|exact-title|close) /.test(err?.message || '')) {
+          err.message += nearestClause(await suggestNearest(adapter, adapter.__ext?.tasks, ref));
+        }
+        throw err;
+      }
       return extract ? { __raw: result } : result;
     }
     case 'url': {

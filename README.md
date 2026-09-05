@@ -86,7 +86,8 @@ ATS is a good fit when operational context already lives in task systems or conn
 ## What you get
 
 - **A two-way bus.** The agent reads the task fields an adapter provides; where the adapter supports writes, it writes results back where you'll see them.
-- **First-fetch relevance.** Capability-driven branches — keyword and adapter-native search, plus dense retrieval when available — are RRF-fused with provenance to reduce repeated search-and-refine loops.
+- **First-fetch relevance.** Capability-driven branches — keyword and adapter-native search, plus dense retrieval when available — are RRF-fused with provenance to reduce repeated search-and-refine loops. Every `find` carries a confidence verdict from branch agreement (`--min-sources N` is the matching gate), `--project` binds it to one project, a stale corpus cache answers immediately while it refreshes in the background, and an empty exact match (`notes find`, `search`, `get`) answers with the nearest items instead of nothing.
+- **Writes that survive retries and concurrency.** `update --append` / `--prepend` add to the body that is there; `--if-match <contentHash>` lands only while the body is unchanged; `create --if-absent` and `--idempotency-key` make a retried create return what the first one produced. One retry policy (`Retry-After`, jittered backoff, transient 5xx, dropped connections) sits under every adapter's HTTP path.
 - **Durable typed links.** One agent attaches a `decision` / `depends-on` / `output` / `supersedes` link; a later agent in a fresh context receives it via `ats context`. The handoff lives in the task app, not a chat log.
 - **Execution context.** `ats intent` captures outcome/why/done-when; `ats lifecycle` keeps stale context from steering current work; `ats security` records scoped allow/deny decisions for cooperating clients; `ats ledger` records what an agent did and whether the task advanced; `ats promote` turns exploration into a committed goal; `ats hierarchy evaluate` checks local work still supports its parent.
 - **Bounded events.** `ats events watch --json` emits deterministic `task.created/updated/completed/...` NDJSON, spooled `0600` with pending/ack recovery and stable dedup IDs. ATS only emits observations — a consumer still evaluates intent, validity, and security before acting.
@@ -94,7 +95,7 @@ ATS is a good fit when operational context already lives in task systems or conn
 - **A facts layer.** `ats kg` keeps durable subject–predicate–object knowledge beside the tasks: agents **propose**, a human **ratifies** (the only write path), and `ats kg ask` answers with deterministic lexical scoring plus full provenance — no LLM, no graph server, an append-only file that travels with `ats state export`. Retraction closes a fact's validity interval instead of deleting it, and `ats kg export --cypher` loads the graph into embedded engines (LadybugDB/Kùzu).
 - **Session-index handoff.** Coding-agent session browsers can keep raw transcript analytics while ATS stores the durable task-linked summary; see [`docs/agent-session-index.md`](docs/agent-session-index.md).
 
-ATS-managed execution metadata can be encoded in the task body, with typed links under `## Related` and consulted sources under `## References`. Managed helpers are designed to preserve human-authored rows and links, but a direct content update can replace the complete body; callers should read first, write the smallest intended change, and verify the result. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the execution-context path.
+ATS-managed execution metadata can be encoded in the task body, with typed links under `## Related` and consulted sources under `## References`. Managed helpers are designed to preserve human-authored rows and links; `update --content` replaces the complete body, so callers that add to a body use `--append` / `--prepend`, present the `contentHash` they read with `--if-match`, and verify the result. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the execution-context path.
 
 ## Minimal adapter-neutral workflow
 
@@ -170,7 +171,10 @@ ats auth login                      # delegate login to the active adapter
 ats doctor                          # inspect adapter and service health
 
 # Retrieval  (any read command takes --json for piping to jq / agents)
-ats find <query> [--explain]       # parallel + RRF + provenance — DEFAULT
+ats find <query> [--explain]       # parallel + RRF + provenance + confidence verdict — DEFAULT
+ats find <query> --project <id|name>   # bind retrieval to a project (--projects a,b for several)
+ats find <query> --min-sources 2   # keep only results two branches agree on
+ats find <query> --fresh           # refresh a stale corpus cache before answering
 ats open <project> <task>          # open any adapter item by explicit ids
 ats context <project> <task>       # task + valid linked/retrieved context
 ats link list <project> <task>     # list portable typed links
@@ -184,7 +188,9 @@ ats links <project> <task>         # resolve deep-links in a note body
 
 # Authoring
 ats create "<title>" [--content ..][--project <id>]
+ats create <project> "<title>" --if-absent --idempotency-key <k>   # never a duplicate on retry
 ats update <project> <task> [--content ..][--title ..]
+ats update <project> <task> --append "- 2026-09-05: shipped" --if-match <contentHash>   # add to the body; write only if unchanged
 
 # Agent execution context (portable across adapters)
 ats intent set <project> <task> --outcome ".." --done-when "a,b"
@@ -200,7 +206,8 @@ ats context <project> <task>
 ats kg propose "Acme GmbH" "prefers" "invoices as PDF" --domain sales --source "call 2026-08-01"
 ats review approve <id> && ats kg ratify --all
 ats kg ask "what does Acme prefer" --domain sales --json
-ats kg export --cypher > facts.cypher      # load into LadybugDB / Kùzu
+ats kg export --cypher > facts.cypher      # load into LadybugDB / Kùzu, full provenance on every fact
+ats kg export --cypher --include-retracted # closed facts too, with tInvalid and who retracted them
 ats ledger record <project> <task> --action release.verified --advanced true
 ats security set <project> <task> --trust trusted --allow-actions read --allow-resources task:self
 ats security check <project> <task> --action read --resource task:self --reason "load context"
@@ -209,7 +216,8 @@ ats events watch --json            # NDJSON observations; never launches agents
 # Ops
 ats review list                 # writes staged by approvalRequired targets
 ats review approve ID && ats review apply --all
-ats cache sync                  # refresh the corpus cache (cron-friendly)
+ats cache sync                  # refresh the corpus cache (find also refreshes a stale one in the background)
+ats cache status                # age, stale / servable / revalidating
 ats bench run
 ats bench score
 ats bench progress --json

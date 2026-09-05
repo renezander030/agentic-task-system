@@ -63,6 +63,14 @@ const adapter = {
   },
 
   // --- Optional ---
+  // One-shot corpus in retrieval shape: `ats cache sync` and every Core reader
+  // (find, dedup, garden) get exactly what the adapter's own `find` prefetches.
+  bulkFetch: async () => {
+    const { tasks: corpus, sourcesFailed } = await tasks.fetchCorpus();
+    adapter.__fetchWarnings = sourcesFailed.map((s) => ({ source: s.name || s.source, error: s.error }));
+    return corpus;
+  },
+
   listCompletedTasks: async (opts = {}) => {
     const done = await tasks.listCompleted({
       projectIds: opts.projectIds,

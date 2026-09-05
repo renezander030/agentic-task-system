@@ -11,6 +11,8 @@
  * highlight, or a `goal:`/`ziel:` line) is lifted back to the top.
  */
 
+import { createHash } from 'node:crypto';
+
 const HEADING = /^(#{1,6})\s+(.+?)\s*$/;
 const HIGHLIGHT = /^\s*::(.+?)::\s*$/;
 const GOAL_LINE = /^\s*(goal|ziel)\s*:\s*(.+?)\s*$/i;
@@ -20,6 +22,19 @@ const PLACEHOLDER_GOAL = /^todo\b.*set goal$/i;   // the "no goal found" sentine
 
 // Triage tag namespaces — used by callers to decide whether a task is already classified.
 export const TRIAGE_TAG = /^(route|type|model|effort|do|tool|review)[:-]/;
+
+/**
+ * Short, stable fingerprint of a task body for compare-and-swap writes
+ * (`ats update --if-match`). Line endings and trailing whitespace do not
+ * change it, so a body that round-trips through a backend hashes the same.
+ */
+export function contentHash(content = '') {
+  const canon = String(content ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n+$/, '');
+  return createHash('sha256').update(canon, 'utf8').digest('hex').slice(0, 12);
+}
 
 function promoteHeadings(content) {
   // migrate any-level "## Goal"/"## Log" (old triage H2 form) to canonical H1

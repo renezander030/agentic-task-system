@@ -83,23 +83,39 @@ score(doc) = Σ over branches  1 / (60 + rank_in_branch)
 
 Tag each result with `sources: [<branch>, ...]` listing which branches surfaced it.
 
+## Confidence
+
+Every `find` result carries `confidence: { verdict, reason, branchesRun, topAgreement }`, read off branch agreement on the top hit:
+
+- `strong` — two or more branches surfaced the top result, or its title is the query.
+- `weak` — several branches ran and only one found the top result.
+- `moderate` — a single branch ran, so agreement cannot be measured.
+- `none` — no results.
+
+`--min-sources N` is the matching precision gate: the fused pool is widened, only docs that N branches agree on are kept, then the top `--limit` is returned. The verdict also lands in the usage log (`meta.confidence`), so `ats bench analyze-usage` can show how often agents act on weak sets.
+
 ## Cache
 
 Corpus prefetch is the slow step (full project list + per-project tasks). Cached at:
 
 - `~/.config/ats/corpus-cache.json` — 5-min TTL by default
 - Override TTL: `ATS_CORPUS_TTL_MS=60000`
+- Stale ceiling: `ATS_CORPUS_STALE_MAX_MS=86400000` (24h by default)
 - Disable: `ATS_CORPUS_CACHE_DISABLE=1`
 
-The first call after expiration refreshes the corpus. Warm calls avoid that store fetch, but total wall-clock time still depends on corpus size, embeddings, native search, and custom branches; ATS does not guarantee a fixed latency.
+Within the TTL a call answers from the cache. Past the TTL, `find` still answers immediately from the stale copy — the result carries `corpus.stale: true` and `corpus.revalidating: true` — and a detached `ats cache sync` refreshes the cache for the next call (stale-while-revalidate). One refresh runs at a time; concurrent calls share it. Past the stale ceiling the next call refreshes first. `ats find ... --fresh` always refreshes first. Total wall-clock time still depends on corpus size, embeddings, native search, and custom branches; ATS does not guarantee a fixed latency.
 
-If the active adapter implements `bulkFetch()`, the prefetch uses it (one call). Otherwise, Core iterates `listProjects` → `listTasksInProject` (N+1 calls).
+If the active adapter implements `bulkFetch()`, the prefetch uses it (one call). Otherwise, Core iterates `listProjects` → `listTasksInProject` (N+1 calls). The TickTick adapter's `bulkFetch()` returns the same shape its own `find` prefetches, so `ats cache sync` and `find` always agree on the cache.
 
 ## Budget
 
 `ats find` accepts `--budget-ms <N>` (default 3000). Each branch races against the budget. Branches that don't complete in time contribute nothing — the merge is graceful.
 
 In practice, branches finish in 1–500ms once the corpus is cached. The budget protects against pathological cases (qdrant down, adapter unresponsive).
+
+## Scope
+
+`ats find "<query>" --project <id|name>` (or `--projects a,b`) binds retrieval to those projects: the corpus is filtered before any branch runs, and branches that reach past the corpus (the embedder's hybrid branch, the adapter's native search) are filtered on the way back. A project may be given as its full id, its short id, a composite-namespaced id (`backend:id`), or its name (leading decorations ignored). A partial name resolves when it names exactly one project (`scope.resolved`); several matches are listed in `scope.candidates`. The result carries `scope: { projects, matched, of }`; `matched: 0` with `count: 0` means the scope holds nothing, not that the query missed.
 
 ## Bench
 

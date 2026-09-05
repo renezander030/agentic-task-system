@@ -13,8 +13,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { retryingFetch } from '@reneza/ats-core/retry';
 
 const DEFAULT_ENDPOINT = 'https://api.github.com';
+const ghFetch = retryingFetch((...a) => fetch(...a), { label: 'GitHub' });
 const PER_PAGE = 100;
 const API_VERSION = '2022-11-28';
 
@@ -47,7 +49,6 @@ export function configPath() {
   );
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Authenticated GitHub request with JSON parsing and secondary-rate-limit backoff.
@@ -76,33 +77,22 @@ export async function gh(apiPath, opts = {}) {
     init.body = JSON.stringify(opts.body);
   }
 
-  // GitHub returns 403/429 with Retry-After on secondary rate limits. Retry a few times.
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, init);
-    if ((res.status === 403 || res.status === 429) && attempt < 4) {
-      const retryAfter = Number(res.headers.get('retry-after'));
-      const remaining = res.headers.get('x-ratelimit-remaining');
-      if (retryAfter || remaining === '0') {
-        const reset = Number(res.headers.get('x-ratelimit-reset'));
-        const resetMs = reset ? Math.max(0, reset * 1000 - Date.now()) : 0;
-        const wait = retryAfter * 1000 || resetMs || 1000 * (attempt + 1);
-        await sleep(Math.min(wait, 60000));
-        continue;
-      }
-    }
-    const text = await res.text();
-    let json;
-    try {
-      json = text ? JSON.parse(text) : {};
-    } catch {
-      json = { raw: text };
-    }
-    if (!res.ok) {
-      const msg = json?.message || json?.error || text || res.statusText;
-      throw new Error(`GitHub ${res.status} on ${apiPath}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
-    }
-    return { json, res };
+  // GitHub answers 403/429 with Retry-After or an exhausted x-ratelimit window on
+  // secondary rate limits; core's retry policy waits them out (capped), and also
+  // covers gateway 5xx and dropped connections.
+  const res = await ghFetch(url, init);
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
   }
+  if (!res.ok) {
+    const msg = json?.message || json?.error || text || res.statusText;
+    throw new Error(`GitHub ${res.status} on ${apiPath}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
+  }
+  return { json, res };
 }
 
 /** Parse the `rel="next"` url out of a Link header, if any. */

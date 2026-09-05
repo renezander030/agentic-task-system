@@ -1,5 +1,6 @@
 export { validateAdapter, adapterCapabilities } from './adapter-interface.js';
 export { withLock, withLockSync, writeFileAtomicSync } from './fs-lock.js';
+export { withRetry, retryingFetch, retryPolicy, isTransientResponse, isTransientError } from './retry.js';
 export {
   REVIEW_QUEUE_VERSION,
   reviewQueuePath,
@@ -11,6 +12,7 @@ export {
   markReviewItemApplied,
   writeRequiresApproval,
 } from './review-queue.js';
+export { guardWrite } from './write-guard.js';
 export { STATE_BUNDLE_VERSION, stateFileRegistry, exportState, importState } from './state-bundle.js';
 export {
   kgFactsPath,
@@ -23,7 +25,7 @@ export {
   kgStats,
   exportFactsCypher,
 } from './kg.js';
-export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, RRF_K } from './retrieval.js';
+export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, projectScope, findConfidence, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';
 export { gardenSweep, formatGarden } from './garden.js';
 export {
@@ -88,4 +90,4 @@ export {
   scoreProgressEpisodes,
   formatProgressBenchmark,
 } from './progress-benchmark.js';
-export { normalizeTaskBody, TRIAGE_TAG } from './task-format.js';
+export { normalizeTaskBody, contentHash, TRIAGE_TAG } from './task-format.js';
