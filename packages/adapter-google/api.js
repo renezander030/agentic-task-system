@@ -12,6 +12,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { retryingFetch } from '@reneza/ats-core/retry';
+
+const googleFetch = retryingFetch((...a) => fetch(...a), { label: 'Google' });
 
 export const DOC_TYPES = {
   sheets: {
@@ -109,7 +112,7 @@ export async function exchangeCode(code, cfg = loadConfig()) {
     redirect_uri: cfg.redirectUri,
     grant_type: 'authorization_code',
   });
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await googleFetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
@@ -137,7 +140,7 @@ export async function getAccessToken(cfg = loadConfig()) {
     refresh_token: cfg.refreshToken,
     grant_type: 'refresh_token',
   });
-  const res = await fetch('https://oauth2.googleapis.com/token', {
+  const res = await googleFetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
@@ -154,7 +157,7 @@ export async function g(url, token, query) {
   for (const [k, v] of Object.entries(query || {})) {
     if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v));
   }
-  const res = await fetch(u, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await googleFetch(u, { headers: { Authorization: `Bearer ${token}` } });
   const text = await res.text();
   let json;
   try {

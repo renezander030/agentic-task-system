@@ -61,6 +61,10 @@
     "./adapter-interface": {
       "types": "./adapter-interface.d.ts",
       "default": "./adapter-interface.js"
+    },
+    "./retry": {
+      "types": "./retry.d.ts",
+      "default": "./retry.js"
     }
   },
   "license": "MIT",

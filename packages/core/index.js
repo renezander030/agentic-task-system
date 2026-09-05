@@ -1,5 +1,6 @@
 export { validateAdapter, adapterCapabilities } from './adapter-interface.js';
 export { withLock, withLockSync, writeFileAtomicSync } from './fs-lock.js';
+export { withRetry, retryingFetch, retryPolicy, isTransientResponse, isTransientError } from './retry.js';
 export {
   REVIEW_QUEUE_VERSION,
   reviewQueuePath,

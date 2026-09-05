@@ -13,8 +13,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { retryingFetch } from '@reneza/ats-core/retry';
 
 const DEFAULT_ENDPOINT = 'https://api.notion.com';
+const notionFetch = retryingFetch((...a) => fetch(...a), { label: 'Notion' });
 const NOTION_VERSION = '2022-06-28';
 const PAGE_SIZE = 100;
 
@@ -48,7 +50,6 @@ export function configPath() {
   );
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Authenticated Notion request with JSON parsing and 429 backoff.
@@ -69,27 +70,21 @@ export async function notion(apiPath, opts = {}) {
   };
   if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
 
-  // Notion rate-limits at ~3 req/sec -> 429 with Retry-After. Retry a few times.
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, init);
-    if (res.status === 429 && attempt < 4) {
-      const wait = Number(res.headers.get('retry-after')) * 1000 || 1000 * (attempt + 1);
-      await sleep(wait);
-      continue;
-    }
-    const text = await res.text();
-    let json;
-    try {
-      json = text ? JSON.parse(text) : {};
-    } catch {
-      json = { raw: text };
-    }
-    if (!res.ok) {
-      const msg = json?.message || json?.code || text || res.statusText;
-      throw new Error(`Notion ${res.status} on ${apiPath}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
-    }
-    return json;
+  // Notion rate-limits at ~3 req/sec -> 429 with Retry-After; core's retry policy
+  // honors it (plus gateway 5xx and dropped connections) with jittered backoff.
+  const res = await notionFetch(url, init);
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
   }
+  if (!res.ok) {
+    const msg = json?.message || json?.code || text || res.statusText;
+    throw new Error(`Notion ${res.status} on ${apiPath}: ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
+  }
+  return json;
 }
 
 /** Plain text from a Notion rich_text array. */
