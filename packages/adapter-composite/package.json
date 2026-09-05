@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-adapter-composite",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Cross-source adapter for the Agentic Task System. Query GitHub + Notion + TickTick + any ATS backends as ONE fused corpus: a single `ats find` returns one RRF-ranked list across all of them, each result tagged with its backend. The thing a single-vendor MCP server can't do.",
   "type": "module",
   "main": "index.js",
@@ -12,7 +12,7 @@
     "test": "node --test"
   },
   "peerDependencies": {
-    "@reneza/ats-core": "^0.11.0"
+    "@reneza/ats-core": "^0.12.0"
   },
   "dependencies": {},
   "repository": {

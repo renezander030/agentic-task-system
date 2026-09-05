@@ -3,7 +3,7 @@
 
 ## 0.12.0 - Retry policy, stale-while-revalidate, scoped find, safe writes
 
-Unreleased — version bump, date, tag, and npm publish follow review.
+Released 2026-09-05.
 
 - **One retry policy for every adapter's HTTP path.** A 429, a gateway 5xx, a 500 whose body names a query or rate limit (TickTick's `exceed_query_limit`), a 403 carrying `Retry-After` or an exhausted rate-limit window (GitHub), and dropped connections are retried with jittered exponential backoff that honors `Retry-After` and `x-ratelimit-reset`. TickTick, Notion, GitHub, Airtable and Google ride the same `@reneza/ats-core/retry`; a plain 4xx returns on the first attempt. Knobs: `ATS_HTTP_RETRIES` (3; 0 disables), `ATS_HTTP_RETRY_BASE_MS`, `ATS_HTTP_RETRY_MAX_MS`.
 - **Stale-while-revalidate corpus cache.** Past the 5-minute TTL, `find` answers immediately from the stale copy — the result says `corpus.stale: true, revalidating: true` — while a detached `ats cache sync` refreshes the cache for the next call. One refresh lease at a time; concurrent calls share it. `ATS_CORPUS_STALE_MAX_MS` (24h) is the ceiling past which a read refreshes first; `ats find … --fresh` always refreshes first. `ats cache status` and `ats doctor` show stale / servable / revalidating. The TickTick adapter gains `bulkFetch()` in retrieval shape, so `ats cache sync`, `find`, `dedup` and `garden` all read the same cache.
