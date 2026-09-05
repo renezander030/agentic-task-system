@@ -418,6 +418,40 @@ async function activeTaskWithTitle(adapter, t, projectId, title) {
   return findActiveByTitle(tasks, title);
 }
 
+// Zero-result recovery: an exact-match path that finds nothing (notes find,
+// search, notes get) answers with the fused find's nearest items, so an
+// agent's next call is informed instead of a blind re-query. The recovery
+// never fails the primary call: any error here reads as "nothing nearby".
+async function suggestNearest(adapter, t, query) {
+  try {
+    const opts = { limit: 5, budgetMs: 1500, staleOk: true, revalidate: false };
+    const found = t?.find
+      ? await t.find(query, opts)
+      : await coreFind(query, { adapter, ...opts, log: logUsage });
+    return (found?.tasks || []).map((d) => ({
+      id: d.id,
+      projectId: d.projectId,
+      ...(d.projectName ? { projectName: d.projectName } : {}),
+      title: d.title,
+      ...(Array.isArray(d.sources) ? { sources: d.sources } : {}),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function emptyWithSuggestions(kind, label, query, suggestions) {
+  const hint = suggestions.length
+    ? `No ${label} matched "${query}" exactly; the ${suggestions.length} nearest item(s) via ats find are in suggestions.`
+    : `No ${label} matched "${query}", and ats find found nothing nearby either.`;
+  return { query, count: 0, [kind]: [], suggestions, hint };
+}
+
+function nearestClause(suggestions) {
+  if (!suggestions.length) return '';
+  return ` Nearest via ats find: ${suggestions.map((s) => `"${s.title}" (${s.projectId}/${s.id})`).join(', ')}.`;
+}
+
 // Attach the body fingerprint a later `--if-match` write can present.
 function withContentHash(result) {
   const task = result?.task || result;
@@ -1542,7 +1576,15 @@ async function handleTasks() {
         console.error('Usage: ats tasks search [QUERY] [--tags TAGS] [--priority LEVEL]');
         process.exit(1);
       }
-      return t?.search ? await t.search(query, { tags, priority: args.options.priority }) : needsTaskExt('search', 'search');
+      if (!t?.search) return needsTaskExt('search', 'search');
+      const found = await t.search(query, { tags, priority: args.options.priority });
+      // An empty keyword match answers with the nearest items from the fused find.
+      if (query && found && typeof found === 'object' && !Array.isArray(found) && found.count === 0 && !(found.tasks || []).length) {
+        const suggestions = await suggestNearest(adapter, t, query);
+        const { hint } = emptyWithSuggestions('tasks', 'task', query, suggestions);
+        return { ...found, suggestions, hint };
+      }
+      return found;
     }
     case 'due':
       return t?.due ? await t.due(parseInt(args.positional[0]) || 7, { folder: args.options.folder }) : needsTaskExt('due', 'due');
@@ -1996,12 +2038,18 @@ async function handleNotes() {
     );
   }
   switch (args.subcommand) {
-    case 'find':
+    case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats notes find QUERY'); process.exit(1); }
-      return await n.find(args.positional[0], {
+      const notes = await n.find(args.positional[0], {
         project: args.options.project || wikiProject(),
         limit: parseInt(args.options.limit) || 10,
       });
+      const empty = Array.isArray(notes) ? notes.length === 0 : notes?.count === 0;
+      if (!empty) return notes;
+      // An empty title match answers with the nearest items from the fused find.
+      const suggestions = await suggestNearest(adapter, adapter.__ext?.tasks, args.positional[0]);
+      return emptyWithSuggestions('notes', 'note title', args.positional[0], suggestions);
+    }
     case 'get': {
       const ref = args.positional[0];
       if (!ref) { console.error('Usage: ats notes get ID_OR_TITLE [--extract raw|json|yaml]'); process.exit(1); }
@@ -2010,11 +2058,20 @@ async function handleNotes() {
         console.error('--extract must be one of: raw, json, yaml');
         process.exit(1);
       }
-      const result = await n.get(ref, {
-        project: args.options.project || wikiProject(),
-        extract,
-        exact: !!args.options.exact,
-      });
+      let result;
+      try {
+        result = await n.get(ref, {
+          project: args.options.project || wikiProject(),
+          extract,
+          exact: !!args.options.exact,
+        });
+      } catch (err) {
+        // A miss names the nearest items so the next call can be exact.
+        if (/^No (note|exact-title|close) /.test(err?.message || '')) {
+          err.message += nearestClause(await suggestNearest(adapter, adapter.__ext?.tasks, ref));
+        }
+        throw err;
+      }
       return extract ? { __raw: result } : result;
     }
     case 'url': {

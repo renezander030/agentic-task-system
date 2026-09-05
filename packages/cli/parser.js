@@ -900,7 +900,8 @@ Cross-references use the active adapter's native deep-link markdown form.
 Usage: ats notes <subcommand> [options]
 
 Subcommands:
-  find <query>                          Search note titles (fuzzy match)
+  find <query>                          Search note titles (fuzzy match); an empty
+                                        match answers with the nearest items via find
   get <id-or-title>                     Get note (default: structured object)
   url <id-or-title>                     Emit a markdown link to the note,
                                         ready to paste into a task body
@@ -946,7 +947,8 @@ Subcommands:
   update <project_id> <task_id>    Update task
   complete <project_id> <task_id>  Complete task
   delete <project_id> <task_id>    Delete task
-  search <keyword>                 Search all tasks (keyword match)
+  search <keyword>                 Search all tasks (keyword match); an empty
+                                   match carries the nearest items via find
   semantic <query>                 Semantic search (vector similarity)
   hybrid <query>                   Hybrid retrieval — semantic + keyword fusion (RRF)
   find <query>                     Time-bounded parallel retrieval over every
