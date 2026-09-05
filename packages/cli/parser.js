@@ -328,6 +328,10 @@ function formatFindResults(obj) {
     .map((b) => `${b.name} ${b.ok ? `${b.count}` : '✗'}/${b.elapsedMs}ms${b.error ? ` (${b.error})` : ''}`)
     .join(', ');
   if (branchInfo) lines.push(`branches: ${branchInfo}`);
+  if (obj.confidence) {
+    const gate = obj.minSources ? `, min-sources ${obj.minSources}` : '';
+    lines.push(`confidence: ${obj.confidence.verdict} (${obj.confidence.reason}${gate})`);
+  }
   if (obj.k !== undefined) lines.push(`RRF k=${obj.k} (contribution = 1/(k+rank))`);
   lines.push('');
 
@@ -953,6 +957,9 @@ Subcommands:
                                    --budget-ms tune breadth/deadline.
                                    --project <id|name> (or --projects a,b)
                                    binds retrieval to those projects.
+                                   --min-sources N keeps only results N
+                                   branches agree on; every result carries
+                                   a confidence verdict.
                                    --fresh refreshes a stale corpus cache
                                    before answering.
   similar <task_id>                Find semantically similar tasks

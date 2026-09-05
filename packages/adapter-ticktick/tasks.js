@@ -593,7 +593,7 @@ export async function fetchCorpus(deps = {}, { includeCompleted = false } = {}) 
 }
 
 export async function find(query, options = {}, deps = {}) {
-  const { limit = 5, budgetMs = 3000, explain = false, includeCompleted = false, staleOk = true, revalidate, project } = options;
+  const { limit = 5, budgetMs = 3000, explain = false, includeCompleted = false, staleOk = true, revalidate, project, minSources } = options;
   const {
     vectorHybrid = vectorFunctions.hybrid,
     loadCorpus: loadCorpusOverride,
@@ -672,6 +672,7 @@ export async function find(query, options = {}, deps = {}) {
     budgetMs,
     explain,
     project,
+    minSources,
     embedder: { hybrid: vectorHybrid },
     retrievers: [notesFind],
     loadCorpus,

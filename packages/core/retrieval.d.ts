@@ -105,6 +105,8 @@ export interface FindOptions {
   revalidate?: (() => unknown) | false;
   /** Bind retrieval to these projects (full id, short id, `backend:id`, or name). */
   project?: string | string[];
+  /** Keep only results that at least this many branches agree on (default 1). */
+  minSources?: number;
   /** Override the corpus loader (store-specific prefetch). */
   loadCorpus?: () => Promise<CorpusResult>;
   /** Usage-log record callback. */
@@ -135,11 +137,25 @@ export interface FindResult {
   error?: string;
   /** Present when the query was scoped: the projects asked for and how much of the corpus they cover. */
   scope?: { projects: string[]; matched: number; of: number };
+  /** How much to trust the set, from branch agreement on the top hit. */
+  confidence: FindConfidence;
+  /** The agreement gate that was applied, when greater than 1. */
+  minSources?: number;
   branches: BranchSummary[];
   /** RRF constant; present only when explain=true (contribution = 1/(k+rank)). */
   k?: number;
   tasks: FusedDoc[];
 }
+
+export interface FindConfidence {
+  verdict: 'strong' | 'moderate' | 'weak' | 'none';
+  reason: string;
+  branchesRun: number;
+  topAgreement: number;
+}
+
+/** Confidence verdict for a fused result set. */
+export function findConfidence(query: string, tasks: FusedDoc[], branchesRun: number): FindConfidence;
 
 /** Corpus filter for one or more project references; null when none are given. */
 export function projectScope(project?: string | string[] | null): ((task: Task) => boolean) | null;

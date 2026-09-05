@@ -83,6 +83,17 @@ score(doc) = Σ over branches  1 / (60 + rank_in_branch)
 
 Tag each result with `sources: [<branch>, ...]` listing which branches surfaced it.
 
+## Confidence
+
+Every `find` result carries `confidence: { verdict, reason, branchesRun, topAgreement }`, read off branch agreement on the top hit:
+
+- `strong` — two or more branches surfaced the top result, or its title is the query.
+- `weak` — several branches ran and only one found the top result.
+- `moderate` — a single branch ran, so agreement cannot be measured.
+- `none` — no results.
+
+`--min-sources N` is the matching precision gate: the fused pool is widened, only docs that N branches agree on are kept, then the top `--limit` is returned. The verdict also lands in the usage log (`meta.confidence`), so `ats bench analyze-usage` can show how often agents act on weak sets.
+
 ## Cache
 
 Corpus prefetch is the slow step (full project list + per-project tasks). Cached at:

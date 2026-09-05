@@ -1085,9 +1085,13 @@ Backend: ${source.pkg} (${source.origin})${wiki ? ` · wiki project: "${wiki}"` 
   or call its API directly. Every read command takes \`--json\` for piping.
 - Retrieve before you ask: \`ats find "<query>"\` (add \`--explain\` to see why
   results ranked, \`--rerank\` for match-quality ordering,
-  \`--include-completed\` for retrospectives). Treat \`degraded: true\` plus
-  \`warnings\` as a partial result — say so instead of presenting it as
-  complete.
+  \`--include-completed\` for retrospectives, \`--project <id|name>\` to stay
+  inside one project). Treat \`degraded: true\` plus \`warnings\` as a partial
+  result — say so instead of presenting it as complete.
+- Read \`confidence.verdict\` before acting on a result: \`strong\` means the
+  branches agree on the top hit; \`weak\` means one branch alone found it —
+  refine the query or scope (or pass \`--min-sources 2\`) before treating it as
+  the answer.
 - Read with \`ats get <project> <task>\`; write with patch semantics via
   \`ats update\`. Every write is ledgered and reversible (\`ats undo\`).
 - Record execution context as you work: \`ats intent\` (outcome / why /
@@ -1496,6 +1500,8 @@ async function handleTasks() {
         includeCompleted: !!args.options['include-completed'],
         // --project <id|name> or --projects a,b binds retrieval to those projects.
         project: args.options.projects !== undefined ? tagsToArray(args.options.projects) : args.options.project,
+        // --min-sources N keeps only results that N branches agree on.
+        minSources: parseInt(args.options['min-sources']) || undefined,
         ...corpusFreshness(),
       };
       // Rich adapters bring their own embedder-backed find; generic adapters get

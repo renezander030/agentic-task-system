@@ -229,6 +229,28 @@ async function syncCorpusCacheUnleased(adapter, { full = false } = {}) {
   };
 }
 
+/**
+ * How much to trust a fused result set, from branch agreement on the top hit:
+ * `strong` when two or more branches surfaced it (or its title is the query),
+ * `weak` when several branches ran and only one found it, `moderate` when a
+ * single branch ran and agreement cannot be measured, `none` for no results.
+ */
+export function findConfidence(query, tasks, branchesRun) {
+  const top = tasks[0];
+  if (!top) return { verdict: 'none', reason: 'no results', branchesRun, topAgreement: 0 };
+  const topAgreement = Array.isArray(top.sources) ? top.sources.length : 0;
+  const q = String(query || '').trim().toLowerCase();
+  const exactTitle = q.length > 0 && String(top.title || '').trim().toLowerCase() === q;
+  if (exactTitle) return { verdict: 'strong', reason: 'top result title is the query', branchesRun, topAgreement };
+  if (topAgreement >= 2) {
+    return { verdict: 'strong', reason: `top result found by ${topAgreement} of ${branchesRun} branches`, branchesRun, topAgreement };
+  }
+  if (branchesRun < 2) {
+    return { verdict: 'moderate', reason: 'one branch ran; agreement cannot be measured', branchesRun, topAgreement };
+  }
+  return { verdict: 'weak', reason: `top result found by 1 of ${branchesRun} branches`, branchesRun, topAgreement };
+}
+
 /** Project names compare without leading decorations ("🔶Notes" == "notes"). */
 function plainName(value) {
   return String(value || '').normalize('NFKC').replace(/^[^\p{L}\p{N}]+/u, '').trim().toLowerCase();
@@ -468,6 +490,7 @@ export async function find(query, cfg = {}) {
     staleOk = true,
     revalidate,
     project,
+    minSources = 1,
     loadCorpus: loadCorpusOverride,
     log,
   } = cfg;
@@ -618,7 +641,12 @@ export async function find(query, cfg = {}) {
   // to `limit`. A failing reranker never sinks the query — it falls back to the
   // fused order and is recorded as a degraded source (surfaced below).
   const depth = rerankDepth || Math.max(limit * 4, candidatesPerSource);
-  let tasks = fuse(branches, { k, limit: rerank ? depth : limit, explain });
+  const agreementGate = Number.isInteger(minSources) && minSources > 1 ? minSources : 1;
+  const widen = rerank || agreementGate > 1;
+  let tasks = fuse(branches, { k, limit: widen ? depth : limit, explain });
+  // Precision gate: keep only docs that at least `minSources` branches agree on.
+  if (agreementGate > 1) tasks = tasks.filter((d) => (d.sources?.length || 0) >= agreementGate);
+  if (!rerank && widen) tasks = tasks.slice(0, limit);
   let reranked = false;
   if (rerank) {
     const reranker = typeof rerank === 'function' ? rerank : builtinRerank;
@@ -656,6 +684,7 @@ export async function find(query, cfg = {}) {
     ...settled.filter((b) => !b.ok).map((b) => `retrieval branch "${b.name}" failed: ${b.error}`),
   ];
   const degraded = warnings.length > 0;
+  const confidence = findConfidence(query, tasks, branches.length);
 
   if (typeof log === 'function') {
     log({
@@ -664,7 +693,7 @@ export async function find(query, cfg = {}) {
       resultCount: tasks.length,
       topId: tasks[0]?.id || null,
       durationMs: Date.now() - t0,
-      meta: { budgetMs, degraded, branches: branchSummary, ...(scope ? { scope } : {}) },
+      meta: { budgetMs, degraded, confidence: confidence.verdict, branches: branchSummary, ...(scope ? { scope } : {}) },
     });
   }
 
@@ -673,6 +702,8 @@ export async function find(query, cfg = {}) {
     mode: 'find',
     count: tasks.length,
     degraded,
+    confidence,
+    ...(agreementGate > 1 ? { minSources: agreementGate } : {}),
     ...(rerank ? { reranked } : {}),
     ...(scope ? { scope } : {}),
     elapsedMs: Date.now() - t0,

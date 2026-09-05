@@ -65,3 +65,15 @@ test('find --project scopes the result and reports the scope', () => {
   assert.equal(several.count, 2);
   assert.deepEqual(several.scope.projects, ['p1', 'p2']);
 });
+
+test('find carries a confidence verdict and honors --min-sources', () => {
+  const out = run('find', 'Release');
+  assert.ok(['strong', 'moderate', 'weak', 'none'].includes(out.confidence.verdict));
+  assert.equal(out.confidence.branchesRun, 1, 'the generic adapter runs the keyword branch only');
+  assert.equal(out.confidence.verdict, 'moderate');
+
+  const gated = run('find', 'Release', '--min-sources', '2');
+  assert.equal(gated.minSources, 2);
+  assert.equal(gated.count, 0, 'one branch cannot satisfy an agreement of two');
+  assert.equal(gated.confidence.verdict, 'none');
+});
