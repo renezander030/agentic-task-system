@@ -13,6 +13,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param {string[]} args - process.argv.slice(2)
  * @returns {{ command: string, subcommand: string, positional: string[], options: object }}
  */
+/** `-h`, `-v`, `--anything`: a token that reads as a flag rather than a value. */
+function looksLikeFlag(token) {
+  return /^--?[A-Za-z]/.test(token);
+}
+
 export function parseArgs(args) {
   const result = {
     command: null,
@@ -39,8 +44,13 @@ export function parseArgs(args) {
       // Ergonomic shorthand for `--format json`. Makes every read command emit
       // machine-readable output for piping into jq / agents.
       result.options.format = 'json';
-    } else if (arg.startsWith('--') && args[i + 1] && !args[i + 1].startsWith('-')) {
-      // Generic option with value
+    } else if (arg.startsWith('--') && arg.includes('=')) {
+      // `--key=value` binds the whole remainder, whatever it starts with.
+      const eq = arg.indexOf('=');
+      result.options[arg.slice(2, eq)] = arg.slice(eq + 1);
+    } else if (arg.startsWith('--') && args[i + 1] !== undefined && !looksLikeFlag(args[i + 1])) {
+      // Generic option with value. A value may start with a dash when it is not
+      // flag-shaped: a log bullet ("- 2026-09-05: shipped") or a negative number.
       const key = arg.slice(2);
       result.options[key] = args[++i];
     } else if (arg.startsWith('--')) {
@@ -953,6 +963,11 @@ Create/Update options:
   --tags <tags>          Comma-separated tags
   --reminder <time>      Reminder: 15m, 1h, 1d (before due)
   --title <text>         New title (update only)
+  --append <text>        (update) Add text after the current body; the body
+                         is never replaced
+  --prepend <text>       (update) Add text before the current body
+  --if-match <hash>      (update) Write only while the body still has this
+                         contentHash (from 'tasks get'); exit 3 if it changed
   --relevance            (create) Append a Relevance Rule instruction block
                          after the result so the active agent can
                          decide a trunk and follow up with 'tasks update'.
@@ -983,6 +998,7 @@ Examples:
   ats tasks create "Call mom" --tags "personal,family"
   ats tasks create PROJECT_ID "Task in specific project"
   ats tasks list PROJECT_ID
+  ats tasks update PROJECT_ID TASK_ID --append "- 2026-09-05: shipped" --if-match 3f9c1e2ab7d4
   ats tasks complete PROJECT_ID TASK_ID
   ats tasks search "meeting"
   ats tasks search --tags "work"

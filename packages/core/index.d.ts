@@ -32,6 +32,9 @@ export {
 export { record as logUsage } from './usage-log.js';
 
 export { withRetry, retryingFetch, retryPolicy, isTransientResponse, isTransientError } from './retry.js';
+
+/** Short fingerprint of a task body for compare-and-swap writes (`ats update --if-match`). */
+export function contentHash(content?: string): string;
 export type { RetryPolicy, RetryOptions } from './retry.js';
 
 export { SESSION_INDEX_VERSION, normalizeSessionIndexEntry, normalizeSessionIndex, sessionIndexTaskBody } from './session-index.js';

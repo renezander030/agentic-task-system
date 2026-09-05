@@ -80,6 +80,7 @@ import {
   snapshotTaskEvents,
   collectAndSpoolTaskEvents,
   normalizeTaskBody,
+  contentHash,
   TRIAGE_TAG,
   syncCorpusCache,
   stageReviewItem,
@@ -365,8 +366,23 @@ async function main() {
     }
   } catch (err) {
     console.error(`Error: ${err.message}`);
-    process.exit(1);
+    // Exit codes an agent can branch on: 3 = precondition failed (--if-match).
+    process.exit(Number.isInteger(err?.exitCode) ? err.exitCode : 1);
   }
+}
+
+function withExitCode(err, code) {
+  err.exitCode = code;
+  return err;
+}
+
+// Attach the body fingerprint a later `--if-match` write can present.
+function withContentHash(result) {
+  const task = result?.task || result;
+  if (task && typeof task === 'object' && typeof task.content === 'string') {
+    result.contentHash = contentHash(task.content);
+  }
+  return result;
 }
 
 async function handleConfig() {
@@ -857,10 +873,19 @@ async function applyReviewedWrite(item, adapter, t) {
   switch (p.action) {
     case 'task.updated': {
       let before;
+      let curTask = null;
       try {
         const cur = t?.get ? await t.get(p.projectId, p.taskId) : await adapter.getTask(p.projectId, p.taskId);
-        before = snapshotTask(cur?.task || cur);
+        curTask = cur?.task || cur;
+        before = snapshotTask(curTask);
       } catch { before = undefined; }
+      // A staged compare-and-swap write still only lands on the body it was staged against.
+      if (p.ifMatch !== undefined) {
+        const actual = contentHash(curTask?.content || '');
+        if (actual !== String(p.ifMatch)) {
+          throw new Error(`Precondition failed: ${p.projectId}/${p.taskId} changed since the write was staged (content hash ${actual}, expected ${p.ifMatch}).`);
+        }
+      }
       const result = t?.update
         ? await t.update(p.projectId, p.taskId, p.patch)
         : await adapter.updateTask(p.projectId, p.taskId, { ...p.patch, tags: tagsToArray(p.patch?.tags) });
@@ -1224,8 +1249,8 @@ async function handleTasks() {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks get PROJECT_ID TASK_ID'); process.exit(1); }
       const [gp, gid] = args.positional;
       const got = t?.get ? await t.get(gp, gid) : await adapter.getTask(gp, gid);
-      if (args.options['no-format'] === true || process.env.ATS_GET_NOFORMAT) return got;
-      return await formatTriageOnGet(t, adapter, gp, gid, got);
+      if (args.options['no-format'] === true || process.env.ATS_GET_NOFORMAT) return withContentHash(got);
+      return withContentHash(await formatTriageOnGet(t, adapter, gp, gid, got));
     }
     case 'normalize': {
       // Structure-only backfill (no triage/LLM): lift Goal, ensure Log, preserve Notes.
@@ -1313,6 +1338,12 @@ async function handleTasks() {
     }
     case 'update': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
+      const [up, uid] = args.positional;
+      // Body modes: --content replaces, --append/--prepend add to what is there.
+      const bodyModes = ['content', 'append', 'prepend'].filter((k) => args.options[k] !== undefined && args.options[k] !== true);
+      if (bodyModes.length > 1) { console.error('Use one of --content, --append, --prepend.'); process.exit(1); }
+      const bodyMode = bodyModes[0];
+      const ifMatch = args.options['if-match'];
       const patch = {
         title: args.options.title,
         content: args.options.content,
@@ -1321,23 +1352,52 @@ async function handleTasks() {
         tags: args.options.tags,
         reminder: args.options.reminder,
       };
-      // Normalize the body whenever content is being written (no extra fetch when it isn't).
-      // format-skip.txt projects keep the body verbatim (id-based match).
-      if (patch.content !== undefined && !formatSkipped(args.positional[0])) patch.content = normalizeTaskBody(patch.content).content;
       // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
       let before;
       let current = null;
       try {
-        current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]);
+        current = t?.get ? await t.get(up, uid) : await adapter.getTask(up, uid);
         before = snapshotTask(current?.task || current);
       } catch { before = undefined; }
-      const gate = reviewGate('task.updated', current, { projectId: args.positional[0], taskId: args.positional[1], patch });
+      const currentTask = current?.task || current;
+      const needsBody = ifMatch !== undefined || bodyMode === 'append' || bodyMode === 'prepend';
+      if (needsBody && !currentTask) {
+        throw new Error(`Cannot read ${up}/${uid} — --append, --prepend and --if-match need the current body.`);
+      }
+      // Compare-and-swap: the write only lands on the body the caller read.
+      if (ifMatch !== undefined) {
+        const actual = contentHash(currentTask.content || '');
+        if (String(ifMatch) !== actual) {
+          throw withExitCode(new Error(
+            `Precondition failed: ${up}/${uid} changed since it was read (content hash ${actual}, expected ${ifMatch}). ` +
+            `Re-read it and retry with --if-match ${actual}.`
+          ), 3);
+        }
+      }
+      if (bodyMode === 'append' || bodyMode === 'prepend') {
+        const base = String(currentTask.content || '').replace(/\s+$/, '');
+        const add = String(args.options[bodyMode]);
+        patch.content = !base ? add : bodyMode === 'append' ? `${base}\n\n${add}` : `${add}\n\n${base}`;
+      }
+      // Normalize the body whenever content is being written (no extra fetch when it isn't).
+      // format-skip.txt projects keep the body verbatim (id-based match).
+      if (patch.content !== undefined && !formatSkipped(up)) patch.content = normalizeTaskBody(patch.content).content;
+      const gate = reviewGate('task.updated', current, {
+        projectId: up,
+        taskId: uid,
+        patch,
+        ...(ifMatch !== undefined ? { ifMatch: String(ifMatch) } : {}),
+      });
       if (gate) return gate;
       const result = t?.update
-        ? await t.update(args.positional[0], args.positional[1], patch)
-        : await adapter.updateTask(args.positional[0], args.positional[1], { ...patch, tags: tagsToArray(patch.tags) });
-      auditCliWrite('task.updated', result, { projectId: args.positional[0], taskId: args.positional[1] }, { fields: Object.keys(patch).filter((key) => patch[key] !== undefined) }, false, before);
-      return result;
+        ? await t.update(up, uid, patch)
+        : await adapter.updateTask(up, uid, { ...patch, tags: tagsToArray(patch.tags) });
+      auditCliWrite('task.updated', result, { projectId: up, taskId: uid }, {
+        fields: Object.keys(patch).filter((key) => patch[key] !== undefined),
+        ...(bodyMode && bodyMode !== 'content' ? { mode: bodyMode } : {}),
+        ...(ifMatch !== undefined ? { ifMatch: String(ifMatch) } : {}),
+      }, false, before);
+      return withContentHash(result);
     }
     case 'complete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
