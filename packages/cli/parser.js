@@ -970,6 +970,10 @@ Create/Update options:
   --tags <tags>          Comma-separated tags
   --reminder <time>      Reminder: 15m, 1h, 1d (before due)
   --title <text>         New title (update only)
+  --if-absent            (create) Return the active task that already has
+                         this title in the project instead of creating one
+  --idempotency-key <k>  (create) A repeat with the same key returns what the
+                         first call produced instead of creating again
   --append <text>        (update) Add text after the current body; the body
                          is never replaced
   --prepend <text>       (update) Add text before the current body
@@ -1004,6 +1008,7 @@ Examples:
   ats tasks create "Buy groceries" --due 2026-01-30 --priority high
   ats tasks create "Call mom" --tags "personal,family"
   ats tasks create PROJECT_ID "Task in specific project"
+  ats tasks create PROJECT_ID "Weekly review" --if-absent --idempotency-key review-2026-w36
   ats tasks list PROJECT_ID
   ats tasks update PROJECT_ID TASK_ID --append "- 2026-09-05: shipped" --if-match 3f9c1e2ab7d4
   ats tasks complete PROJECT_ID TASK_ID

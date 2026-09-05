@@ -36,6 +36,7 @@ import {
   getAgentLayerHelp,
 } from '../parser.js';
 import { formatSkipped } from '../format-skip.js';
+import { lookupIdempotencyKey, recordIdempotencyKey, findActiveByTitle } from '../idempotency.js';
 import {
   validateAdapter,
   runConformance,
@@ -374,6 +375,48 @@ async function main() {
 function withExitCode(err, code) {
   err.exitCode = code;
   return err;
+}
+
+// The stable reference a created task leaves behind for an idempotency key.
+function taskRef(result, fallbackProjectId) {
+  const task = result?.task || result || {};
+  return {
+    projectId: task.fullProjectId || task.projectId || fallbackProjectId || '',
+    taskId: task.fullId || task.id || '',
+  };
+}
+
+// Replay what an idempotency key already produced: the task it created (read
+// back when possible), or the review item it staged.
+async function idempotentReplay(key, seen, adapter, t) {
+  if (seen.reviewId && !seen.taskId) {
+    return {
+      created: false,
+      idempotent: true,
+      key,
+      staged: true,
+      reviewId: seen.reviewId,
+      message: `An earlier create with this key is staged for review as ${seen.reviewId.slice(0, 8)}.`,
+    };
+  }
+  let task = { id: seen.taskId, projectId: seen.projectId };
+  try {
+    const got = t?.get ? await t.get(seen.projectId, seen.taskId) : await adapter.getTask(seen.projectId, seen.taskId);
+    task = got?.task || got || task;
+  } catch {}
+  return { created: false, idempotent: true, key, task };
+}
+
+// The active task in `projectId` whose title matches, for `create --if-absent`.
+async function activeTaskWithTitle(adapter, t, projectId, title) {
+  let tasks;
+  if (t?.list) {
+    tasks = await t.list(projectId || 'inbox');
+  } else {
+    if (!projectId) throw new Error('--if-absent needs a project id to look in: ats create PROJECT_ID "title" --if-absent');
+    tasks = await adapter.listTasksInProject(projectId);
+  }
+  return findActiveByTitle(tasks, title);
 }
 
 // Attach the body fingerprint a later `--if-match` write can present.
@@ -903,6 +946,12 @@ async function applyReviewedWrite(item, adapter, t) {
       return result;
     }
     case 'task.created': {
+      // A staged idempotent create that already landed (an earlier apply of the
+      // same key) is not created twice.
+      if (p.idempotencyKey !== undefined) {
+        const seen = lookupIdempotencyKey(p.idempotencyKey, { configDir: atsConfigDir() });
+        if (seen?.taskId) return { created: false, idempotent: true, key: p.idempotencyKey, task: seen };
+      }
       const result = t?.create
         ? await t.create(p.projectId || '', p.title, p.opts || {})
         : await adapter.createTask({
@@ -1302,10 +1351,32 @@ async function handleTasks() {
       // format-skip.txt projects keep the body verbatim (id-based match — a project
       // passed by NAME is not recognized by the skip).
       if (opts.content && !formatSkipped(projectId)) opts.content = normalizeTaskBody(opts.content).content;
+      // Idempotent creates: a key that already produced something returns it;
+      // --if-absent returns the active task that already carries this title.
+      const idemKey = typeof args.options['idempotency-key'] === 'string' ? args.options['idempotency-key'] : undefined;
+      if (idemKey !== undefined) {
+        const seen = lookupIdempotencyKey(idemKey, { configDir: atsConfigDir() });
+        if (seen) return await idempotentReplay(idemKey, seen, adapter, t);
+      }
+      if (args.options['if-absent'] === true) {
+        const existing = await activeTaskWithTitle(adapter, t, projectId, title);
+        if (existing) {
+          if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(existing, projectId), { configDir: atsConfigDir() });
+          return {
+            created: false,
+            existing: true,
+            reason: 'if-absent: an active task with this title already exists',
+            task: existing,
+          };
+        }
+      }
       // Creates have no target metadata to consult; they stage only under the
       // global ATS_REVIEW_ALL=1 gate.
-      const createGate = reviewGate('task.created', null, { projectId, title, opts });
-      if (createGate) return createGate;
+      const createGate = reviewGate('task.created', null, { projectId, title, opts, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
+      if (createGate) {
+        if (idemKey !== undefined) recordIdempotencyKey(idemKey, { reviewId: createGate.reviewId, projectId }, { configDir: atsConfigDir() });
+        return createGate;
+      }
       const result = t?.create
         ? await t.create(projectId, title, opts)
         : await adapter.createTask({
@@ -1315,7 +1386,8 @@ async function handleTasks() {
           dueDate: opts.dueDate,
           tags: tagsToArray(opts.tags),
         });
-      auditCliWrite('task.created', result, { projectId }, { title });
+      auditCliWrite('task.created', result, { projectId }, { title, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
+      if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(result, projectId), { configDir: atsConfigDir() });
       const relevance = adapter.__ext?.relevance;
       if (relevance?.isEnabled?.({
         relevance: !!args.options.relevance,
