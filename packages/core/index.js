@@ -12,6 +12,7 @@ export {
   markReviewItemApplied,
   writeRequiresApproval,
 } from './review-queue.js';
+export { guardWrite } from './write-guard.js';
 export { STATE_BUNDLE_VERSION, stateFileRegistry, exportState, importState } from './state-bundle.js';
 export {
   kgFactsPath,

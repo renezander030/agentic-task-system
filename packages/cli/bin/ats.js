@@ -84,12 +84,11 @@ import {
   contentHash,
   TRIAGE_TAG,
   syncCorpusCache,
-  stageReviewItem,
+  guardWrite,
   listReviewItems,
   findReviewItem,
   decideReviewItem,
   markReviewItemApplied,
-  writeRequiresApproval,
   exportState,
   importState,
   gardenSweep,
@@ -874,27 +873,18 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false, bef
   }
 }
 
-// Enforcement half of the declared approval metadata: a write whose target
-// carries intent.approvalRequired (or lists the action / generic 'write' in
+// Enforcement half of the declared approval metadata, shared with every other
+// write surface through core's guardWrite: a write whose target carries
+// intent.approvalRequired (or lists the action / generic 'write' in
 // security.approvalRequiredFor), or ANY write when ATS_REVIEW_ALL=1, stages
-// into the review queue instead of reaching the backend. The gate reads the
-// target's metadata; an unreadable target is not gated — set ATS_REVIEW_ALL
-// for a hard gate.
+// into the review queue instead of reaching the backend.
 function reviewGate(action, currentTask, payload) {
-  const forced = process.env.ATS_REVIEW_ALL === '1';
-  if (!forced && !writeRequiresApproval(currentTask, action)) return null;
-  const item = stageReviewItem({
-    kind: 'task.write',
-    payload: { action, ...payload },
-    by: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
-    note: forced ? 'staged by ATS_REVIEW_ALL' : 'approvalRequired on target',
-  });
-  return {
-    staged: true,
-    reviewId: item.id,
+  return guardWrite({
     action,
-    message: `Write staged for review as ${item.id.slice(0, 8)}. Decide with: ats review approve ${item.id.slice(0, 8)}  (then: ats review apply --all)`,
-  };
+    target: currentTask,
+    payload,
+    by: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+  });
 }
 
 const summarizeReviewItem = (i) => ({

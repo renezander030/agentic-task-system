@@ -35,6 +35,9 @@ export { withRetry, retryingFetch, retryPolicy, isTransientResponse, isTransient
 
 /** Short fingerprint of a task body for compare-and-swap writes (`ats update --if-match`). */
 export function contentHash(content?: string): string;
+
+export { guardWrite } from './write-guard.js';
+export type { GuardedWrite, StagedWrite } from './write-guard.js';
 export type { RetryPolicy, RetryOptions } from './retry.js';
 
 export { SESSION_INDEX_VERSION, normalizeSessionIndexEntry, normalizeSessionIndex, sessionIndexTaskBody } from './session-index.js';
