@@ -14,16 +14,20 @@ const corpus = {
     { id: 'b1', title: 'TLS migration deck', content: 'board', projectId: 'proj000000000000000bbbb2', tags: [], modifiedTime: NOW },
     { id: 'b2', title: 'Groceries', content: 'milk', projectId: 'proj000000000000000bbbb2', tags: [], modifiedTime: NOW },
   ],
+  proj000000000000000cccc3: [
+    { id: 'c1', title: 'TLS workshop agenda', content: 'slides', projectId: 'proj000000000000000cccc3', tags: [], modifiedTime: NOW },
+  ],
 };
 const adapter = {
   listProjects: async () => [
     { id: 'proj000000000000000aaaa1', name: '🔧 Ops' },
     { id: 'proj000000000000000bbbb2', name: 'Work' },
+    { id: 'proj000000000000000cccc3', name: 'Workshop' },
   ],
   listTasksInProject: async (pid) => corpus[pid],
   // Native search answers across every project; the scope must trim it too.
   searchByQuery: async (q) =>
-    [...corpus.proj000000000000000aaaa1, ...corpus.proj000000000000000bbbb2]
+    [...corpus.proj000000000000000aaaa1, ...corpus.proj000000000000000bbbb2, ...corpus.proj000000000000000cccc3]
       .filter((t) => t.title.toLowerCase().includes(q.toLowerCase())),
 };
 
@@ -44,9 +48,24 @@ test('projectScope matches full ids, short-id prefixes, composite ids, and decor
 
 test('find --project keeps only the scoped project across corpus and native branches', async () => {
   const out = await find('TLS', { adapter, project: 'proj000000000000000bbbb2' });
-  assert.deepEqual(out.scope, { projects: ['proj000000000000000bbbb2'], matched: 2, of: 3 });
+  assert.deepEqual(out.scope, { projects: ['proj000000000000000bbbb2'], matched: 2, of: 4 });
   assert.deepEqual(out.tasks.map((t) => t.id), ['b1']);
   assert.equal(out.degraded, false);
+});
+
+test('a partial project name resolves when unique and lists candidates when not', async () => {
+  const unique = await find('TLS', { adapter, project: 'ksho' });
+  assert.equal(unique.scope.resolved, 'Workshop');
+  assert.deepEqual(unique.tasks.map((t) => t.id), ['c1']);
+
+  const ambiguous = await find('TLS', { adapter, project: 'wor' });
+  assert.equal(ambiguous.count, 0);
+  assert.equal(ambiguous.scope.matched, 0);
+  assert.deepEqual(ambiguous.scope.candidates, ['Work', 'Workshop']);
+
+  const exact = await find('TLS', { adapter, project: 'work' });
+  assert.equal(exact.scope.resolved, undefined, 'an exact name needs no resolution');
+  assert.deepEqual(exact.tasks.map((t) => t.id), ['b1']);
 });
 
 test('a project can be named, several can be given, and an empty scope says so', async () => {

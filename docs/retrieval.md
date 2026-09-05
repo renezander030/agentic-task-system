@@ -115,7 +115,7 @@ In practice, branches finish in 1–500ms once the corpus is cached. The budget 
 
 ## Scope
 
-`ats find "<query>" --project <id|name>` (or `--projects a,b`) binds retrieval to those projects: the corpus is filtered before any branch runs, and branches that reach past the corpus (the embedder's hybrid branch, the adapter's native search) are filtered on the way back. A project may be given as its full id, its short id, a composite-namespaced id (`backend:id`), or its name (leading decorations ignored). The result carries `scope: { projects, matched, of }`; `matched: 0` with `count: 0` means the scope holds nothing, not that the query missed.
+`ats find "<query>" --project <id|name>` (or `--projects a,b`) binds retrieval to those projects: the corpus is filtered before any branch runs, and branches that reach past the corpus (the embedder's hybrid branch, the adapter's native search) are filtered on the way back. A project may be given as its full id, its short id, a composite-namespaced id (`backend:id`), or its name (leading decorations ignored). A partial name resolves when it names exactly one project (`scope.resolved`); several matches are listed in `scope.candidates`. The result carries `scope: { projects, matched, of }`; `matched: 0` with `count: 0` means the scope holds nothing, not that the query missed.
 
 ## Bench
 

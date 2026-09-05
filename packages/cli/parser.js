@@ -321,7 +321,9 @@ function formatFindResults(obj) {
     lines.push(c);
   }
   if (obj.scope) {
-    lines.push(`scope: ${obj.scope.projects.join(', ')} (${obj.scope.matched} of ${obj.scope.of} items)`);
+    const resolved = obj.scope.resolved ? ` → "${obj.scope.resolved}"` : '';
+    const candidates = obj.scope.candidates ? ` — did you mean: ${obj.scope.candidates.map((c) => `"${c}"`).join(', ')}` : '';
+    lines.push(`scope: ${obj.scope.projects.join(', ')}${resolved} (${obj.scope.matched} of ${obj.scope.of} items)${candidates}`);
   }
 
   const branchInfo = (obj.branches || [])

@@ -559,12 +559,36 @@ export async function find(query, cfg = {}) {
   // any branch runs. Branches that reach past the corpus (hybrid via the
   // embedder, the adapter's native search) are filtered on the way back.
   let scope;
+  let scopeFilter = scopeMatch;
   if (scopeMatch) {
     const of = corpus.length;
-    corpus = corpus.filter(scopeMatch);
-    scope = { projects: scopeMatch.wanted, matched: corpus.length, of };
+    let scoped = corpus.filter(scopeMatch);
+    let resolved;
+    let candidates;
+    if (scoped.length === 0) {
+      // A partial project name resolves when it names exactly one project;
+      // several matches are handed back for the caller to choose from.
+      const names = [...new Set(corpus.map((t) => t.projectName ?? t.project).filter(Boolean))].sort();
+      const wantedNames = scopeMatch.wanted.map(plainName).filter(Boolean);
+      const hits = names.filter((name) => wantedNames.some((w) => plainName(name).includes(w)));
+      if (hits.length === 1) {
+        scopeFilter = projectScope(hits);
+        scoped = corpus.filter(scopeFilter);
+        resolved = hits[0];
+      } else if (hits.length > 1) {
+        candidates = hits.slice(0, 10);
+      }
+    }
+    corpus = scoped;
+    scope = {
+      projects: scopeMatch.wanted,
+      matched: corpus.length,
+      of,
+      ...(resolved ? { resolved } : {}),
+      ...(candidates ? { candidates } : {}),
+    };
   }
-  const inScope = (docs) => (scopeMatch ? docs.filter(scopeMatch) : docs);
+  const inScope = (docs) => (scopeFilter ? docs.filter(scopeFilter) : docs);
 
   // Assemble branches. Branches are pure CPU over the shared corpus (plus the
   // optional hybrid call), so we can always run them all in parallel.

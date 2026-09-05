@@ -136,7 +136,7 @@ export interface FindResult {
   };
   error?: string;
   /** Present when the query was scoped: the projects asked for and how much of the corpus they cover. */
-  scope?: { projects: string[]; matched: number; of: number };
+  scope?: { projects: string[]; matched: number; of: number; resolved?: string; candidates?: string[] };
   /** How much to trust the set, from branch agreement on the top hit. */
   confidence: FindConfidence;
   /** The agreement gate that was applied, when greater than 1. */
