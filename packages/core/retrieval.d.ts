@@ -103,6 +103,8 @@ export interface FindOptions {
   staleOk?: boolean;
   /** How the host runs the background refresh (detached process, un-awaited sync). */
   revalidate?: (() => unknown) | false;
+  /** Bind retrieval to these projects (full id, short id, `backend:id`, or name). */
+  project?: string | string[];
   /** Override the corpus loader (store-specific prefetch). */
   loadCorpus?: () => Promise<CorpusResult>;
   /** Usage-log record callback. */
@@ -131,11 +133,16 @@ export interface FindResult {
     revalidating?: boolean;
   };
   error?: string;
+  /** Present when the query was scoped: the projects asked for and how much of the corpus they cover. */
+  scope?: { projects: string[]; matched: number; of: number };
   branches: BranchSummary[];
   /** RRF constant; present only when explain=true (contribution = 1/(k+rank)). */
   k?: number;
   tasks: FusedDoc[];
 }
+
+/** Corpus filter for one or more project references; null when none are given. */
+export function projectScope(project?: string | string[] | null): ((task: Task) => boolean) | null;
 
 /** Parallel fan-out retrieval fused with RRF. */
 export function find(query: string, cfg?: FindOptions): Promise<FindResult>;

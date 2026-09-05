@@ -102,6 +102,10 @@ If the active adapter implements `bulkFetch()`, the prefetch uses it (one call).
 
 In practice, branches finish in 1–500ms once the corpus is cached. The budget protects against pathological cases (qdrant down, adapter unresponsive).
 
+## Scope
+
+`ats find "<query>" --project <id|name>` (or `--projects a,b`) binds retrieval to those projects: the corpus is filtered before any branch runs, and branches that reach past the corpus (the embedder's hybrid branch, the adapter's native search) are filtered on the way back. A project may be given as its full id, its short id, a composite-namespaced id (`backend:id`), or its name (leading decorations ignored). The result carries `scope: { projects, matched, of }`; `matched: 0` with `count: 0` means the scope holds nothing, not that the query missed.
+
 ## Bench
 
 The `bench/` directory has a Q/A harness. Author questions paired with gold answers, run all retrievers, get a markdown report comparing hit@1 / recall@5 / MRR per tag bucket.

@@ -320,6 +320,9 @@ function formatFindResults(obj) {
     }
     lines.push(c);
   }
+  if (obj.scope) {
+    lines.push(`scope: ${obj.scope.projects.join(', ')} (${obj.scope.matched} of ${obj.scope.of} items)`);
+  }
 
   const branchInfo = (obj.branches || [])
     .map((b) => `${b.name} ${b.ok ? `${b.count}` : '✗'}/${b.elapsedMs}ms${b.error ? ` (${b.error})` : ''}`)
@@ -948,6 +951,10 @@ Subcommands:
                                    --explain shows per-branch rank + RRF
                                    contribution for each result. --limit,
                                    --budget-ms tune breadth/deadline.
+                                   --project <id|name> (or --projects a,b)
+                                   binds retrieval to those projects.
+                                   --fresh refreshes a stale corpus cache
+                                   before answering.
   similar <task_id>                Find semantically similar tasks
   due [days]                       Tasks due within N days (default: 7)
   priority                         High priority tasks

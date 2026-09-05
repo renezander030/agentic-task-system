@@ -1432,6 +1432,8 @@ async function handleTasks() {
         rerank: !!args.options.rerank,
         rerankDepth: parseInt(args.options['rerank-depth']) || undefined,
         includeCompleted: !!args.options['include-completed'],
+        // --project <id|name> or --projects a,b binds retrieval to those projects.
+        project: args.options.projects !== undefined ? tagsToArray(args.options.projects) : args.options.project,
         ...corpusFreshness(),
       };
       // Rich adapters bring their own embedder-backed find; generic adapters get

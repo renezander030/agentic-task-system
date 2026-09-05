@@ -229,6 +229,38 @@ async function syncCorpusCacheUnleased(adapter, { full = false } = {}) {
   };
 }
 
+/** Project names compare without leading decorations ("🔶Notes" == "notes"). */
+function plainName(value) {
+  return String(value || '').normalize('NFKC').replace(/^[^\p{L}\p{N}]+/u, '').trim().toLowerCase();
+}
+
+/**
+ * Build a corpus filter from one or more project references: a full id, a
+ * short id (prefix-equivalent to its full form), a composite-namespaced id
+ * (`backend:id`), or the project's name. Returns null when nothing is asked.
+ */
+export function projectScope(project) {
+  const wanted = (Array.isArray(project) ? project : [project])
+    .map((p) => (p === undefined || p === null ? '' : String(p).trim()))
+    .filter(Boolean);
+  if (wanted.length === 0) return null;
+  const refs = wanted.map((w) => ({ raw: w, lower: w.toLowerCase(), name: plainName(w) }));
+  const idMatches = (id, ref) => {
+    const l = String(id).toLowerCase();
+    if (l === ref.lower) return true;
+    if (l.endsWith(`:${ref.lower}`)) return true; // composite `backend:projectId`
+    const shortest = Math.min(l.length, ref.lower.length);
+    return shortest >= 8 && (l.startsWith(ref.lower) || ref.lower.startsWith(l));
+  };
+  const match = (t) => {
+    const ids = [t.projectId, t.fullProjectId].filter((v) => v !== undefined && v !== null && v !== '');
+    const name = plainName(t.projectName ?? t.project);
+    return refs.some((ref) => (name && name === ref.name) || ids.some((id) => idMatches(id, ref)));
+  };
+  match.wanted = wanted;
+  return match;
+}
+
 /** Built-in substring keyword retriever. Pure CPU over the corpus. */
 function keywordBranch(query, corpus, { limit = 20 } = {}) {
   const lower = (query || '').toLowerCase();
@@ -435,11 +467,13 @@ export async function find(query, cfg = {}) {
     rerankDepth,
     staleOk = true,
     revalidate,
+    project,
     loadCorpus: loadCorpusOverride,
     log,
   } = cfg;
 
   const t0 = Date.now();
+  const scopeMatch = projectScope(project);
 
   let corpusInfo;
   try {
@@ -498,6 +532,17 @@ export async function find(query, cfg = {}) {
     }
   }
 
+  // Scope: bind retrieval to one or more projects (id, short id, or name) before
+  // any branch runs. Branches that reach past the corpus (hybrid via the
+  // embedder, the adapter's native search) are filtered on the way back.
+  let scope;
+  if (scopeMatch) {
+    const of = corpus.length;
+    corpus = corpus.filter(scopeMatch);
+    scope = { projects: scopeMatch.wanted, matched: corpus.length, of };
+  }
+  const inScope = (docs) => (scopeMatch ? docs.filter(scopeMatch) : docs);
+
   // Assemble branches. Branches are pure CPU over the shared corpus (plus the
   // optional hybrid call), so we can always run them all in parallel.
   const branchDefs = [];
@@ -512,14 +557,14 @@ export async function find(query, cfg = {}) {
             fetchTasksForKeyword: async () => corpus,
           })
           .then((r) =>
-            r.map((t) => ({
+            inScope(r.map((t) => ({
               id: t.id,
               title: t.title,
               content: t.content,
               projectId: t.projectId,
               projectName: t.project ?? t.projectName,
               ...(t.status !== undefined ? { status: t.status } : {}),
-            }))
+            })))
           ),
     });
   } else if (adapter && typeof adapter.embeddings === 'function') {
@@ -542,7 +587,7 @@ export async function find(query, cfg = {}) {
     branchDefs.push({
       name: 'native',
       run: () =>
-        adapter.searchByQuery(query).then((r) => (r || []).slice(0, candidatesPerSource)),
+        adapter.searchByQuery(query).then((r) => inScope(r || []).slice(0, candidatesPerSource)),
     });
   }
 
@@ -619,7 +664,7 @@ export async function find(query, cfg = {}) {
       resultCount: tasks.length,
       topId: tasks[0]?.id || null,
       durationMs: Date.now() - t0,
-      meta: { budgetMs, degraded, branches: branchSummary },
+      meta: { budgetMs, degraded, branches: branchSummary, ...(scope ? { scope } : {}) },
     });
   }
 
@@ -629,6 +674,7 @@ export async function find(query, cfg = {}) {
     count: tasks.length,
     degraded,
     ...(rerank ? { reranked } : {}),
+    ...(scope ? { scope } : {}),
     elapsedMs: Date.now() - t0,
     corpus: {
       fromCache,
