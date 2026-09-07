@@ -416,6 +416,7 @@ Commands:
   links <p> <t>  Resolve cross-references inside a task or note
   create <title> Create a task (shortcut for tasks create)
   update <p> <t> Update a task (shortcut for tasks update)
+  workstream     Scaffold + gate a work stream (parent + 2-3 verified sub-tasks)
   hybrid <query> Dense+sparse retrieval (embedder-backed adapters)
   similar <id>   Find related items (embedder-backed adapters)
   intent         Read or set an item's outcome, constraints, and authority
@@ -633,6 +634,42 @@ Every check requires a reason and appends an allow/deny ledger record. ATS is a
 decision point for cooperating clients; it does not sandbox external tools.`,
   };
   return help[command] || getMainHelp();
+}
+
+export function getWorkstreamHelp() {
+  return `ats workstream - one parent task + 2-3 verified sub-tasks
+
+Every work item carries a review date and a named verification. Nothing goes
+back to the human until 'ats workstream ready <id>' exits 0.
+
+Usage: ats workstream <subcommand> [options]
+
+Subcommands:
+  template                 Print the strict spec template
+  lint SPEC.json           Validate a spec - exit 2 until clean, no writes
+  create SPEC.json         Scaffold parent + sub-tasks  [--dry-run]
+  verify ID N --evidence "..." [--fail]
+                           Record a verification result on work item N
+  check ID                 Cap, review dates, verifications  [--json]
+  ready ID                 HARD GATE - exit 0 only if every item passed  [--json]
+  redate ID <n|stream> DATE
+                           Move a review date (task + rendered body together)
+  rerender ID              Re-apply the current template to every body
+  show ID / list           Live state of one stream / all streams
+  agent-brief              The contract, for any agent
+
+Options:
+  --project <id>           Skip the lane lookup when the stream is not in Inbox
+  --dry-run                (create) Render without writing
+  --evidence <text>        (verify) The reading that proves it, not an opinion
+  --fail                   (verify) Record a failed verification
+
+State lives in ATS primitives, not in a private store: membership is real
+sub-tasks, outcome and done-when are intent metadata, the verification log is
+the action ledger, the review date is the task due date. So 'ats intent get',
+'ats hierarchy get', 'ats ledger list' and 'ats undo' all work on these tasks.
+
+Exit codes: 0 ok, 1 error, 2 gate failed.`;
 }
 
 export function getConfigHelp() {
@@ -992,6 +1029,11 @@ Create/Update options:
   --prepend <text>       (update) Add text before the current body
   --if-match <hash>      (update) Write only while the body still has this
                          contentHash (from 'tasks get'); exit 3 if it changed
+  --parent <task_id>     (create) Make this a sub-task of that task
+  --raw                  Store --content verbatim; skip body normalization
+  --live                 (get/update) Bypass the local cache and read TickTick
+                         directly. On update it also makes the merge base live,
+                         so a concurrent change is not clobbered.
   --relevance            (create) Append a Relevance Rule instruction block
                          after the result so the active agent can
                          decide a trunk and follow up with 'tasks update'.

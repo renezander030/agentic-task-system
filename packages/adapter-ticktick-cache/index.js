@@ -356,7 +356,12 @@ export function createTickTickCacheAdapter(options = {}) {
 
   const tasks = {
     list: (projectRef) => operations.tasks.list(projectRef, cacheDeps),
-    get: async (projectRef, taskRef) => {
+    get: async (projectRef, taskRef, opts = {}) => {
+      // An explicit --live is a deliberate request for ground truth, so it
+      // overrides ATS_TICKTICK_LOCAL_DETAILS_ONLY. Default reads are untouched.
+      if (opts.live && remote.__ext?.tasks?.get) {
+        return remote.__ext.tasks.get(projectRef, taskRef);
+      }
       let cached;
       try {
         cached = tasksForProject(load(), projectRef).find((item) => taskMatches(item, taskRef));
@@ -386,8 +391,13 @@ export function createTickTickCacheAdapter(options = {}) {
       });
       return result;
     },
-    update: async (projectId, taskId, patch = {}) => {
-      const cached = tasksForProject(load(), projectId).find((item) => taskMatches(item, taskId));
+    update: async (projectId, taskId, patch = {}, opts = {}) => {
+      // TickTick resets omitted fields, so the update needs a merge base. The
+      // cache is the fast one; with { live: true } the remote adapter fetches
+      // the task itself, so a concurrent change in the app is not clobbered.
+      const cached = opts.live
+        ? null
+        : tasksForProject(load(), projectId).find((item) => taskMatches(item, taskId));
       const result = await remote.__ext.tasks.update(
         projectId,
         taskId,
@@ -535,10 +545,30 @@ export function createTickTickCacheAdapter(options = {}) {
       });
       return JSON.parse(output);
     }
-    if (typeof operations.tasks.vectorSync !== 'function') {
-      throw new Error('The active TickTick adapter does not provide vector synchronization');
-    }
-    return operations.tasks.vectorSync(opts);
+    // Index from the local cache, not the remote Open API project fan-out.
+    // GET /project has no Inbox, so the fan-out silently left ~250 Inbox tasks
+    // (and everything else the cache holds but /project/{id}/data omits) out of
+    // semantic search. Ids here are full TickTick ids, identical to the
+    // payload.taskId keys already in Qdrant, so this re-uses the existing index.
+    const fetchAllTasks = async () => load().tasks
+      .filter((task) => task.status !== 2)
+      .map((task) => ({
+        id: task.id,
+        title: task.title || '',
+        content: task.content || '',
+        projectId: task.projectId,
+        projectName: task.projectName,
+        priority: task.priority || 'none',
+        tags: task.tags || [],
+        dueDate: task.dueDate || null,
+      }));
+    // `embedder`, not the module import: options.embedding is the injection seam
+    // every other vector call already uses, and bypassing it here made syncVectors
+    // untestable and silently ignored an injected embedder.
+    return embedder.sync(fetchAllTasks, {
+      forceFull: !!opts.forceFull,
+      maxEmbeddings: Number(opts.maxEmbeddings) || 200,
+    });
   }
 
   let adapter;
