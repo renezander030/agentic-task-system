@@ -43,8 +43,39 @@ export const EXIT_GATE = 2;
 // readability — ::colon highlight:: is the primary marker, one per section
 // ---------------------------------------------------------------------------
 
-const HL = process.env.ATS_WORKSTREAM_HIGHLIGHT || '::{}::';
-const hl = (text) => HL.replace('{}', String(text).trim().replace(/:+$/, ''));
+/**
+ * Colour is DERIVED from gate state, never chosen by an agent or a human.
+ * That is the whole reason the rule survives: every colour below is a state
+ * this command already computes, so nothing has to be remembered or picked,
+ * and a body re-renders to the same colours every time.
+ *
+ *   outcome  what must become true      the thing being aimed at
+ *   date     the review date            when it lands in front of the human
+ *   pass     verified with evidence     safe to hand back
+ *   fail     failed or blocked          needs a decision
+ *
+ * Blue and purple are deliberately left unassigned. An unused colour keeps its
+ * signal; spending all six on nothing in particular is how a scheme goes numb.
+ *
+ * MARKUP is the single place to change once TickTick's per-colour syntax is
+ * confirmed from the app. Until then every role renders as the plain
+ * double-colon highlight, which is what shipped and what already reads well.
+ */
+const MARKUP = {
+  plain: '::{}::',
+  outcome: process.env.ATS_HL_OUTCOME || '::{}::',   // cyan
+  date: process.env.ATS_HL_DATE || '::{}::',         // yellow
+  pass: process.env.ATS_HL_PASS || '::{}::',         // green
+  fail: process.env.ATS_HL_FAIL || '::{}::',         // red
+};
+
+const clean = (text) => String(text).trim().replace(/:+$/, '');
+
+/** hl(text) keeps the plain marker; hl(text, 'pass') asks for a gate colour. */
+const hl = (text, role = 'plain') => {
+  const tmpl = process.env.ATS_WORKSTREAM_HIGHLIGHT || MARKUP[role] || MARKUP.plain;
+  return tmpl.replace('{}', clean(text));
+};
 const bold = (text) => `**${text}**`;
 const code = (text) => '`' + String(text).replace(/`/g, "'") + '`';
 
@@ -52,12 +83,12 @@ function renderStreamBody(spec, streamId) {
   const { stream, items } = spec;
   const lines = [
     '## Outcome',
-    `> ${hl(stream.outcome)}`,
+    `> ${hl(stream.outcome, 'outcome')}`,
     '',
     `## Work items ${hl(`${items.length} of max ${MAX_ITEMS}`)}`,
   ];
   items.forEach((item, i) => {
-    lines.push(`${i + 1}. ${bold(item.title)} ${hl(`review ${day(item.review)}`)}`);
+    lines.push(`${i + 1}. ${bold(item.title)} ${hl(`review ${day(item.review)}`, 'date')}`);
   });
   lines.push(
     '',
@@ -72,7 +103,7 @@ function renderItemBody(item, n, total, log) {
   const last = log[log.length - 1];
   const status = !last
     ? hl('NOT VERIFIED YET')
-    : last.advanced ? hl('VERIFIED') : hl('VERIFICATION FAILED');
+    : last.advanced ? hl('VERIFIED', 'pass') : hl('VERIFICATION FAILED', 'fail');
   const lines = [
     status,
     '',
@@ -80,12 +111,12 @@ function renderItemBody(item, n, total, log) {
     `> ${item.outcome}`,
     '',
     '## Done when',
-    hl(item.done_when),
+    hl(item.done_when, 'outcome'),
     '',
     '## Verification',
     code(item.verify),
     '',
-    `## Review ${hl(day(item.review))}`,
+    `## Review ${hl(day(item.review), 'date')}`,
     '',
     '## Log',
   ];
@@ -503,6 +534,40 @@ export async function runWorkstream({
         ),
       });
       log(`item ${n} review -> ${day(when)}  ${urlFor(projectId, itemId)}`);
+      return EXIT_OK;
+    }
+
+    case 'rerender': {
+      // Bodies are rendered, never hand-authored, so a template change (a new
+      // highlight colour, a new section) is applied here rather than by editing
+      // tasks in the app. Everything it needs is already on the tasks.
+      const streamId = rest[0];
+      if (!streamId) { err('Usage: ats workstream rerender STREAM_ID'); return EXIT_ERR; }
+      const projectId = args.options.project || (await projectOf(adapter, t, streamId));
+      const { parent, items } = await loadStream(adapter, t, projectId, streamId);
+      const parentMeta = metadataOf(parent);
+      const specItems = items.map((item, i) => specFromTask(item, items.length, i + 1));
+
+      await updateOne(adapter, t, projectId, streamId, {
+        content: withMetadata(renderStreamBody({
+          stream: {
+            outcome: parentMeta.intent?.outcome || '',
+            review: parent.dueDate || '',
+          },
+          items: specItems,
+        }, streamId), parentMeta),
+      });
+      for (const [idx, item] of items.entries()) {
+        const itemId = item.fullId || item.id;
+        await updateOne(adapter, t, projectId, itemId, {
+          content: withMetadata(
+            renderItemBody(specItems[idx], idx + 1, items.length, verifyLog(projectId, itemId)),
+            metadataOf(item),
+          ),
+        });
+      }
+      log(`re-rendered ${items.length + 1} task(s)`);
+      log(urlFor(projectId, streamId));
       return EXIT_OK;
     }
 

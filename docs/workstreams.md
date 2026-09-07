@@ -56,8 +56,33 @@ formatter shows the task line alone.
 `::colon highlight::` is the primary marker — one per section, on the single
 value the eye should land on. Bold carries titles, `` `code` `` carries
 commands, `- [ ]` carries the verification log, `> ` carries the outcome.
-`ATS_WORKSTREAM_HIGHLIGHT` overrides the token for a store that renders
-something else.
+
+### The colour standard
+
+Colour is **derived from gate state, never chosen**. That is what makes the rule
+safe to keep: every colour is a state the command already computes, so nothing
+has to be remembered, and a body re-renders to the same colours every time. A
+scheme where a human or an agent picks the colour is a scheme that rots.
+
+| role | colour | means |
+|---|---|---|
+| `outcome` | cyan | what must become true: the stream outcome, an item's done-when |
+| `date` | yellow | the review date, when it lands in front of the human |
+| `pass` | green | verified with evidence, safe to hand back |
+| `fail` | red | failed or blocked, needs a decision |
+
+Blue and purple are deliberately unassigned. An unused colour keeps its signal;
+spending all six on nothing in particular is how a scheme goes numb.
+
+The roles live in `MARKUP` at the top of `packages/cli/workstream.js`, which is
+the single place to change. Each is overridable by env var
+(`ATS_HL_OUTCOME`, `ATS_HL_DATE`, `ATS_HL_PASS`, `ATS_HL_FAIL`), and
+`ATS_WORKSTREAM_HIGHLIGHT` overrides all of them for a store that renders
+something else entirely.
+
+`ats workstream rerender <id>` applies a template or colour change to every body
+in an existing stream, rebuilding them from the intent metadata and the ledger.
+Bodies are never edited in the app.
 
 ## Adapter capabilities this relies on
 

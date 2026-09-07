@@ -654,6 +654,7 @@ Subcommands:
   ready ID                 HARD GATE - exit 0 only if every item passed  [--json]
   redate ID <n|stream> DATE
                            Move a review date (task + rendered body together)
+  rerender ID              Re-apply the current template to every body
   show ID / list           Live state of one stream / all streams
   agent-brief              The contract, for any agent
 
