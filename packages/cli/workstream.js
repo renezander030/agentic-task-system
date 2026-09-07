@@ -62,11 +62,13 @@ export const EXIT_GATE = 2;
  * double-colon highlight, which is what shipped and what already reads well.
  */
 const MARKUP = {
+  // `::x::` is the uncoloured highlight already in wide use. A colour is the
+  // `=={#hex}x==` form, confirmed against the TickTick editor 2026-09-07.
   plain: '::{}::',
-  outcome: process.env.ATS_HL_OUTCOME || '::{}::',   // cyan
-  date: process.env.ATS_HL_DATE || '::{}::',         // yellow
-  pass: process.env.ATS_HL_PASS || '::{}::',         // green
-  fail: process.env.ATS_HL_FAIL || '::{}::',         // red
+  outcome: process.env.ATS_HL_OUTCOME || '=={#57DEE2}{}==',  // cyan
+  date: process.env.ATS_HL_DATE || '=={#FFE500}{}==',        // yellow
+  pass: process.env.ATS_HL_PASS || '=={#6FF143}{}==',        // green
+  fail: process.env.ATS_HL_FAIL || '=={#FD848D}{}==',        // red
 };
 
 const clean = (text) => String(text).trim().replace(/:+$/, '');
@@ -74,6 +76,8 @@ const clean = (text) => String(text).trim().replace(/:+$/, '');
 /** hl(text) keeps the plain marker; hl(text, 'pass') asks for a gate colour. */
 const hl = (text, role = 'plain') => {
   const tmpl = process.env.ATS_WORKSTREAM_HIGHLIGHT || MARKUP[role] || MARKUP.plain;
+  // Only the empty `{}` placeholder is substituted, never the `{#hex}` colour
+  // token that sits beside it.
   return tmpl.replace('{}', clean(text));
 };
 const bold = (text) => `**${text}**`;
