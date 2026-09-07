@@ -21,6 +21,7 @@ import {
   getMainHelp,
   getNotesHelp,
   getTasksHelp,
+  getWorkstreamHelp,
   getAuthHelp,
   getProjectsHelp,
   getAdapterHelp,
@@ -283,6 +284,30 @@ async function main() {
       case 'tasks':
         result = await handleTasks();
         break;
+      case 'workstream': {
+        // Work streams: the 3-item cap, review dates and the verification gate.
+        // It stores nothing of its own - membership is real sub-tasks, intent
+        // metadata carries outcome/done-when, and the action ledger is the
+        // verification log - so it is an ATS operation, not a second interface.
+        const { runWorkstream } = await import('../workstream.js');
+        const wsAdapter = await loadAdapter();
+        process.exit(await runWorkstream({
+          adapter: wsAdapter,
+          args,
+          readSpec: (file) => {
+            if (!file) { console.error('Usage: ats workstream <lint|create> SPEC.json'); process.exit(1); }
+            const raw = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8');
+            try { return JSON.parse(raw); } catch (e) {
+              console.error(`ats workstream: spec is not valid JSON: ${e.message}`);
+              process.exit(1);
+            }
+          },
+          urlFor: (projectId, taskId) => (wsAdapter.urlFor
+            ? wsAdapter.urlFor({ projectId, taskId })
+            : `${projectId}/${taskId}`),
+        }));
+        break;
+      }
       case 'notes':
         result = await handleNotes();
         break;
@@ -496,6 +521,7 @@ function helpFor(command) {
     case 'auth': return getAuthHelp();
     case 'projects': return getProjectsHelp();
     case 'tasks': return getTasksHelp();
+    case 'workstream': return getWorkstreamHelp();
     case 'notes': return getNotesHelp();
     case 'adapter': return getAdapterHelp();
     case 'open': return getOpenHelp();
@@ -1327,7 +1353,12 @@ async function handleTasks() {
     case 'get': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks get PROJECT_ID TASK_ID'); process.exit(1); }
       const [gp, gid] = args.positional;
-      const got = t?.get ? await t.get(gp, gid) : await adapter.getTask(gp, gid);
+      // --live bypasses the local cache. A gate decided on a cached read is not
+      // a gate; the cache stays the default for retrieval.
+      const live = args.options.live === true;
+      const got = t?.get
+        ? await t.get(gp, gid, ...(live ? [{ live: true }] : []))
+        : await adapter.getTask(gp, gid);
       if (args.options['no-format'] === true || process.env.ATS_GET_NOFORMAT) return withContentHash(got);
       return withContentHash(await formatTriageOnGet(t, adapter, gp, gid, got));
     }
@@ -1358,6 +1389,7 @@ async function handleTasks() {
         priority: args.options.priority,
         tags: args.options.tags,
         reminder: args.options.reminder,
+        parentId: args.options.parent,
       };
       if (!title && process.stdin.isTTY && adapter.__ext?.interactive?.promptTaskCreate) {
         const input = await adapter.__ext.interactive.promptTaskCreate({ projectId, title, ...opts });
@@ -1379,8 +1411,11 @@ async function handleTasks() {
       // Conform any body that's written (deterministic, no LLM). Bare quick-captures
       // (no --content) stay clean; they get the Goal+Log skeleton on first `get`.
       // format-skip.txt projects keep the body verbatim (id-based match — a project
-      // passed by NAME is not recognized by the skip).
-      if (opts.content && !formatSkipped(projectId)) opts.content = normalizeTaskBody(opts.content).content;
+      // passed by NAME is not recognized by the skip). --raw is the per-call form:
+      // a body rendered deterministically by a tool must survive byte-for-byte.
+      if (opts.content && !formatSkipped(projectId) && args.options.raw !== true) {
+        opts.content = normalizeTaskBody(opts.content).content;
+      }
       // Idempotent creates: a key that already produced something returns it;
       // --if-absent returns the active task that already carries this title.
       const idemKey = typeof args.options['idempotency-key'] === 'string' ? args.options['idempotency-key'] : undefined;
@@ -1483,7 +1518,11 @@ async function handleTasks() {
       }
       // Normalize the body whenever content is being written (no extra fetch when it isn't).
       // format-skip.txt projects keep the body verbatim (id-based match).
-      if (patch.content !== undefined && !formatSkipped(up)) patch.content = normalizeTaskBody(patch.content).content;
+      // --raw is the per-call form of format-skip: a body rendered
+      // deterministically by a tool must survive the write byte-for-byte.
+      if (patch.content !== undefined && !formatSkipped(up) && args.options.raw !== true) {
+        patch.content = normalizeTaskBody(patch.content).content;
+      }
       const gate = reviewGate('task.updated', current, {
         projectId: up,
         taskId: uid,
@@ -1492,7 +1531,8 @@ async function handleTasks() {
       });
       if (gate) return gate;
       const result = t?.update
-        ? await t.update(up, uid, patch)
+        ? await t.update(up, uid, patch,
+          ...(args.options.live === true ? [{ live: true }] : []))
         : await adapter.updateTask(up, uid, { ...patch, tags: tagsToArray(patch.tags) });
       auditCliWrite('task.updated', result, { projectId: up, taskId: uid }, {
         fields: Object.keys(patch).filter((key) => patch[key] !== undefined),

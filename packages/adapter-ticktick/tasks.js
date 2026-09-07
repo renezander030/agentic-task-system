@@ -41,6 +41,8 @@ export async function list(projectId, deps = {}) {
     priority: formatPriority(t.priority),
     tags: t.tags || [],
     kind: t.kind || 'TEXT',         // TASK | NOTE — TickTick distinguishes; surface it
+    parentId: t.parentId,
+    childIds: t.childIds || [],
     status: t.status === 2 ? 'completed' : 'active',
     completedTime: t.completedTime,
     modifiedTime: t.modifiedTime,
@@ -85,6 +87,10 @@ export async function get(projectId, taskId, deps = {}) {
     reminders: task.reminders,
     repeatFlag: task.repeatFlag,
     items: task.items,
+    // Sub-task edges. TickTick returns both; the mapping used to drop them,
+    // so a parent's children were invisible to every caller.
+    parentId: task.parentId,
+    childIds: task.childIds || [],
     attachments: task.attachments || [],
     createdTime: task.createdTime,
     modifiedTime: task.modifiedTime,
@@ -114,6 +120,9 @@ export async function create(projectId, title, options = {}, deps = {}) {
   const input = { title: title.trim(), projectId: resolvedProjectId };
 
   if (options.content !== undefined) input.content = options.content;
+  // A real TickTick sub-task: the Open API accepts parentId on create, though
+  // the create response does not echo it back (the readback does).
+  if (options.parentId !== undefined) input.parentId = options.parentId;
   if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
   if (options.priority !== undefined) input.priority = parsePriority(options.priority);
   if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);

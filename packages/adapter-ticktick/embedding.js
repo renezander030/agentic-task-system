@@ -85,7 +85,11 @@ export function truncateText(text, maxCharacters, suffix = '') {
 }
 
 async function getEmbedding(text, inputType = 'document') {
-  const truncated = truncateText(embeddingInput(text, inputType), 8000);
+  // 8000 chars overruns the embedder's context on dense text (German, technical,
+  // long task logs) and ollama answers 500 - which the caller counted as a silent
+  // error, leaving 33 of the largest tasks out of the index. 4000 embeds reliably.
+  const truncated = truncateText(embeddingInput(text, inputType),
+    Number(process.env.EMBEDDING_MAX_CHARS) || 4000);
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const data = await httpJson(
