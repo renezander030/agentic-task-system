@@ -102,6 +102,7 @@ import {
   kgStats,
   exportFactsCypher,
   KgGateError,
+  factHistory,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -1080,11 +1081,12 @@ async function handleKg() {
       return { ratified };
     }
     case 'ask': {
-      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted]'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted --as-of DATE]'); process.exit(1); }
       return askFacts(args.positional.join(' '), {
         domain: args.options.domain,
         limit: parseInt(args.options.limit) || 8,
         includeRetracted: !!args.options['include-retracted'],
+        asOf: args.options['as-of'],
       });
     }
     case 'facts':
@@ -1094,8 +1096,13 @@ async function handleKg() {
           subject: args.options.subject,
           predicate: args.options.predicate,
           status: args.options.all ? 'all' : 'active',
+          asOf: args.options['as-of'],
         }),
       };
+    case 'history': {
+      if (!args.positional[0]) { console.error('Usage: ats kg history FACT_ID'); process.exit(1); }
+      return factHistory(args.positional[0]);
+    }
     case 'stats':
       return kgStats({ listReviewItems });
     case 'export': {

@@ -23,6 +23,7 @@ const {
   exportFactsCypher,
   checkFactProposal,
   normalizeTerm,
+  factHistory,
 } = await import('../kg.js');
 const { decideReviewItem, listReviewItems } = await import('../review-queue.js');
 
@@ -203,4 +204,42 @@ test('supersede closes the old fact and adds its replacement in one ratification
   const twice = loadFacts({ factsPath: p });
   assert.equal(twice.facts[0].tInvalid, '2026-02-01T00:00:00.000Z');
   assert.equal(twice.history.get('f1')[2].ignored, 'already retracted');
+});
+
+test('--as-of answers from validity intervals — what the store believed then — and history follows the supersession chain', () => {
+  const fp = path.join(tmp, 'timeline.jsonl');
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene' });
+  const T1 = '2026-06-01T00:00:00.000Z';
+  const T2 = '2026-07-01T00:00:00.000Z';
+  const T3 = '2026-08-01T00:00:00.000Z';
+  const a = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'time', by: 'a' }, { factsPath: fp });
+  const petra = ratifyFactItem(approve(a), { factsPath: fp, now: T1 }).fact;
+  const b = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Maria', domain: 'time', by: 'a', supersedes: petra.id }, { factsPath: fp });
+  const maria = ratifyFactItem(approve(b), { factsPath: fp, now: T2 }).fact;
+  const r = proposeRetract({ factId: maria.id, reason: 'contract ended', by: 'a' }, { factsPath: fp });
+  ratifyFactItem(approve(r), { factsPath: fp, now: T3 });
+
+  const objects = (res) => res.facts.map((f) => f.object);
+  const ask = (asOf) => askFacts('Acme billing contact', { domain: 'time', factsPath: fp, asOf });
+  assert.deepEqual(objects(ask()), [], 'today nothing is active');
+  assert.deepEqual(objects(ask('2026-05-01')), [], 'before anything was ratified');
+  assert.deepEqual(objects(ask('2026-06-15')), ['Petra']);
+  assert.deepEqual(objects(ask('2026-07-15')), ['Maria']);
+  assert.deepEqual(objects(ask('2026-08-15')), [], 'after the retraction');
+  assert.deepEqual(objects(ask('2026-07-01')), ['Maria'], 'a bare date is the end of that day: the day of ratification counts');
+  assert.deepEqual(objects(ask('2026-07-01T00:00:00.000Z')), ['Maria'], 'the closing instant belongs to the new fact');
+  assert.equal(ask('2026-06-15').asOf, '2026-06-15T23:59:59.999Z');
+  assert.equal(listKgFacts({ domain: 'time', factsPath: fp, asOf: '2026-06-15' })[0].object, 'Petra');
+  assert.throws(() => askFacts('x', { factsPath: fp, asOf: 'yesterday' }), /--as-of needs an ISO date/);
+
+  const h = factHistory(petra.id.slice(0, 8), { factsPath: fp });
+  assert.equal(h.fact.status, 'superseded');
+  assert.deepEqual(h.events.map((e) => e.op), ['add', 'supersede']);
+  assert.equal(h.events[1].byFact, maria.id);
+  assert.deepEqual(h.chain, { replaces: [], replacedBy: [maria.id] });
+  const h2 = factHistory(maria.id, { factsPath: fp });
+  assert.deepEqual(h2.chain, { replaces: [petra.id], replacedBy: [] });
+  assert.deepEqual(h2.events.map((e) => e.op), ['add', 'retract']);
+  assert.equal(h2.events[1].reason, 'contract ended');
+  assert.throws(() => factHistory('nope', { factsPath: fp }), /no fact nope/);
 });

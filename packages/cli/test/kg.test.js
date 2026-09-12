@@ -137,3 +137,17 @@ test('--supersedes replaces a fact in one ratification: the old one closes with 
   const stats = run(['kg', 'stats']);
   assert.equal(stats.superseded, 1);
 });
+
+test('ask --as-of answers what the store believed then, and kg history shows the chain', () => {
+  const pdf = run(['kg', 'facts', '--domain', 'sales', '--all']).facts.find((f) => f.object === 'invoices as PDF');
+  const justBefore = new Date(new Date(pdf.tInvalid).getTime() - 1).toISOString();
+  const then = run(['kg', 'ask', 'Acme invoices', '--domain', 'sales', '--as-of', justBefore]);
+  assert.deepEqual(then.facts.map((f) => f.object), ['invoices as PDF']);
+  assert.equal(then.asOf, justBefore);
+  const history = run(['kg', 'history', pdf.id.slice(0, 8)]);
+  assert.deepEqual(history.events.map((e) => e.op), ['add', 'supersede']);
+  assert.deepEqual(history.chain.replacedBy, [pdf.supersededBy]);
+  const bad = runProcess(['kg', 'ask', 'x', '--as-of', 'lastweek']);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /--as-of needs an ISO date/);
+});
