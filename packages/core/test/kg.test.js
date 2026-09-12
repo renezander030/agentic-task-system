@@ -160,3 +160,47 @@ test('the proposal gate: duplicates are no-ops, rejected triples need an acknowl
   // --supersedes must name an active fact.
   assert.throws(() => proposeFact({ subject: 'x', predicate: 'y', object: 'z', domain: 'gate', by: 'a', supersedes: 'nope' }), /names no fact/);
 });
+
+test('supersede closes the old fact and adds its replacement in one ratification; a closed fact is never closed twice', () => {
+  const petra = listKgFacts({ domain: 'gate' }).find((f) => f.object === 'Petra');
+  const item = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Maria', domain: 'gate', by: 'agent-a', supersedes: petra.id.slice(0, 8) });
+  assert.equal(item.payload.supersedes, petra.id);
+  const outcome = ratifyThrough(item);
+  assert.equal(outcome.superseded, petra.id);
+  const { facts, history } = loadFacts();
+  const old = facts.find((f) => f.id === petra.id);
+  assert.equal(old.status, 'superseded');
+  assert.equal(old.supersededBy, outcome.fact.id);
+  assert.ok(old.tInvalid);
+  const fresh = facts.find((f) => f.id === outcome.fact.id);
+  assert.equal(fresh.supersedes, petra.id);
+  assert.equal(fresh.status, 'active');
+  assert.deepEqual(history.get(petra.id).map((e) => e.op), ['add', 'supersede']);
+  assert.equal(history.get(fresh.id)[0].supersedes, petra.id);
+  // Ask reads the current value only; the chain is in the export.
+  assert.equal(askFacts('Acme billing contact', { domain: 'gate' }).facts[0].object, 'Maria');
+  const script = exportFactsCypher({ domain: 'gate', includeRetracted: true });
+  assert.ok(script.includes(`supersededBy: '${fresh.id}'`));
+  assert.ok(script.includes("status: 'superseded'"));
+  assert.equal(kgStats().superseded, 1);
+  // A closed fact cannot be retracted or superseded again — at proposal time...
+  assert.throws(() => proposeRetract({ factId: petra.id }), /already superseded/);
+  assert.throws(() => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Nils', domain: 'gate', by: 'a', supersedes: petra.id }), /already superseded/);
+  // ...and at ratification time: two retractions staged before either is ratified — the second is refused and the first closing time stands.
+  const r1 = proposeRetract({ factId: fresh.id, reason: 'first', by: 'a' });
+  const r2 = proposeRetract({ factId: fresh.id, reason: 'second', by: 'b' });
+  ratifyThrough(r1);
+  const closedAt = loadFacts().facts.find((f) => f.id === fresh.id).tInvalid;
+  assert.throws(() => ratifyThrough(r2), /already retracted since/);
+  assert.equal(loadFacts().facts.find((f) => f.id === fresh.id).tInvalid, closedAt);
+  // A legacy log carrying a second retract line: the first close stands and the second is kept in history as ignored.
+  const p = path.join(tmp, 'closed-twice.jsonl');
+  fs.writeFileSync(p, [
+    JSON.stringify({ op: 'add', at: '2026-01-01T00:00:00.000Z', fact: { id: 'f1', subject: 's', predicate: 'p', object: 'o', domain: 'd', tValid: '2026-01-01T00:00:00.000Z' } }),
+    JSON.stringify({ op: 'retract', factId: 'f1', at: '2026-02-01T00:00:00.000Z', by: 'x' }),
+    JSON.stringify({ op: 'retract', factId: 'f1', at: '2026-03-01T00:00:00.000Z', by: 'y' }),
+  ].join('\n') + '\n');
+  const twice = loadFacts({ factsPath: p });
+  assert.equal(twice.facts[0].tInvalid, '2026-02-01T00:00:00.000Z');
+  assert.equal(twice.history.get('f1')[2].ignored, 'already retracted');
+});

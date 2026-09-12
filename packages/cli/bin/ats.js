@@ -1067,7 +1067,9 @@ async function handleKg() {
       for (const item of targets) {
         try {
           const outcome = ratifyFactItem(item);
-          const result = outcome.op === 'add' ? { factId: outcome.fact.id } : { retracted: outcome.factId };
+          const result = outcome.op === 'add'
+            ? { factId: outcome.fact.id, ...(outcome.superseded ? { superseded: outcome.superseded } : {}) }
+            : { retracted: outcome.factId };
           markReviewItemApplied(item.id, { result });
           ratified.push({ id: item.id.slice(0, 8), ok: true, ...result });
         } catch (err) {

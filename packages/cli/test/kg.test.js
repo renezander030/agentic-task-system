@@ -118,3 +118,22 @@ test('propose exits 0 on a duplicate, 4 on a contradiction, and 4 on a triple th
   assert.equal(acknowledged.staged, true);
   run(['review', 'reject', acknowledged.reviewId, '--by', 'rene']);
 });
+
+test('--supersedes replaces a fact in one ratification: the old one closes with supersededBy, ask answers with the new one', () => {
+  const pdf = run(['kg', 'facts', '--domain', 'sales']).facts.find((f) => f.object === 'invoices as PDF');
+  const proposal = run(['kg', 'propose', 'Acme GmbH', 'prefers', 'invoices as e-Rechnung XML', '--domain', 'sales', '--supersedes', pdf.id.slice(0, 8)]);
+  assert.equal(proposal.staged, true);
+  assert.equal(proposal.supersedes, pdf.id);
+  const ratified = ratify(proposal.reviewId);
+  assert.equal(ratified.superseded, pdf.id);
+  const all = run(['kg', 'facts', '--domain', 'sales', '--all']).facts;
+  const old = all.find((f) => f.id === pdf.id);
+  assert.equal(old.status, 'superseded');
+  assert.equal(old.supersededBy, ratified.factId);
+  assert.ok(old.tInvalid);
+  const current = run(['kg', 'ask', 'what invoices does Acme prefer', '--domain', 'sales']);
+  assert.equal(current.facts[0].object, 'invoices as e-Rechnung XML');
+  assert.equal(current.facts[0].supersedes, pdf.id);
+  const stats = run(['kg', 'stats']);
+  assert.equal(stats.superseded, 1);
+});
