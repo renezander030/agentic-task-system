@@ -208,3 +208,22 @@ test('export --dialect writes openCypher for Neo4j and FalkorDB, --graphiti writ
   assert.ok(episodes.some((e) => e.content === 'Acme GmbH prefers invoices as e-Rechnung XML.'));
   assert.ok(episodes.every((e) => e.group_id === 'sales' && e.source === 'text' && e.reference_time && e.status === 'active'));
 });
+
+test('kg pending is the reviewer view: every proposal not yet in the store, with its effect and a verdict against the store now', () => {
+  const view = run(['kg', 'pending', '--domain', 'sales']);
+  const initech = view.pending.filter((p) => p.subject === 'Initech');
+  assert.equal(initech.length, 2);
+  assert.ok(initech.every((p) => p.effect === 'add' && p.verdict === 'clear' && p.status === 'pending' && p.stagedBy === 'agent-test'));
+  assert.equal(initech.find((p) => p.object === 'TPS reports').confidence, 'high');
+  assert.deepEqual(Object.keys(view.byDomain), ['sales']);
+  assert.equal(view.count, initech.length);
+  const target = run(['kg', 'facts', '--domain', 'sales']).facts[0];
+  const retract = run(['kg', 'retract', target.id.slice(0, 8), '--reason', 'checking the view']);
+  const withRetract = run(['kg', 'pending']);
+  const entry = withRetract.pending.find((p) => p.id === retract.reviewId);
+  assert.match(entry.effect, /^retract [0-9a-f]{8}$/);
+  assert.equal(entry.verdict, 'clear');
+  assert.equal(entry.reason, 'checking the view');
+  run(['review', 'reject', retract.reviewId]);
+  assert.equal(run(['kg', 'pending']).pending.some((p) => p.id === retract.reviewId), false);
+});

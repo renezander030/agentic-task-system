@@ -27,8 +27,9 @@ const {
   factsForTask,
   proposeFactLines,
   exportFactsGraphiti,
+  pendingFactProposals,
 } = await import('../kg.js');
-const { decideReviewItem, listReviewItems } = await import('../review-queue.js');
+const { decideReviewItem, listReviewItems, markReviewItemApplied } = await import('../review-queue.js');
 
 function ratifyThrough(item) {
   const approved = decideReviewItem(item.id, 'approve', { by: 'rene' });
@@ -332,4 +333,51 @@ test('cypher export speaks the Ladybug/Kùzu DDL and a re-runnable openCypher lo
   assert.equal(exportFactsGraphiti({ domain: 'sales' }), '', 'active only by default — the sales fact is closed');
   const gate = exportFactsGraphiti({ domain: 'gate', includeRetracted: true }).trim().split('\n').map((l) => JSON.parse(l));
   assert.match(gate.find((e) => e.status === 'superseded').content, /\(superseded \d{4}-\d{2}-\d{2} by fact [0-9a-f-]{36}\)$/);
+});
+
+test('pendingFactProposals shows what each queued proposal would do to the graph, checked against the store as it is now', () => {
+  const fp = path.join(tmp, 'pending.jsonl');
+  const qp = path.join(tmp, 'pending-queue.json');
+  const paths = { factsPath: fp, queuePath: qp };
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene', queuePath: qp });
+  // Promote the way the CLI does: approve, ratify, and mark the review item applied.
+  const promote = (item, queuePath = qp) => {
+    const outcome = ratifyFactItem(decideReviewItem(item.id, 'approve', { by: 'rene', queuePath }), { factsPath: fp });
+    markReviewItemApplied(item.id, { result: {}, queuePath });
+    return outcome;
+  };
+  const gold = promote(proposeFact({ subject: 'Acme', predicate: 'tier', object: 'gold', domain: 'p', by: 'a' }, paths)).fact;
+  const plain = proposeFact({ subject: 'Acme', predicate: 'region', object: 'DACH', domain: 'p', by: 'a' }, paths);
+  const platinum = proposeFact({ subject: 'Acme', predicate: 'tier', object: 'platinum', domain: 'p', by: 'a', supersedes: gold.id }, paths);
+  const retract = proposeRetract({ factId: gold.id, reason: 'churned', by: 'b' }, paths);
+  const silver = proposeFact({ subject: 'Globex', predicate: 'tier', object: 'silver', domain: 'q', by: 'a' }, paths);
+  approve(silver);
+  const twin = proposeFact({ subject: 'Acme', predicate: 'ships to', object: 'Berlin', domain: 'p', by: 'a' }, paths);
+
+  const view = pendingFactProposals(paths);
+  assert.equal(view.count, 5);
+  assert.deepEqual(view.byDomain, { p: 4, q: 1 });
+  const byId = Object.fromEntries(view.pending.map((i) => [i.id, i]));
+  assert.deepEqual([byId[plain.id].effect, byId[plain.id].verdict, byId[plain.id].status], ['add', 'clear', 'pending']);
+  assert.equal(byId[platinum.id].effect, `add, superseding ${gold.id.slice(0, 8)}`);
+  assert.equal(byId[platinum.id].verdict, 'clear');
+  assert.equal(byId[platinum.id].conflicts[0].object, 'gold', 'the reviewer sees what it replaces');
+  assert.equal(byId[retract.id].effect, `retract ${gold.id.slice(0, 8)}`);
+  assert.equal(byId[retract.id].target.object, 'gold');
+  assert.equal(byId[retract.id].reason, 'churned');
+  assert.deepEqual([byId[silver.id].status, byId[silver.id].approvedBy], ['approved', 'rene'], 'approved but not ratified is still pending promotion');
+  assert.equal(pendingFactProposals({ ...paths, domain: 'q' }).count, 1);
+  assert.equal(view.pending[0].domain, 'p', 'grouped by domain');
+
+  // The store moves on: the retraction lands, so the supersede proposal can no longer do what it says.
+  promote(retract);
+  // Another agent's twin of a pending triple gets ratified through its own queue: the first now reads as duplicate.
+  const otherQueue = path.join(tmp, 'other-queue.json');
+  promote(proposeFact({ subject: 'Acme', predicate: 'ships to', object: 'Berlin', domain: 'p', by: 'b' }, { factsPath: fp, queuePath: otherQueue }), otherQueue);
+  const later = Object.fromEntries(pendingFactProposals(paths).pending.map((i) => [i.id, i]));
+  assert.equal(later[platinum.id].verdict, 'stale');
+  assert.match(later[platinum.id].message, /already retracted since/);
+  assert.equal(later[twin.id].verdict, 'duplicate');
+  assert.equal(later[twin.id].duplicateOf.object, 'Berlin');
+  assert.equal(later[retract.id], undefined, 'applied items leave the view');
 });

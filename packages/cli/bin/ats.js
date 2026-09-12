@@ -106,6 +106,7 @@ import {
   factsForTask,
   proposeFactLines,
   exportFactsGraphiti,
+  pendingFactProposals,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -1125,6 +1126,8 @@ async function handleKg() {
       if (!args.positional[0]) { console.error('Usage: ats kg history FACT_ID'); process.exit(1); }
       return factHistory(args.positional[0]);
     }
+    case 'pending':
+      return pendingFactProposals({ domain: args.options.domain });
     case 'stats':
       return kgStats({ listReviewItems });
     case 'export': {
