@@ -108,6 +108,7 @@ import {
   exportFactsGraphiti,
   pendingFactProposals,
   askFactsSemantic,
+  listEntities,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -1105,13 +1106,14 @@ async function handleKg() {
       return { ratified };
     }
     case 'ask': {
-      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted --as-of DATE] [--semantic | --lexical]'); process.exit(1); }
+      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted --as-of DATE --center ENTITY] [--semantic | --lexical]'); process.exit(1); }
       const question = args.positional.join(' ');
       const opts = {
         domain: args.options.domain,
         limit: parseInt(args.options.limit) || 8,
         includeRetracted: !!args.options['include-retracted'],
         asOf: args.options['as-of'],
+        center: args.options.center,
       };
       // Lexical stays the default (deterministic, dependency-free). The dense
       // branch is opt-in per call (--semantic) or per install
@@ -1142,10 +1144,18 @@ async function handleKg() {
           domain: args.options.domain,
           subject: args.options.subject,
           predicate: args.options.predicate,
+          entity: args.options.entity,
           status: args.options.all ? 'all' : 'active',
           asOf: args.options['as-of'],
         }),
       };
+    case 'nodes':
+      return listEntities({
+        query: args.positional.join(' ') || undefined,
+        domain: args.options.domain,
+        status: args.options.all ? 'all' : 'active',
+        limit: parseInt(args.options.limit) || 50,
+      });
     case 'history': {
       if (!args.positional[0]) { console.error('Usage: ats kg history FACT_ID'); process.exit(1); }
       return factHistory(args.positional[0]);

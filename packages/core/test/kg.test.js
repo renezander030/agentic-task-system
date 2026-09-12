@@ -29,6 +29,7 @@ const {
   exportFactsGraphiti,
   pendingFactProposals,
   askFactsSemantic,
+  listEntities,
 } = await import('../kg.js');
 const { decideReviewItem, listReviewItems, markReviewItemApplied } = await import('../review-queue.js');
 
@@ -451,4 +452,42 @@ test('ask carries a confidence verdict; askFactsSemantic fuses a cached dense br
   const short = async (texts) => texts.slice(1).map(() => [1]);
   assert.match((await askFactsSemantic('Acme', { embed: short, cacheKey: 'x', vectorsPath: vp, domain: 'sem', factsPath: fp })).branches[1].error, /vectors for/);
   await assert.rejects(askFactsSemantic('Acme', { domain: 'sem', factsPath: fp }), /needs an embed\(texts\) function/);
+});
+
+test('listEntities shows what the store knows about whom; --entity reads both directions; --center anchors an ask on one entity', async () => {
+  const fp = path.join(tmp, 'entities.jsonl');
+  const add = (input) => ratifyFactItem(decideReviewItem(proposeFact({ domain: 'ent', by: 'a', ...input }, { factsPath: fp }).id, 'approve', { by: 'rene' }), { factsPath: fp }).fact;
+  add({ subject: 'Acme GmbH', predicate: 'prefers', object: 'invoices as PDF' });
+  add({ subject: 'acme gmbh', predicate: 'pays within', object: '14 days' });
+  add({ subject: 'cluster-2', predicate: 'hosts', object: 'billing service' });
+  add({ subject: 'billing service', predicate: 'runs on', object: 'cluster-2' });
+  const fax = add({ subject: 'Acme GmbH', predicate: 'uses', object: 'fax' });
+  ratifyFactItem(decideReviewItem(proposeRetract({ factId: fax.id, by: 'a' }, { factsPath: fp }).id, 'approve', { by: 'rene' }), { factsPath: fp });
+
+  const { count, entities } = listEntities({ domain: 'ent', factsPath: fp });
+  assert.equal(count, 5);
+  assert.deepEqual(entities.map((e) => e.name), ['Acme GmbH', 'billing service', 'cluster-2', '14 days', 'invoices as PDF']);
+  const acme = entities[0];
+  assert.deepEqual([acme.facts, acme.asSubject, acme.asObject], [2, 2, 0], 'two spellings, one entity, shown under the spelling ratified first');
+  assert.deepEqual(acme.predicates, ['prefers', 'pays within']);
+  assert.deepEqual(acme.domains, { ent: 2 });
+  assert.ok(acme.lastValid);
+  const cluster = entities.find((e) => e.name === 'cluster-2');
+  assert.deepEqual([cluster.facts, cluster.asSubject, cluster.asObject], [2, 1, 1]);
+  assert.deepEqual(listEntities({ domain: 'ent', query: 'ACME', factsPath: fp }).entities.map((e) => e.name), ['Acme GmbH']);
+  assert.equal(listEntities({ domain: 'ent', status: 'all', factsPath: fp }).entities.find((e) => e.name === 'Acme GmbH').facts, 3, 'closed facts count when asked');
+  assert.equal(listEntities({ domain: 'ent', limit: 2, factsPath: fp }).entities.length, 2);
+
+  assert.equal(listKgFacts({ entity: 'cluster-2', factsPath: fp }).length, 2, 'both directions');
+  assert.equal(listKgFacts({ entity: 'CLUSTER', factsPath: fp }).length, 2, 'substring when nothing matches exactly');
+  assert.equal(listKgFacts({ entity: 'Acme GmbH', factsPath: fp }).length, 2);
+
+  assert.equal(askFacts('invoices', { domain: 'ent', factsPath: fp }).count, 1);
+  assert.equal(askFacts('invoices', { domain: 'ent', center: 'cluster-2', factsPath: fp }).count, 0, 'centered on another entity, the Acme fact is not a candidate');
+  const centered = askFacts('invoices', { domain: 'ent', center: 'acme', factsPath: fp });
+  assert.equal(centered.count, 1);
+  assert.equal(centered.center, 'acme');
+  const semantic = await askFactsSemantic('what does the cluster run', { embed: fakeEmbedder(), cacheKey: 'ent', vectorsPath: path.join(tmp, 'ent-vectors.json'), domain: 'ent', center: 'cluster-2', factsPath: fp });
+  assert.equal(semantic.center, 'cluster-2');
+  assert.ok(semantic.facts.length >= 1 && semantic.facts.every((f) => f.subject === 'cluster-2' || f.object === 'cluster-2'));
 });

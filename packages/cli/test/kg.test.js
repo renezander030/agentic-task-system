@@ -255,3 +255,23 @@ test('ask carries a confidence verdict; --semantic rides the adapter embedder wi
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /needs an adapter that supplies embeddings\(texts\)/);
 });
+
+test('kg nodes lists the entities with how much the store knows; facts --entity reads both directions; ask --center anchors on one entity', () => {
+  const nodes = run(['kg', 'nodes', '--domain', 'sales']);
+  const acme = nodes.entities.find((e) => e.name === 'Acme GmbH');
+  assert.ok(acme.facts >= 2 && acme.asSubject >= 2, JSON.stringify(acme));
+  assert.ok(acme.predicates.includes('prefers'));
+  assert.equal(nodes.entities[0].name, 'Acme GmbH', 'most-known first');
+  const filtered = run(['kg', 'nodes', 'acme']);
+  assert.ok(filtered.entities.length >= 1 && filtered.entities.every((e) => /acme/i.test(e.name)));
+  assert.ok(run(['kg', 'nodes', '--all']).entities.find((e) => e.name === 'invoices as PDF'), 'closed facts count with --all');
+  assert.equal(run(['kg', 'facts', '--entity', 'Maria']).facts.length, 1);
+  assert.ok(run(['kg', 'facts', '--entity', 'acme']).facts.length >= 2);
+  const centered = run(['kg', 'ask', 'invoices', '--domain', 'sales', '--center', 'Acme GmbH']);
+  assert.equal(centered.center, 'Acme GmbH');
+  assert.ok(centered.count >= 1 && centered.facts.every((f) => /acme/i.test(f.subject) || /acme/i.test(f.object)));
+  assert.equal(run(['kg', 'ask', 'invoices', '--domain', 'sales', '--center', 'Initech']).count, 0, 'Initech is only proposed, never ratified');
+  const semantic = run(['kg', 'ask', 'invoices', '--domain', 'sales', '--center', 'Acme GmbH', '--semantic']);
+  assert.equal(semantic.center, 'Acme GmbH');
+  assert.ok(semantic.facts.every((f) => /acme/i.test(f.subject) || /acme/i.test(f.object)));
+});
