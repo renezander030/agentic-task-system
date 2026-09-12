@@ -105,6 +105,7 @@ import {
   factHistory,
   factsForTask,
   proposeFactLines,
+  exportFactsGraphiti,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -1127,8 +1128,12 @@ async function handleKg() {
     case 'stats':
       return kgStats({ listReviewItems });
     case 'export': {
-      if (args.options.cypher) {
-        return { __raw: exportFactsCypher({ domain: args.options.domain, includeRetracted: !!args.options['include-retracted'] }) };
+      const includeRetracted = !!args.options['include-retracted'];
+      if (args.options.graphiti) {
+        return { __raw: exportFactsGraphiti({ domain: args.options.domain, includeRetracted }) };
+      }
+      if (args.options.cypher || args.options.dialect) {
+        return { __raw: exportFactsCypher({ domain: args.options.domain, includeRetracted, dialect: args.options.dialect }) };
       }
       const { facts } = loadFacts();
       const selected = args.options.domain ? facts.filter((f) => f.domain === args.options.domain) : facts;

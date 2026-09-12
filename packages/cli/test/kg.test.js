@@ -188,3 +188,23 @@ test('propose --file stages a JSONL batch line by line, from a file or stdin, an
   assert.deepEqual([report.staged, report.duplicate, report.refused, report.invalid], [0, 1, 1, 1]);
   assert.equal(report.results.find((r) => r.line === 3).verdict, 'contradiction');
 });
+
+test('export --dialect writes openCypher for Neo4j and FalkorDB, --graphiti writes episode JSONL', () => {
+  const neo = runProcess(['kg', 'export', '--dialect', 'neo4j', '--domain', 'sales'], { json: false });
+  assert.equal(neo.status, 0, neo.stderr);
+  assert.match(neo.stdout, /CREATE INDEX entity_name IF NOT EXISTS FOR \(e:Entity\) ON \(e\.name\);/);
+  assert.match(neo.stdout, /MERGE \(a\)-\[r:FACT \{id: '[0-9a-f-]+'\}\]->\(b\) SET r\.predicate = 'prefers'/);
+  const falkor = runProcess(['kg', 'export', '--cypher', '--dialect', 'falkordb', '--include-retracted'], { json: false });
+  assert.match(falkor.stdout, /CREATE INDEX FOR \(e:Entity\) ON \(e\.name\);/);
+  assert.match(falkor.stdout, /r\.status = 'superseded'/);
+  const ladybug = runProcess(['kg', 'export', '--cypher'], { json: false });
+  assert.match(ladybug.stdout, /CREATE NODE TABLE IF NOT EXISTS Entity/);
+  const bad = runProcess(['kg', 'export', '--dialect', 'sparql']);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /dialect must be one of/);
+  const graphiti = runProcess(['kg', 'export', '--graphiti', '--domain', 'sales'], { json: false });
+  assert.equal(graphiti.status, 0, graphiti.stderr);
+  const episodes = graphiti.stdout.trim().split('\n').map((l) => JSON.parse(l));
+  assert.ok(episodes.some((e) => e.content === 'Acme GmbH prefers invoices as e-Rechnung XML.'));
+  assert.ok(episodes.every((e) => e.group_id === 'sales' && e.source === 'text' && e.reference_time && e.status === 'active'));
+});

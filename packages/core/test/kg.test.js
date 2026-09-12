@@ -26,6 +26,7 @@ const {
   factHistory,
   factsForTask,
   proposeFactLines,
+  exportFactsGraphiti,
 } = await import('../kg.js');
 const { decideReviewItem, listReviewItems } = await import('../review-queue.js');
 
@@ -300,4 +301,35 @@ test('proposeFactLines stages every valid line on its own: bad lines are reporte
   assert.equal(sap.payload.confidence, 'high');
   assert.equal(sap.payload.source, 'batch import', 'defaults fill what a line does not carry');
   assert.equal(staged.find((i) => i.payload.object === 'Sam').payload.source, 'call 2026-09-10', 'a line keeps its own values');
+});
+
+test('cypher export speaks the Ladybug/Kùzu DDL and a re-runnable openCypher load for Neo4j and FalkorDB; --graphiti emits episodes with provenance', () => {
+  assert.equal(exportFactsCypher({ domain: 'infra' }), exportFactsCypher({ domain: 'infra', dialect: 'kuzu' }));
+  const neo = exportFactsCypher({ domain: 'infra', dialect: 'neo4j' });
+  assert.ok(!neo.includes('CREATE NODE TABLE'), 'no table DDL outside the embedded engine');
+  assert.ok(neo.includes('CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name);'));
+  assert.ok(neo.includes("MERGE (:Entity {name: 'billing service'});"));
+  assert.match(neo, /MATCH \(a:Entity \{name: 'billing service'\}\), \(b:Entity \{name: 'cluster-2'\}\) MERGE \(a\)-\[r:FACT \{id: '[0-9a-f-]+'\}\]->\(b\) SET r\.predicate = 'runs on', r\.domain = 'infra', r\.status = 'active'/);
+  assert.ok(neo.includes("r.ratifiedBy = 'rene'"));
+  assert.ok(neo.includes("r.supersededBy = ''"));
+  const falkor = exportFactsCypher({ domain: 'infra', dialect: 'FalkorDB' });
+  assert.ok(falkor.includes('CREATE INDEX FOR (e:Entity) ON (e.name);'));
+  assert.ok(!falkor.includes('IF NOT EXISTS'));
+  assert.ok(falkor.includes('MERGE (a)-[r:FACT'));
+  assert.throws(() => exportFactsCypher({ dialect: 'sparql' }), /dialect must be one of ladybug, kuzu, neo4j, falkordb/);
+
+  const episodes = exportFactsGraphiti({ domain: 'sales', includeRetracted: true }).trim().split('\n').map((l) => JSON.parse(l));
+  const retracted = episodes.find((e) => e.status === 'retracted');
+  assert.ok(retracted, 'the closed sales fact is exported when asked');
+  assert.equal(retracted.group_id, 'sales');
+  assert.equal(retracted.source, 'text');
+  assert.match(retracted.content, /^Acme GmbH prefers O'Reilly-style invoices\. \(retracted \d{4}-\d{2}-\d{2}: client changed policy\)$/);
+  assert.equal(retracted.reference_time, retracted.valid_at);
+  assert.ok(retracted.invalid_at);
+  assert.equal(retracted.uuid.length, 36);
+  assert.match(retracted.name, /^ats-kg [0-9a-f]{8}$/);
+  assert.match(retracted.source_description, /proposed by agent-3 from call 2026-08-01; ratified by rene /);
+  assert.equal(exportFactsGraphiti({ domain: 'sales' }), '', 'active only by default — the sales fact is closed');
+  const gate = exportFactsGraphiti({ domain: 'gate', includeRetracted: true }).trim().split('\n').map((l) => JSON.parse(l));
+  assert.match(gate.find((e) => e.status === 'superseded').content, /\(superseded \d{4}-\d{2}-\d{2} by fact [0-9a-f-]{36}\)$/);
 });
