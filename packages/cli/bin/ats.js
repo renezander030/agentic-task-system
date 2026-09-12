@@ -101,6 +101,7 @@ import {
   askFacts,
   kgStats,
   exportFactsCypher,
+  KgGateError,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -993,13 +994,25 @@ async function applyReviewedWrite(item, adapter, t) {
   }
 }
 
+// A gate refusal is an outcome, not a crash. A duplicate is the no-op case
+// (the fact is already known or already queued) and exits 0; a contradiction
+// or a previously rejected triple prints the report and exits 4 — an exit code
+// an agent can branch on, next to 3 for a failed --if-match.
+function kgGateOutcome(err) {
+  const body = { staged: false, ...err.gate, message: err.message };
+  if (err.code === 'duplicate') return body;
+  console.log(formatOutput(body, args.options.format));
+  process.exit(4);
+}
+
 async function handleKg() {
   const agentId = args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli';
   switch (args.subcommand) {
     case 'propose': {
       const [subject, predicate, object] = args.positional;
       if (!subject || !predicate || !object) {
-        console.error('Usage: ats kg propose SUBJECT PREDICATE OBJECT [--domain D --source REF --confidence low|medium|high --task PROJECT/TASK]');
+        console.error('Usage: ats kg propose SUBJECT PREDICATE OBJECT [--domain D --source REF --confidence low|medium|high --task PROJECT/TASK]\n' +
+          '       [--supersedes FACT_ID | --additive] [--acknowledge-rejected REVIEW_ID]');
         process.exit(1);
       }
       let taskRef;
@@ -1007,17 +1020,27 @@ async function handleKg() {
         const [tp, tt] = splitTaskRef(args.options.task);
         taskRef = { projectId: tp, taskId: tt };
       }
-      const item = proposeFact({
-        subject, predicate, object,
-        domain: args.options.domain,
-        source: args.options.source,
-        confidence: args.options.confidence,
-        taskRef,
-        by: agentId,
-      });
+      let item;
+      try {
+        item = proposeFact({
+          subject, predicate, object,
+          domain: args.options.domain,
+          source: args.options.source,
+          confidence: args.options.confidence,
+          taskRef,
+          by: agentId,
+          supersedes: args.options.supersedes,
+          additive: !!args.options.additive,
+          acknowledgeRejected: args.options['acknowledge-rejected'],
+        });
+      } catch (err) {
+        if (err instanceof KgGateError) return kgGateOutcome(err);
+        throw err;
+      }
       return {
         staged: true,
         reviewId: item.id,
+        ...(item.payload.supersedes ? { supersedes: item.payload.supersedes } : {}),
         message: `Fact proposed as ${item.id.slice(0, 8)}. Ratify with: ats review approve ${item.id.slice(0, 8)} && ats kg ratify --all`,
       };
     }

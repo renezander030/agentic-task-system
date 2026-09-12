@@ -21,6 +21,8 @@ const {
   askFacts,
   kgStats,
   exportFactsCypher,
+  checkFactProposal,
+  normalizeTerm,
 } = await import('../kg.js');
 const { decideReviewItem, listReviewItems } = await import('../review-queue.js');
 
@@ -114,4 +116,47 @@ test('a malformed log line fails loudly, never silently', () => {
   const badPath = path.join(tmp, 'bad.jsonl');
   fs.writeFileSync(badPath, '{"op":"add","fact":{"id":"1","subject":"s","predicate":"p","object":"o","domain":"d"}}\nnot json\n');
   assert.throws(() => loadFacts({ factsPath: badPath }), /Malformed kg fact log at line 2/);
+});
+
+test('the proposal gate: duplicates are no-ops, rejected triples need an acknowledgement, contradictions need --supersedes or --additive', () => {
+  assert.equal(normalizeTerm('  Acme   GmbH. '), 'acme gmbh');
+  const first = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'gate', by: 'agent-a' });
+  // The same triple, spelled differently, while the first is still pending: a duplicate of the queued proposal.
+  assert.throws(
+    () => proposeFact({ subject: 'acme gmbh', predicate: 'Billing Contact', object: 'Petra.', domain: 'gate', by: 'agent-b' }),
+    (e) => e.name === 'KgGateError' && e.code === 'duplicate' && e.gate.proposal.id === first.id && /already pending/.test(e.message)
+  );
+  ratifyThrough(first);
+  // Once ratified, the duplicate names the active fact instead.
+  assert.throws(
+    () => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'gate', by: 'agent-b' }),
+    (e) => e.code === 'duplicate' && e.gate.fact.subject === 'Acme GmbH' && typeof e.gate.fact.id === 'string'
+  );
+  // Another object for the same subject+predicate is a contradiction...
+  assert.throws(
+    () => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b' }),
+    (e) => e.code === 'contradiction' && e.gate.conflicts.length === 1 && e.gate.conflicts[0].object === 'Petra'
+  );
+  // ...unless the predicate is declared multi-valued.
+  const additive = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b', additive: true });
+  assert.equal(additive.payload.additive, true);
+  decideReviewItem(additive.id, 'reject', { by: 'rene', note: 'Jonas left in May' });
+  // A rejected triple is refused, naming the decision, until the agent acknowledges it.
+  assert.throws(
+    () => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b', additive: true }),
+    (e) => e.code === 'rejected' && e.gate.rejected.id === additive.id && e.gate.rejected.note === 'Jonas left in May' && /--acknowledge-rejected/.test(e.message)
+  );
+  const again = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b', additive: true, acknowledgeRejected: additive.id.slice(0, 8) });
+  assert.equal(again.status, 'pending');
+  assert.equal(again.payload.acknowledgedRejection, additive.id.slice(0, 8));
+  // The same triple in another domain is another graph.
+  assert.equal(proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'gate-2', by: 'agent-a' }).status, 'pending');
+  // The pure gate reports conflicts even when it lets a superseding proposal through.
+  const petra = listKgFacts({ domain: 'gate' })[0];
+  const verdict = checkFactProposal({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate' }, { facts: loadFacts().facts, supersedes: petra.id });
+  assert.equal(verdict.verdict, 'clear');
+  assert.equal(verdict.supersedes, petra.id);
+  assert.equal(verdict.conflicts[0].id, petra.id);
+  // --supersedes must name an active fact.
+  assert.throws(() => proposeFact({ subject: 'x', predicate: 'y', object: 'z', domain: 'gate', by: 'a', supersedes: 'nope' }), /names no fact/);
 });
