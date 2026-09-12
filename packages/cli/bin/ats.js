@@ -103,6 +103,7 @@ import {
   exportFactsCypher,
   KgGateError,
   factHistory,
+  factsForTask,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -1889,9 +1890,22 @@ async function handleGraph() {
 async function handleContext() {
   const projectId = args.subcommand;
   const taskId = args.positional[0];
-  if (!projectId || !taskId) { console.error('Usage: ats context PROJECT_ID TASK_ID [--limit N]'); process.exit(1); }
+  if (!projectId || !taskId) { console.error('Usage: ats context PROJECT_ID TASK_ID [--limit N] [--no-facts] [--facts-limit N] [--domain D]'); process.exit(1); }
   const adapter = await loadAdapter();
-  return contextForTask(adapter, { projectId, taskId }, { limit: parseInt(args.options.limit) || 8 });
+  const context = await contextForTask(adapter, { projectId, taskId }, { limit: parseInt(args.options.limit) || 8 });
+  if (args.options['no-facts']) return context;
+  // Two layers, one bundle: the ratified facts about this task ride along with
+  // the linked and retrieved tasks — proposed from the task first, then the
+  // best lexical matches on its title and intent.
+  const query = [context.task?.title, context.intent?.outcome, context.intent?.why].filter(Boolean).join(' ');
+  context.facts = factsForTask({
+    projectId,
+    taskId,
+    query,
+    domain: args.options.domain,
+    limit: parseInt(args.options['facts-limit']) || 5,
+  });
+  return context;
 }
 
 async function handleLedger() {

@@ -592,10 +592,14 @@ Returns nodes, typed edges, lifecycle validity, and unresolved references.`,
     context: `ats context - Assemble execution context for a task
 
 Usage:
-  ats context PROJECT_ID TASK_ID [--limit N]
+  ats context PROJECT_ID TASK_ID [--limit N] [--no-facts] [--facts-limit N] [--domain D]
 
 Typed links are returned first. Retrieval then discovers additional candidates.
-Archived, expired, future, and superseded items are excluded with reasons.`,
+Archived, expired, future, and superseded items are excluded with reasons.
+The ratified facts about the task ride along in \`facts\`: those proposed from
+it (\`ats kg propose ... --task P/T\`) as \`linked\`, then the best lexical
+matches on its title and intent as \`related\` — each with provenance.
+--no-facts leaves the facts layer out; --domain scopes it.`,
     ledger: `ats ledger - Append-only agent action log
 
 Usage:

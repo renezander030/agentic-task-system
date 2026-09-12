@@ -151,3 +151,16 @@ test('ask --as-of answers what the store believed then, and kg history shows the
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /--as-of needs an ISO date/);
 });
+
+test('ats context carries the ratified facts about the task: proposed from it first, then lexical matches on its title', () => {
+  const linked = run(['kg', 'propose', 'Acme GmbH', 'billing contact', 'Maria', '--domain', 'sales', '--task', 'p1/t1']);
+  ratify(linked.reviewId);
+  const ctx = run(['context', 'p1', 't1']);
+  assert.equal(ctx.task.title, 'Send the Acme GmbH invoice for August');
+  assert.deepEqual(ctx.facts.linked.map((f) => [f.object, f.via]), [['Maria', 'task-ref']]);
+  assert.ok(ctx.facts.related.some((f) => f.object === 'invoices as e-Rechnung XML' && f.via === 'lexical'), JSON.stringify(ctx.facts));
+  assert.ok(!ctx.facts.related.some((f) => f.object === 'invoices as PDF'), 'the superseded fact stays out');
+  assert.ok(ctx.facts.related.every((f) => f.provenance?.ratifiedBy === 'rene'));
+  assert.equal(run(['context', 'p1', 't1', '--no-facts']).facts, undefined);
+  assert.equal(run(['context', 'p1', 't2']).facts.count, 0, 'an unrelated task gets no facts');
+});

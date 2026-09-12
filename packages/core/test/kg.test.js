@@ -24,6 +24,7 @@ const {
   checkFactProposal,
   normalizeTerm,
   factHistory,
+  factsForTask,
 } = await import('../kg.js');
 const { decideReviewItem, listReviewItems } = await import('../review-queue.js');
 
@@ -242,4 +243,24 @@ test('--as-of answers from validity intervals â€” what the store believed then â
   assert.deepEqual(h2.events.map((e) => e.op), ['add', 'retract']);
   assert.equal(h2.events[1].reason, 'contract ended');
   assert.throws(() => factHistory('nope', { factsPath: fp }), /no fact nope/);
+});
+
+test('factsForTask joins the two layers: facts proposed from the task come first, lexical matches on its title follow, closed facts stay out', () => {
+  const fp = path.join(tmp, 'context.jsonl');
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene' });
+  const add = (input) => ratifyFactItem(approve(proposeFact({ domain: 'ctx', by: 'a', ...input }, { factsPath: fp })), { factsPath: fp }).fact;
+  const linked = add({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Maria', taskRef: { projectId: 'p1', taskId: 't1' } });
+  add({ subject: 'Acme GmbH', predicate: 'prefers', object: 'invoices as PDF' });
+  add({ subject: 'Globex', predicate: 'prefers', object: 'invoices by post' });
+  const closed = add({ subject: 'Acme GmbH', predicate: 'pays within', object: '14 days' });
+  ratifyFactItem(approve(proposeRetract({ factId: closed.id, by: 'a' }, { factsPath: fp })), { factsPath: fp });
+
+  const ctx = factsForTask({ projectId: 'p1', taskId: 't1', query: 'Send the Acme GmbH invoice for August', factsPath: fp });
+  assert.deepEqual(ctx.linked.map((f) => [f.id, f.via]), [[linked.id, 'task-ref']]);
+  assert.equal(ctx.related[0].object, 'invoices as PDF');
+  assert.ok(ctx.related.every((f) => f.via === 'lexical' && f.id !== linked.id && f.object !== '14 days'));
+  assert.equal(ctx.count, ctx.linked.length + ctx.related.length);
+  // Namespaced ids resolve to the same task; an unrelated task gets no linked facts.
+  assert.equal(factsForTask({ projectId: 'ticktick:p1', taskId: 'ticktick:t1', factsPath: fp }).linked.length, 1);
+  assert.equal(factsForTask({ projectId: 'p1', taskId: 't2', query: 'Groceries', factsPath: fp }).count, 0);
 });
