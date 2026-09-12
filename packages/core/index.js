@@ -35,6 +35,8 @@ export {
   exportFactsGraphiti,
   CYPHER_DIALECTS,
   pendingFactProposals,
+  askFactsSemantic,
+  kgVectorsPath,
 } from './kg.js';
 export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, projectScope, findConfidence, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';

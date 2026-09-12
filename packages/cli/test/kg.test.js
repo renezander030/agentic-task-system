@@ -56,7 +56,7 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-function runProcess(argv, { input, json = true } = {}) {
+function runProcess(argv, { input, json = true, env = {} } = {}) {
   return spawnSync(process.execPath, [cli, ...argv, ...(json ? ['--json'] : [])], {
     encoding: 'utf8',
     input,
@@ -74,6 +74,7 @@ function runProcess(argv, { input, json = true } = {}) {
       ATS_CORPUS_CACHE_DISABLE: '1',
       ATS_USAGE_DISABLE: '1',
       XDG_CONFIG_HOME: path.join(tempDir, 'xdg'),
+      ...env,
     },
   });
 }
@@ -226,4 +227,31 @@ test('kg pending is the reviewer view: every proposal not yet in the store, with
   assert.equal(entry.reason, 'checking the view');
   run(['review', 'reject', retract.reviewId]);
   assert.equal(run(['kg', 'pending']).pending.some((p) => p.id === retract.reviewId), false);
+});
+
+test('ask carries a confidence verdict; --semantic rides the adapter embedder with a vector cache, and names a missing embedder', () => {
+  const question = ['which invoice format does Acme want', '--domain', 'sales'];
+  const lexical = run(['kg', 'ask', ...question]);
+  assert.equal(lexical.confidence.verdict, 'weak');
+  const semantic = run(['kg', 'ask', ...question, '--semantic']);
+  assert.equal(semantic.mode, 'semantic');
+  assert.equal(semantic.facts[0].object, 'invoices as e-Rechnung XML');
+  assert.equal(semantic.confidence.verdict, 'strong');
+  assert.deepEqual(semantic.branches.map((b) => [b.name, b.ok]), [['lexical', true], ['dense', true]]);
+  assert.ok(semantic.branches[1].embedded > 0);
+  assert.ok(fs.existsSync(path.join(tempDir, 'kg-vectors.json')));
+  const again = run(['kg', 'ask', ...question, '--semantic']);
+  assert.equal(again.branches[1].embedded, 0, 'fact vectors are cached');
+  assert.equal(run(['kg', 'ask', 'Acme invoices', '--domain', 'sales'], { env: { ATS_KG_ASK_SEMANTIC: '1' } }).mode, 'semantic');
+  assert.equal(run(['kg', 'ask', 'Acme invoices', '--domain', 'sales', '--lexical'], { env: { ATS_KG_ASK_SEMANTIC: '1' } }).mode, undefined);
+
+  const plainAdapter = path.join(tempDir, 'plain.mjs');
+  fs.writeFileSync(plainAdapter, `export default {
+  listProjects: async () => [], listTasksInProject: async () => [], getTask: async () => null,
+  createTask: async (input) => input, updateTask: async (p, id, patch) => patch, urlFor: () => 'test://x',
+  authStatus: async () => ({ authenticated: true }), authLogin: async () => ({ instructions: 'none' }),
+};`);
+  const missing = runProcess(['kg', 'ask', 'Acme invoices', '--semantic'], { env: { ATS_ADAPTER: pathToFileURL(plainAdapter).href } });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /needs an adapter that supplies embeddings\(texts\)/);
 });

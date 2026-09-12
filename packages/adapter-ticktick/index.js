@@ -11,6 +11,7 @@ import * as notes from './notes.js';
 import * as relevance from './relevance.js';
 import * as interactive from './interactive.js';
 import * as setup from './setup.js';
+import * as embedding from './embedding.js';
 
 function contractTask(task, fallback = {}) {
   return {
@@ -106,6 +107,9 @@ const adapter = {
     relevance,
     interactive,
     setup,
+    // `ats kg ask --semantic` embeds facts through here (embedTexts,
+    // embeddingId) without adding a corpus-wide dense branch to Core reads.
+    embedding,
   },
 };
 

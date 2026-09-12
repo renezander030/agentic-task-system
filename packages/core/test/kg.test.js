@@ -28,6 +28,7 @@ const {
   proposeFactLines,
   exportFactsGraphiti,
   pendingFactProposals,
+  askFactsSemantic,
 } = await import('../kg.js');
 const { decideReviewItem, listReviewItems, markReviewItemApplied } = await import('../review-queue.js');
 
@@ -380,4 +381,74 @@ test('pendingFactProposals shows what each queued proposal would do to the graph
   assert.equal(later[twin.id].verdict, 'duplicate');
   assert.equal(later[twin.id].duplicateOf.object, 'Berlin');
   assert.equal(later[retract.id], undefined, 'applied items leave the view');
+});
+
+// A deterministic bag-of-words embedder with a few synonyms, so a paraphrase
+// lands near the fact it means without any model.
+function fakeEmbedder(log = []) {
+  const SYNONYMS = { invoice: 'invoice', invoices: 'invoice', billing: 'invoice', prefers: 'want', want: 'want', wants: 'want', format: 'pdf', gmbh: 'acme', pays: 'pay', paid: 'pay' };
+  const DIMS = 32;
+  const embed = (text) => {
+    const v = new Array(DIMS).fill(0);
+    for (const raw of String(text).toLowerCase().match(/[a-z0-9]+/g) || []) {
+      const tok = SYNONYMS[raw] || raw;
+      let h = 7;
+      for (const c of tok) h = (h * 31 + c.charCodeAt(0)) % 1000003;
+      v[h % DIMS] += 1;
+    }
+    return v;
+  };
+  return async (texts) => { log.push(texts.length); return texts.map(embed); };
+}
+
+test('ask carries a confidence verdict; askFactsSemantic fuses a cached dense branch with it and degrades transparently when the embedder fails', async () => {
+  const fp = path.join(tmp, 'semantic.jsonl');
+  const vp = path.join(tmp, 'vectors.json');
+  const add = (input) => ratifyFactItem(decideReviewItem(proposeFact({ domain: 'sem', by: 'a', ...input }, { factsPath: fp }).id, 'approve', { by: 'rene' }), { factsPath: fp }).fact;
+  add({ subject: 'Acme GmbH', predicate: 'prefers', object: 'invoices as PDF' });
+  add({ subject: 'Globex', predicate: 'prefers', object: 'invoices by post' });
+  add({ subject: 'Acme GmbH', predicate: 'pays within', object: '14 days' });
+
+  assert.equal(askFacts('Acme GmbH prefers invoices as PDF', { domain: 'sem', factsPath: fp }).confidence.verdict, 'strong');
+  assert.equal(askFacts('Acme GmbH pays', { domain: 'sem', factsPath: fp }).confidence.verdict, 'strong');
+  const weak = askFacts('which invoice format does Acme want', { domain: 'sem', factsPath: fp });
+  assert.equal(weak.confidence.verdict, 'weak');
+  assert.equal(weak.confidence.coverage, 0.33);
+  assert.match(weak.confidence.reason, /--semantic/);
+  assert.equal(askFacts('zebra', { domain: 'sem', factsPath: fp }).confidence.verdict, 'none');
+
+  const calls = [];
+  const embed = fakeEmbedder(calls);
+  const res = await askFactsSemantic('which invoice format does Acme want', { embed, cacheKey: 'fake', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.equal(res.mode, 'semantic');
+  assert.equal(res.facts[0].object, 'invoices as PDF');
+  assert.deepEqual([...res.facts[0].sources].sort(), ['dense', 'lexical']);
+  assert.ok(res.facts[0].similarity > 0 && res.facts[0].lexicalScore > 0);
+  assert.equal(res.confidence.verdict, 'strong');
+  assert.equal(res.confidence.topAgreement, 2);
+  assert.equal(res.degraded, false);
+  assert.deepEqual(res.branches.map((b) => [b.name, b.ok]), [['lexical', true], ['dense', true]]);
+  assert.deepEqual([res.branches[1].embedded, res.branches[1].cached], [3, 0]);
+  assert.equal(calls[0], 4, 'the question and every fact were embedded once');
+  assert.ok(fs.existsSync(vp));
+  assert.equal((fs.statSync(vp).mode & 0o777), 0o600);
+
+  const again = await askFactsSemantic('which invoice format does Acme want', { embed, cacheKey: 'fake', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.deepEqual([again.branches[1].embedded, again.branches[1].cached], [0, 3], 'a repeat ask embeds only the question');
+  assert.equal(calls[1], 1);
+  const other = await askFactsSemantic('Acme invoices', { embed, cacheKey: 'other-model', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.equal(other.branches[1].embedded, 3, 'another embedder starts its own cache');
+
+  const failing = async () => { throw new Error('embedder down'); };
+  const degraded = await askFactsSemantic('Acme invoices', { embed: failing, cacheKey: 'fake', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.equal(degraded.degraded, true);
+  assert.equal(degraded.branches[1].ok, false);
+  assert.match(degraded.branches[1].error, /embedder down/);
+  assert.equal(degraded.facts[0].object, 'invoices as PDF', 'the lexical branch still answers');
+  assert.deepEqual(degraded.facts[0].sources, ['lexical']);
+  assert.match(degraded.confidence.reason, /dense branch failed \(embedder down\)/);
+  assert.equal(degraded.confidence.branchesRun, 1);
+  const short = async (texts) => texts.slice(1).map(() => [1]);
+  assert.match((await askFactsSemantic('Acme', { embed: short, cacheKey: 'x', vectorsPath: vp, domain: 'sem', factsPath: fp })).branches[1].error, /vectors for/);
+  await assert.rejects(askFactsSemantic('Acme', { domain: 'sem', factsPath: fp }), /needs an embed\(texts\) function/);
 });

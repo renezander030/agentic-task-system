@@ -107,6 +107,7 @@ import {
   proposeFactLines,
   exportFactsGraphiti,
   pendingFactProposals,
+  askFactsSemantic,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -1104,13 +1105,36 @@ async function handleKg() {
       return { ratified };
     }
     case 'ask': {
-      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted --as-of DATE]'); process.exit(1); }
-      return askFacts(args.positional.join(' '), {
+      if (!args.positional[0]) { console.error('Usage: ats kg ask "QUESTION" [--domain D --limit N --include-retracted --as-of DATE] [--semantic | --lexical]'); process.exit(1); }
+      const question = args.positional.join(' ');
+      const opts = {
         domain: args.options.domain,
         limit: parseInt(args.options.limit) || 8,
         includeRetracted: !!args.options['include-retracted'],
         asOf: args.options['as-of'],
-      });
+      };
+      // Lexical stays the default (deterministic, dependency-free). The dense
+      // branch is opt-in per call (--semantic) or per install
+      // (ATS_KG_ASK_SEMANTIC=1, --lexical overrides), and rides the active
+      // adapter's embedder: the contract's embeddings(texts), or the
+      // TickTick adapter's own Ollama client behind __ext.embedding.
+      const semantic = !!args.options.semantic || (process.env.ATS_KG_ASK_SEMANTIC === '1' && !args.options.lexical);
+      if (!semantic) return askFacts(question, opts);
+      const adapter = await loadAdapter();
+      const source = resolveAdapterPkg();
+      const ext = adapter.__ext?.embedding;
+      let embed;
+      let cacheKey;
+      if (typeof adapter.embeddings === 'function') {
+        embed = (texts) => adapter.embeddings(texts);
+        cacheKey = `${source.pkg}:embeddings`;
+      } else if (ext && typeof ext.embedTexts === 'function') {
+        embed = (texts) => ext.embedTexts(texts);
+        cacheKey = `${source.pkg}:${typeof ext.embeddingId === 'function' ? ext.embeddingId() : 'embedding'}`;
+      } else {
+        throw withExitCode(new Error(`kg ask --semantic needs an adapter that supplies embeddings(texts); ${source.pkg} does not. The lexical ask needs no embedder.`), 1);
+      }
+      return askFactsSemantic(question, { ...opts, embed, cacheKey });
     }
     case 'facts':
       return {
