@@ -31,6 +31,7 @@ export {
   believedAt,
   factHistory,
   factsForTask,
+  proposeFactLines,
 } from './kg.js';
 export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, projectScope, findConfidence, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';

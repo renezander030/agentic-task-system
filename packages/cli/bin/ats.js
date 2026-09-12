@@ -104,6 +104,7 @@ import {
   KgGateError,
   factHistory,
   factsForTask,
+  proposeFactLines,
 } from '@reneza/ats-core';
 import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpus-cache';
 import { scaffoldAdapter } from '../scaffold.js';
@@ -1011,6 +1012,25 @@ async function handleKg() {
   const agentId = args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli';
   switch (args.subcommand) {
     case 'propose': {
+      if (args.options.file) {
+        // Batch: one JSON object per line from a file or stdin (`--file -`).
+        // Every line stands on its own; the report names each one. Exit 0
+        // when every line staged or was a known duplicate, 4 when any line
+        // was refused by the gate or could not be read.
+        const file = String(args.options.file);
+        const text = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8');
+        const report = proposeFactLines(text.split('\n'), {
+          by: agentId,
+          defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence },
+        });
+        const ok = report.refused === 0 && report.invalid === 0;
+        report.message = ok
+          ? `${report.staged} fact${report.staged === 1 ? '' : 's'} proposed${report.duplicate ? `, ${report.duplicate} already known` : ''}. Ratify with: ats review list && ats kg ratify --all`
+          : `${report.staged} proposed, ${report.duplicate} already known, ${report.refused} refused by the gate, ${report.invalid} unreadable — see results.`;
+        if (ok) return report;
+        console.log(formatOutput(report, args.options.format));
+        process.exit(4);
+      }
       const [subject, predicate, object] = args.positional;
       if (!subject || !predicate || !object) {
         console.error('Usage: ats kg propose SUBJECT PREDICATE OBJECT [--domain D --source REF --confidence low|medium|high --task PROJECT/TASK]\n' +

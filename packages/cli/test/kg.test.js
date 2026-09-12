@@ -164,3 +164,27 @@ test('ats context carries the ratified facts about the task: proposed from it fi
   assert.equal(run(['context', 'p1', 't1', '--no-facts']).facts, undefined);
   assert.equal(run(['context', 'p1', 't2']).facts.count, 0, 'an unrelated task gets no facts');
 });
+
+test('propose --file stages a JSONL batch line by line, from a file or stdin, and exits 4 only when a line was refused or unreadable', () => {
+  const clean = path.join(tempDir, 'clean.jsonl');
+  fs.writeFileSync(clean, [
+    JSON.stringify({ subject: 'Initech', predicate: 'billing contact', object: 'Peter' }),
+    JSON.stringify({ subject: 'Initech', predicate: 'uses', object: 'TPS reports', confidence: 'high' }),
+  ].join('\n') + '\n');
+  const ok = run(['kg', 'propose', '--file', clean, '--domain', 'sales', '--source', 'kickoff 2026-09-12']);
+  assert.equal(ok.staged, 2);
+  assert.match(ok.message, /2 facts proposed/);
+  assert.ok(run(['kg', 'stats']).pendingProposals >= 2);
+
+  const mixed = runProcess(['kg', 'propose', '--file', '-', '--domain', 'sales'], {
+    input: [
+      JSON.stringify({ subject: 'Initech', predicate: 'billing contact', object: 'peter' }),
+      'garbage',
+      JSON.stringify({ subject: 'Acme GmbH', predicate: 'prefers', object: 'invoices by fax' }),
+    ].join('\n'),
+  });
+  assert.equal(mixed.status, 4, mixed.stdout);
+  const report = JSON.parse(mixed.stdout);
+  assert.deepEqual([report.staged, report.duplicate, report.refused, report.invalid], [0, 1, 1, 1]);
+  assert.equal(report.results.find((r) => r.line === 3).verdict, 'contradiction');
+});

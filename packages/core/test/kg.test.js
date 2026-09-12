@@ -25,6 +25,7 @@ const {
   normalizeTerm,
   factHistory,
   factsForTask,
+  proposeFactLines,
 } = await import('../kg.js');
 const { decideReviewItem, listReviewItems } = await import('../review-queue.js');
 
@@ -263,4 +264,40 @@ test('factsForTask joins the two layers: facts proposed from the task come first
   // Namespaced ids resolve to the same task; an unrelated task gets no linked facts.
   assert.equal(factsForTask({ projectId: 'ticktick:p1', taskId: 'ticktick:t1', factsPath: fp }).linked.length, 1);
   assert.equal(factsForTask({ projectId: 'p1', taskId: 't2', query: 'Groceries', factsPath: fp }).count, 0);
+});
+
+test('proposeFactLines stages every valid line on its own: bad lines are reported, in-batch duplicates are no-ops, contradictions are refused', () => {
+  const fp = path.join(tmp, 'batch.jsonl');
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene' });
+  const thirty = ratifyFactItem(approve(proposeFact({ subject: 'Globex', predicate: 'pays within', object: '30 days', domain: 'batch', by: 'a' }, { factsPath: fp })), { factsPath: fp }).fact;
+  const lines = [
+    JSON.stringify({ subject: 'Globex', predicate: 'billing contact', object: 'Sam', source: 'call 2026-09-10' }),
+    'not json',
+    '',
+    JSON.stringify({ subject: 'globex', predicate: 'Billing contact', object: 'Sam.' }),
+    JSON.stringify({ subject: 'Globex', predicate: 'pays within', object: '60 days' }),
+    JSON.stringify({ predicate: 'no subject', object: 'x' }),
+    JSON.stringify({ subject: 'Globex', predicate: 'uses', object: 'SAP', task: 'p1/t9', confidence: 'high' }),
+    JSON.stringify({ subject: 'Globex', predicate: 'pays within', object: '45 days', supersedes: thirty.id.slice(0, 8) }),
+    JSON.stringify(['an', 'array']),
+  ];
+  const report = proposeFactLines(lines, { by: 'agent-a', defaults: { domain: 'batch', source: 'batch import' }, factsPath: fp });
+  assert.deepEqual({ staged: report.staged, duplicate: report.duplicate, refused: report.refused, invalid: report.invalid, lines: report.lines }, { staged: 3, duplicate: 1, refused: 1, invalid: 3, lines: 8 });
+  const byLine = Object.fromEntries(report.results.map((r) => [r.line, r]));
+  assert.equal(byLine[1].ok, true);
+  assert.match(byLine[2].error, /line 2: .*JSON/);
+  assert.equal(byLine[4].verdict, 'duplicate');
+  assert.equal(byLine[4].ok, true, 'a duplicate inside the batch is a no-op, not a failure');
+  assert.equal(byLine[5].verdict, 'contradiction');
+  assert.equal(byLine[5].conflicts[0].object, '30 days');
+  assert.match(byLine[6].error, /subject is required/);
+  assert.equal(byLine[8].supersedes, thirty.id);
+  assert.match(byLine[9].error, /JSON object/);
+  const staged = listReviewItems({ kind: 'kg.fact', status: 'pending' }).filter((i) => i.payload.domain === 'batch');
+  assert.equal(staged.length, 3);
+  const sap = staged.find((i) => i.payload.object === 'SAP');
+  assert.deepEqual(sap.payload.taskRef, { projectId: 'p1', taskId: 't9' });
+  assert.equal(sap.payload.confidence, 'high');
+  assert.equal(sap.payload.source, 'batch import', 'defaults fill what a line does not carry');
+  assert.equal(staged.find((i) => i.payload.object === 'Sam').payload.source, 'call 2026-09-10', 'a line keeps its own values');
 });
