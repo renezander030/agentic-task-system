@@ -700,21 +700,43 @@ every fact records who did both and from what source.
 
 Usage:
   ats kg propose SUBJ PRED OBJ [--domain D --source REF --confidence C --task P/T]
+                [--supersedes FACT_ID | --additive] [--acknowledge-rejected ID]
+  ats kg propose --file FILE|-              One JSON object per line, every line
+                                            through the gate; --domain/--source/
+                                            --confidence fill what a line lacks
   ats kg retract FACT_ID [--reason "..."]   Retraction proposal — reviewed too
+  ats kg pending [--domain D]               What each queued proposal would do,
+                                            checked against the store now
   ats kg ratify <ID...|--all>               Write APPROVED proposals to the store
   ats kg ask "QUESTION" [--domain D --limit N --include-retracted]
-                                            Zero-LLM lexical answers + provenance
-  ats kg facts [--domain D --subject S --all]
+                        [--as-of DATE] [--center ENTITY] [--semantic | --lexical]
+                                            Lexical answers + provenance + a
+                                            confidence verdict; --as-of answers
+                                            what the store believed then;
+                                            --semantic adds the adapter's embedder
+  ats kg facts [--domain D --subject S --predicate P --entity E --as-of DATE --all]
+  ats kg nodes [QUERY] [--domain D --limit N --all]
+                                            Entities and how much is known about each
+  ats kg history FACT_ID                    A fact's events and supersession chain
   ats kg stats                              Size, domains, pending proposals
-  ats kg export [--cypher] [--domain D]     JSON, or a Cypher script for embedded
-                                            graph databases (LadybugDB / Kùzu) with
-                                            full provenance on every fact;
+  ats kg export [--cypher] [--dialect ladybug|kuzu|neo4j|falkordb] [--domain D]
+                                            JSON, or a Cypher load script — typed DDL
+                                            for the embedded engines, re-runnable
+                                            openCypher for Neo4j / FalkorDB — with
+                                            full provenance on every fact
+  ats kg export --graphiti [--domain D]     Graphiti episode JSONL (add_episode_bulk)
                                             --include-retracted adds closed facts
 
+The gate: a duplicate of an active or queued fact is a no-op (exit 0); a
+contradiction (same subject + predicate, another object) needs --supersedes or
+--additive; a triple the reviewer declined needs --acknowledge-rejected. A
+refusal prints its report and exits 4.
+
 Fact proposals share the review queue: ats review list / approve / reject
-work on them (kind kg.fact). A retracted fact keeps its validity interval,
-so "what did we believe then" stays answerable. The store travels with
-\`ats state export\`.`;
+work on them (kind kg.fact). A retracted or superseded fact keeps its validity
+interval, so "what did we believe then" stays answerable (--as-of). The store
+travels with \`ats state export\`; fact vectors for --semantic live in
+kg-vectors.json (ATS_KG_VECTORS), one cache per embedder.`;
 }
 
 export function getStateHelp() {
