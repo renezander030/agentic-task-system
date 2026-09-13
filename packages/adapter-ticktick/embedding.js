@@ -677,3 +677,25 @@ function buildPayload(task, hash) {
     indexedAt: new Date().toISOString(),
   };
 }
+
+/**
+ * Embed arbitrary texts with the configured Ollama model, in batches of
+ * BATCH_SIZE. This is the hook `ats kg ask --semantic` uses
+ * (`__ext.embedding.embedTexts`) — deliberately not the adapter contract's
+ * `embeddings(texts)`, which would put a dense branch over the whole corpus
+ * into every Core read while this adapter's own `find` already carries its
+ * Qdrant-backed hybrid.
+ */
+export async function embedTexts(texts, inputType = 'document') {
+  const out = [];
+  for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+    const batch = texts.slice(i, i + BATCH_SIZE);
+    out.push(...(await Promise.all(batch.map((text) => getEmbedding(text, inputType)))));
+  }
+  return out;
+}
+
+/** Identifies the embedder for vector caches: a different model means a different cache. */
+export function embeddingId() {
+  return `ollama:${EMBEDDING_MODEL}`;
+}

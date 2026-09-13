@@ -24,6 +24,20 @@ export {
   askFacts,
   kgStats,
   exportFactsCypher,
+  normalizeTerm,
+  checkFactProposal,
+  KgGateError,
+  parseAsOf,
+  believedAt,
+  factHistory,
+  factsForTask,
+  proposeFactLines,
+  exportFactsGraphiti,
+  CYPHER_DIALECTS,
+  pendingFactProposals,
+  askFactsSemantic,
+  kgVectorsPath,
+  listEntities,
 } from './kg.js';
 export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, projectScope, findConfidence, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';

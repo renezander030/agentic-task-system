@@ -21,8 +21,17 @@ const {
   askFacts,
   kgStats,
   exportFactsCypher,
+  checkFactProposal,
+  normalizeTerm,
+  factHistory,
+  factsForTask,
+  proposeFactLines,
+  exportFactsGraphiti,
+  pendingFactProposals,
+  askFactsSemantic,
+  listEntities,
 } = await import('../kg.js');
-const { decideReviewItem, listReviewItems } = await import('../review-queue.js');
+const { decideReviewItem, listReviewItems, markReviewItemApplied } = await import('../review-queue.js');
 
 function ratifyThrough(item) {
   const approved = decideReviewItem(item.id, 'approve', { by: 'rene' });
@@ -114,4 +123,371 @@ test('a malformed log line fails loudly, never silently', () => {
   const badPath = path.join(tmp, 'bad.jsonl');
   fs.writeFileSync(badPath, '{"op":"add","fact":{"id":"1","subject":"s","predicate":"p","object":"o","domain":"d"}}\nnot json\n');
   assert.throws(() => loadFacts({ factsPath: badPath }), /Malformed kg fact log at line 2/);
+});
+
+test('the proposal gate: duplicates are no-ops, rejected triples need an acknowledgement, contradictions need --supersedes or --additive', () => {
+  assert.equal(normalizeTerm('  Acme   GmbH. '), 'acme gmbh');
+  const first = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'gate', by: 'agent-a' });
+  // The same triple, spelled differently, while the first is still pending: a duplicate of the queued proposal.
+  assert.throws(
+    () => proposeFact({ subject: 'acme gmbh', predicate: 'Billing Contact', object: 'Petra.', domain: 'gate', by: 'agent-b' }),
+    (e) => e.name === 'KgGateError' && e.code === 'duplicate' && e.gate.proposal.id === first.id && /already pending/.test(e.message)
+  );
+  ratifyThrough(first);
+  // Once ratified, the duplicate names the active fact instead.
+  assert.throws(
+    () => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'gate', by: 'agent-b' }),
+    (e) => e.code === 'duplicate' && e.gate.fact.subject === 'Acme GmbH' && typeof e.gate.fact.id === 'string'
+  );
+  // Another object for the same subject+predicate is a contradiction...
+  assert.throws(
+    () => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b' }),
+    (e) => e.code === 'contradiction' && e.gate.conflicts.length === 1 && e.gate.conflicts[0].object === 'Petra'
+  );
+  // ...unless the predicate is declared multi-valued.
+  const additive = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b', additive: true });
+  assert.equal(additive.payload.additive, true);
+  decideReviewItem(additive.id, 'reject', { by: 'rene', note: 'Jonas left in May' });
+  // A rejected triple is refused, naming the decision, until the agent acknowledges it.
+  assert.throws(
+    () => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b', additive: true }),
+    (e) => e.code === 'rejected' && e.gate.rejected.id === additive.id && e.gate.rejected.note === 'Jonas left in May' && /--acknowledge-rejected/.test(e.message)
+  );
+  const again = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate', by: 'agent-b', additive: true, acknowledgeRejected: additive.id.slice(0, 8) });
+  assert.equal(again.status, 'pending');
+  assert.equal(again.payload.acknowledgedRejection, additive.id.slice(0, 8));
+  // The same triple in another domain is another graph.
+  assert.equal(proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'gate-2', by: 'agent-a' }).status, 'pending');
+  // The pure gate reports conflicts even when it lets a superseding proposal through.
+  const petra = listKgFacts({ domain: 'gate' })[0];
+  const verdict = checkFactProposal({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Jonas', domain: 'gate' }, { facts: loadFacts().facts, supersedes: petra.id });
+  assert.equal(verdict.verdict, 'clear');
+  assert.equal(verdict.supersedes, petra.id);
+  assert.equal(verdict.conflicts[0].id, petra.id);
+  // --supersedes must name an active fact.
+  assert.throws(() => proposeFact({ subject: 'x', predicate: 'y', object: 'z', domain: 'gate', by: 'a', supersedes: 'nope' }), /names no fact/);
+});
+
+test('supersede closes the old fact and adds its replacement in one ratification; a closed fact is never closed twice', () => {
+  const petra = listKgFacts({ domain: 'gate' }).find((f) => f.object === 'Petra');
+  const item = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Maria', domain: 'gate', by: 'agent-a', supersedes: petra.id.slice(0, 8) });
+  assert.equal(item.payload.supersedes, petra.id);
+  const outcome = ratifyThrough(item);
+  assert.equal(outcome.superseded, petra.id);
+  const { facts, history } = loadFacts();
+  const old = facts.find((f) => f.id === petra.id);
+  assert.equal(old.status, 'superseded');
+  assert.equal(old.supersededBy, outcome.fact.id);
+  assert.ok(old.tInvalid);
+  const fresh = facts.find((f) => f.id === outcome.fact.id);
+  assert.equal(fresh.supersedes, petra.id);
+  assert.equal(fresh.status, 'active');
+  assert.deepEqual(history.get(petra.id).map((e) => e.op), ['add', 'supersede']);
+  assert.equal(history.get(fresh.id)[0].supersedes, petra.id);
+  // Ask reads the current value only; the chain is in the export.
+  assert.equal(askFacts('Acme billing contact', { domain: 'gate' }).facts[0].object, 'Maria');
+  const script = exportFactsCypher({ domain: 'gate', includeRetracted: true });
+  assert.ok(script.includes(`supersededBy: '${fresh.id}'`));
+  assert.ok(script.includes("status: 'superseded'"));
+  assert.equal(kgStats().superseded, 1);
+  // A closed fact cannot be retracted or superseded again — at proposal time...
+  assert.throws(() => proposeRetract({ factId: petra.id }), /already superseded/);
+  assert.throws(() => proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Nils', domain: 'gate', by: 'a', supersedes: petra.id }), /already superseded/);
+  // ...and at ratification time: two retractions staged before either is ratified — the second is refused and the first closing time stands.
+  const r1 = proposeRetract({ factId: fresh.id, reason: 'first', by: 'a' });
+  const r2 = proposeRetract({ factId: fresh.id, reason: 'second', by: 'b' });
+  ratifyThrough(r1);
+  const closedAt = loadFacts().facts.find((f) => f.id === fresh.id).tInvalid;
+  assert.throws(() => ratifyThrough(r2), /already retracted since/);
+  assert.equal(loadFacts().facts.find((f) => f.id === fresh.id).tInvalid, closedAt);
+  // A legacy log carrying a second retract line: the first close stands and the second is kept in history as ignored.
+  const p = path.join(tmp, 'closed-twice.jsonl');
+  fs.writeFileSync(p, [
+    JSON.stringify({ op: 'add', at: '2026-01-01T00:00:00.000Z', fact: { id: 'f1', subject: 's', predicate: 'p', object: 'o', domain: 'd', tValid: '2026-01-01T00:00:00.000Z' } }),
+    JSON.stringify({ op: 'retract', factId: 'f1', at: '2026-02-01T00:00:00.000Z', by: 'x' }),
+    JSON.stringify({ op: 'retract', factId: 'f1', at: '2026-03-01T00:00:00.000Z', by: 'y' }),
+  ].join('\n') + '\n');
+  const twice = loadFacts({ factsPath: p });
+  assert.equal(twice.facts[0].tInvalid, '2026-02-01T00:00:00.000Z');
+  assert.equal(twice.history.get('f1')[2].ignored, 'already retracted');
+});
+
+test('--as-of answers from validity intervals — what the store believed then — and history follows the supersession chain', () => {
+  const fp = path.join(tmp, 'timeline.jsonl');
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene' });
+  const T1 = '2026-06-01T00:00:00.000Z';
+  const T2 = '2026-07-01T00:00:00.000Z';
+  const T3 = '2026-08-01T00:00:00.000Z';
+  const a = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Petra', domain: 'time', by: 'a' }, { factsPath: fp });
+  const petra = ratifyFactItem(approve(a), { factsPath: fp, now: T1 }).fact;
+  const b = proposeFact({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Maria', domain: 'time', by: 'a', supersedes: petra.id }, { factsPath: fp });
+  const maria = ratifyFactItem(approve(b), { factsPath: fp, now: T2 }).fact;
+  const r = proposeRetract({ factId: maria.id, reason: 'contract ended', by: 'a' }, { factsPath: fp });
+  ratifyFactItem(approve(r), { factsPath: fp, now: T3 });
+
+  const objects = (res) => res.facts.map((f) => f.object);
+  const ask = (asOf) => askFacts('Acme billing contact', { domain: 'time', factsPath: fp, asOf });
+  assert.deepEqual(objects(ask()), [], 'today nothing is active');
+  assert.deepEqual(objects(ask('2026-05-01')), [], 'before anything was ratified');
+  assert.deepEqual(objects(ask('2026-06-15')), ['Petra']);
+  assert.deepEqual(objects(ask('2026-07-15')), ['Maria']);
+  assert.deepEqual(objects(ask('2026-08-15')), [], 'after the retraction');
+  assert.deepEqual(objects(ask('2026-07-01')), ['Maria'], 'a bare date is the end of that day: the day of ratification counts');
+  assert.deepEqual(objects(ask('2026-07-01T00:00:00.000Z')), ['Maria'], 'the closing instant belongs to the new fact');
+  assert.equal(ask('2026-06-15').asOf, '2026-06-15T23:59:59.999Z');
+  assert.equal(listKgFacts({ domain: 'time', factsPath: fp, asOf: '2026-06-15' })[0].object, 'Petra');
+  assert.throws(() => askFacts('x', { factsPath: fp, asOf: 'yesterday' }), /--as-of needs an ISO date/);
+
+  const h = factHistory(petra.id.slice(0, 8), { factsPath: fp });
+  assert.equal(h.fact.status, 'superseded');
+  assert.deepEqual(h.events.map((e) => e.op), ['add', 'supersede']);
+  assert.equal(h.events[1].byFact, maria.id);
+  assert.deepEqual(h.chain, { replaces: [], replacedBy: [maria.id] });
+  const h2 = factHistory(maria.id, { factsPath: fp });
+  assert.deepEqual(h2.chain, { replaces: [petra.id], replacedBy: [] });
+  assert.deepEqual(h2.events.map((e) => e.op), ['add', 'retract']);
+  assert.equal(h2.events[1].reason, 'contract ended');
+  assert.throws(() => factHistory('nope', { factsPath: fp }), /no fact nope/);
+});
+
+test('factsForTask joins the two layers: facts proposed from the task come first, lexical matches on its title follow, closed facts stay out', () => {
+  const fp = path.join(tmp, 'context.jsonl');
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene' });
+  const add = (input) => ratifyFactItem(approve(proposeFact({ domain: 'ctx', by: 'a', ...input }, { factsPath: fp })), { factsPath: fp }).fact;
+  const linked = add({ subject: 'Acme GmbH', predicate: 'billing contact', object: 'Maria', taskRef: { projectId: 'p1', taskId: 't1' } });
+  add({ subject: 'Acme GmbH', predicate: 'prefers', object: 'invoices as PDF' });
+  add({ subject: 'Globex', predicate: 'prefers', object: 'invoices by post' });
+  const closed = add({ subject: 'Acme GmbH', predicate: 'pays within', object: '14 days' });
+  ratifyFactItem(approve(proposeRetract({ factId: closed.id, by: 'a' }, { factsPath: fp })), { factsPath: fp });
+
+  const ctx = factsForTask({ projectId: 'p1', taskId: 't1', query: 'Send the Acme GmbH invoice for August', factsPath: fp });
+  assert.deepEqual(ctx.linked.map((f) => [f.id, f.via]), [[linked.id, 'task-ref']]);
+  assert.equal(ctx.related[0].object, 'invoices as PDF');
+  assert.ok(ctx.related.every((f) => f.via === 'lexical' && f.id !== linked.id && f.object !== '14 days'));
+  assert.equal(ctx.count, ctx.linked.length + ctx.related.length);
+  // Namespaced ids resolve to the same task; an unrelated task gets no linked facts.
+  assert.equal(factsForTask({ projectId: 'ticktick:p1', taskId: 'ticktick:t1', factsPath: fp }).linked.length, 1);
+  assert.equal(factsForTask({ projectId: 'p1', taskId: 't2', query: 'Groceries', factsPath: fp }).count, 0);
+});
+
+test('proposeFactLines stages every valid line on its own: bad lines are reported, in-batch duplicates are no-ops, contradictions are refused', () => {
+  const fp = path.join(tmp, 'batch.jsonl');
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene' });
+  const thirty = ratifyFactItem(approve(proposeFact({ subject: 'Globex', predicate: 'pays within', object: '30 days', domain: 'batch', by: 'a' }, { factsPath: fp })), { factsPath: fp }).fact;
+  const lines = [
+    JSON.stringify({ subject: 'Globex', predicate: 'billing contact', object: 'Sam', source: 'call 2026-09-10' }),
+    'not json',
+    '',
+    JSON.stringify({ subject: 'globex', predicate: 'Billing contact', object: 'Sam.' }),
+    JSON.stringify({ subject: 'Globex', predicate: 'pays within', object: '60 days' }),
+    JSON.stringify({ predicate: 'no subject', object: 'x' }),
+    JSON.stringify({ subject: 'Globex', predicate: 'uses', object: 'SAP', task: 'p1/t9', confidence: 'high' }),
+    JSON.stringify({ subject: 'Globex', predicate: 'pays within', object: '45 days', supersedes: thirty.id.slice(0, 8) }),
+    JSON.stringify(['an', 'array']),
+  ];
+  const report = proposeFactLines(lines, { by: 'agent-a', defaults: { domain: 'batch', source: 'batch import' }, factsPath: fp });
+  assert.deepEqual({ staged: report.staged, duplicate: report.duplicate, refused: report.refused, invalid: report.invalid, lines: report.lines }, { staged: 3, duplicate: 1, refused: 1, invalid: 3, lines: 8 });
+  const byLine = Object.fromEntries(report.results.map((r) => [r.line, r]));
+  assert.equal(byLine[1].ok, true);
+  assert.match(byLine[2].error, /line 2: .*JSON/);
+  assert.equal(byLine[4].verdict, 'duplicate');
+  assert.equal(byLine[4].ok, true, 'a duplicate inside the batch is a no-op, not a failure');
+  assert.equal(byLine[5].verdict, 'contradiction');
+  assert.equal(byLine[5].conflicts[0].object, '30 days');
+  assert.match(byLine[6].error, /subject is required/);
+  assert.equal(byLine[8].supersedes, thirty.id);
+  assert.match(byLine[9].error, /JSON object/);
+  const staged = listReviewItems({ kind: 'kg.fact', status: 'pending' }).filter((i) => i.payload.domain === 'batch');
+  assert.equal(staged.length, 3);
+  const sap = staged.find((i) => i.payload.object === 'SAP');
+  assert.deepEqual(sap.payload.taskRef, { projectId: 'p1', taskId: 't9' });
+  assert.equal(sap.payload.confidence, 'high');
+  assert.equal(sap.payload.source, 'batch import', 'defaults fill what a line does not carry');
+  assert.equal(staged.find((i) => i.payload.object === 'Sam').payload.source, 'call 2026-09-10', 'a line keeps its own values');
+});
+
+test('cypher export speaks the Ladybug/Kùzu DDL and a re-runnable openCypher load for Neo4j and FalkorDB; --graphiti emits episodes with provenance', () => {
+  assert.equal(exportFactsCypher({ domain: 'infra' }), exportFactsCypher({ domain: 'infra', dialect: 'kuzu' }));
+  const neo = exportFactsCypher({ domain: 'infra', dialect: 'neo4j' });
+  assert.ok(!neo.includes('CREATE NODE TABLE'), 'no table DDL outside the embedded engine');
+  assert.ok(neo.includes('CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name);'));
+  assert.ok(neo.includes("MERGE (:Entity {name: 'billing service'});"));
+  assert.match(neo, /MATCH \(a:Entity \{name: 'billing service'\}\), \(b:Entity \{name: 'cluster-2'\}\) MERGE \(a\)-\[r:FACT \{id: '[0-9a-f-]+'\}\]->\(b\) SET r\.predicate = 'runs on', r\.domain = 'infra', r\.status = 'active'/);
+  assert.ok(neo.includes("r.ratifiedBy = 'rene'"));
+  assert.ok(neo.includes("r.supersededBy = ''"));
+  const falkor = exportFactsCypher({ domain: 'infra', dialect: 'FalkorDB' });
+  assert.ok(falkor.includes('CREATE INDEX FOR (e:Entity) ON (e.name);'));
+  assert.ok(!falkor.includes('IF NOT EXISTS'));
+  assert.ok(falkor.includes('MERGE (a)-[r:FACT'));
+  assert.throws(() => exportFactsCypher({ dialect: 'sparql' }), /dialect must be one of ladybug, kuzu, neo4j, falkordb/);
+
+  const episodes = exportFactsGraphiti({ domain: 'sales', includeRetracted: true }).trim().split('\n').map((l) => JSON.parse(l));
+  const retracted = episodes.find((e) => e.status === 'retracted');
+  assert.ok(retracted, 'the closed sales fact is exported when asked');
+  assert.equal(retracted.group_id, 'sales');
+  assert.equal(retracted.source, 'text');
+  assert.match(retracted.content, /^Acme GmbH prefers O'Reilly-style invoices\. \(retracted \d{4}-\d{2}-\d{2}: client changed policy\)$/);
+  assert.equal(retracted.reference_time, retracted.valid_at);
+  assert.ok(retracted.invalid_at);
+  assert.equal(retracted.uuid.length, 36);
+  assert.match(retracted.name, /^ats-kg [0-9a-f]{8}$/);
+  assert.match(retracted.source_description, /proposed by agent-3 from call 2026-08-01; ratified by rene /);
+  assert.equal(exportFactsGraphiti({ domain: 'sales' }), '', 'active only by default — the sales fact is closed');
+  const gate = exportFactsGraphiti({ domain: 'gate', includeRetracted: true }).trim().split('\n').map((l) => JSON.parse(l));
+  assert.match(gate.find((e) => e.status === 'superseded').content, /\(superseded \d{4}-\d{2}-\d{2} by fact [0-9a-f-]{36}\)$/);
+});
+
+test('pendingFactProposals shows what each queued proposal would do to the graph, checked against the store as it is now', () => {
+  const fp = path.join(tmp, 'pending.jsonl');
+  const qp = path.join(tmp, 'pending-queue.json');
+  const paths = { factsPath: fp, queuePath: qp };
+  const approve = (item) => decideReviewItem(item.id, 'approve', { by: 'rene', queuePath: qp });
+  // Promote the way the CLI does: approve, ratify, and mark the review item applied.
+  const promote = (item, queuePath = qp) => {
+    const outcome = ratifyFactItem(decideReviewItem(item.id, 'approve', { by: 'rene', queuePath }), { factsPath: fp });
+    markReviewItemApplied(item.id, { result: {}, queuePath });
+    return outcome;
+  };
+  const gold = promote(proposeFact({ subject: 'Acme', predicate: 'tier', object: 'gold', domain: 'p', by: 'a' }, paths)).fact;
+  const plain = proposeFact({ subject: 'Acme', predicate: 'region', object: 'DACH', domain: 'p', by: 'a' }, paths);
+  const platinum = proposeFact({ subject: 'Acme', predicate: 'tier', object: 'platinum', domain: 'p', by: 'a', supersedes: gold.id }, paths);
+  const retract = proposeRetract({ factId: gold.id, reason: 'churned', by: 'b' }, paths);
+  const silver = proposeFact({ subject: 'Globex', predicate: 'tier', object: 'silver', domain: 'q', by: 'a' }, paths);
+  approve(silver);
+  const twin = proposeFact({ subject: 'Acme', predicate: 'ships to', object: 'Berlin', domain: 'p', by: 'a' }, paths);
+
+  const view = pendingFactProposals(paths);
+  assert.equal(view.count, 5);
+  assert.deepEqual(view.byDomain, { p: 4, q: 1 });
+  const byId = Object.fromEntries(view.pending.map((i) => [i.id, i]));
+  assert.deepEqual([byId[plain.id].effect, byId[plain.id].verdict, byId[plain.id].status], ['add', 'clear', 'pending']);
+  assert.equal(byId[platinum.id].effect, `add, superseding ${gold.id.slice(0, 8)}`);
+  assert.equal(byId[platinum.id].verdict, 'clear');
+  assert.equal(byId[platinum.id].conflicts[0].object, 'gold', 'the reviewer sees what it replaces');
+  assert.equal(byId[retract.id].effect, `retract ${gold.id.slice(0, 8)}`);
+  assert.equal(byId[retract.id].target.object, 'gold');
+  assert.equal(byId[retract.id].reason, 'churned');
+  assert.deepEqual([byId[silver.id].status, byId[silver.id].approvedBy], ['approved', 'rene'], 'approved but not ratified is still pending promotion');
+  assert.equal(pendingFactProposals({ ...paths, domain: 'q' }).count, 1);
+  assert.equal(view.pending[0].domain, 'p', 'grouped by domain');
+
+  // The store moves on: the retraction lands, so the supersede proposal can no longer do what it says.
+  promote(retract);
+  // Another agent's twin of a pending triple gets ratified through its own queue: the first now reads as duplicate.
+  const otherQueue = path.join(tmp, 'other-queue.json');
+  promote(proposeFact({ subject: 'Acme', predicate: 'ships to', object: 'Berlin', domain: 'p', by: 'b' }, { factsPath: fp, queuePath: otherQueue }), otherQueue);
+  const later = Object.fromEntries(pendingFactProposals(paths).pending.map((i) => [i.id, i]));
+  assert.equal(later[platinum.id].verdict, 'stale');
+  assert.match(later[platinum.id].message, /already retracted since/);
+  assert.equal(later[twin.id].verdict, 'duplicate');
+  assert.equal(later[twin.id].duplicateOf.object, 'Berlin');
+  assert.equal(later[retract.id], undefined, 'applied items leave the view');
+});
+
+// A deterministic bag-of-words embedder with a few synonyms, so a paraphrase
+// lands near the fact it means without any model.
+function fakeEmbedder(log = []) {
+  const SYNONYMS = { invoice: 'invoice', invoices: 'invoice', billing: 'invoice', prefers: 'want', want: 'want', wants: 'want', format: 'pdf', gmbh: 'acme', pays: 'pay', paid: 'pay' };
+  const DIMS = 32;
+  const embed = (text) => {
+    const v = new Array(DIMS).fill(0);
+    for (const raw of String(text).toLowerCase().match(/[a-z0-9]+/g) || []) {
+      const tok = SYNONYMS[raw] || raw;
+      let h = 7;
+      for (const c of tok) h = (h * 31 + c.charCodeAt(0)) % 1000003;
+      v[h % DIMS] += 1;
+    }
+    return v;
+  };
+  return async (texts) => { log.push(texts.length); return texts.map(embed); };
+}
+
+test('ask carries a confidence verdict; askFactsSemantic fuses a cached dense branch with it and degrades transparently when the embedder fails', async () => {
+  const fp = path.join(tmp, 'semantic.jsonl');
+  const vp = path.join(tmp, 'vectors.json');
+  const add = (input) => ratifyFactItem(decideReviewItem(proposeFact({ domain: 'sem', by: 'a', ...input }, { factsPath: fp }).id, 'approve', { by: 'rene' }), { factsPath: fp }).fact;
+  add({ subject: 'Acme GmbH', predicate: 'prefers', object: 'invoices as PDF' });
+  add({ subject: 'Globex', predicate: 'prefers', object: 'invoices by post' });
+  add({ subject: 'Acme GmbH', predicate: 'pays within', object: '14 days' });
+
+  assert.equal(askFacts('Acme GmbH prefers invoices as PDF', { domain: 'sem', factsPath: fp }).confidence.verdict, 'strong');
+  assert.equal(askFacts('Acme GmbH pays', { domain: 'sem', factsPath: fp }).confidence.verdict, 'strong');
+  const weak = askFacts('which invoice format does Acme want', { domain: 'sem', factsPath: fp });
+  assert.equal(weak.confidence.verdict, 'weak');
+  assert.equal(weak.confidence.coverage, 0.33);
+  assert.match(weak.confidence.reason, /--semantic/);
+  assert.equal(askFacts('zebra', { domain: 'sem', factsPath: fp }).confidence.verdict, 'none');
+
+  const calls = [];
+  const embed = fakeEmbedder(calls);
+  const res = await askFactsSemantic('which invoice format does Acme want', { embed, cacheKey: 'fake', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.equal(res.mode, 'semantic');
+  assert.equal(res.facts[0].object, 'invoices as PDF');
+  assert.deepEqual([...res.facts[0].sources].sort(), ['dense', 'lexical']);
+  assert.ok(res.facts[0].similarity > 0 && res.facts[0].lexicalScore > 0);
+  assert.equal(res.confidence.verdict, 'strong');
+  assert.equal(res.confidence.topAgreement, 2);
+  assert.equal(res.degraded, false);
+  assert.deepEqual(res.branches.map((b) => [b.name, b.ok]), [['lexical', true], ['dense', true]]);
+  assert.deepEqual([res.branches[1].embedded, res.branches[1].cached], [3, 0]);
+  assert.equal(calls[0], 4, 'the question and every fact were embedded once');
+  assert.ok(fs.existsSync(vp));
+  assert.equal((fs.statSync(vp).mode & 0o777), 0o600);
+
+  const again = await askFactsSemantic('which invoice format does Acme want', { embed, cacheKey: 'fake', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.deepEqual([again.branches[1].embedded, again.branches[1].cached], [0, 3], 'a repeat ask embeds only the question');
+  assert.equal(calls[1], 1);
+  const other = await askFactsSemantic('Acme invoices', { embed, cacheKey: 'other-model', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.equal(other.branches[1].embedded, 3, 'another embedder starts its own cache');
+
+  const failing = async () => { throw new Error('embedder down'); };
+  const degraded = await askFactsSemantic('Acme invoices', { embed: failing, cacheKey: 'fake', vectorsPath: vp, domain: 'sem', factsPath: fp });
+  assert.equal(degraded.degraded, true);
+  assert.equal(degraded.branches[1].ok, false);
+  assert.match(degraded.branches[1].error, /embedder down/);
+  assert.equal(degraded.facts[0].object, 'invoices as PDF', 'the lexical branch still answers');
+  assert.deepEqual(degraded.facts[0].sources, ['lexical']);
+  assert.match(degraded.confidence.reason, /dense branch failed \(embedder down\)/);
+  assert.equal(degraded.confidence.branchesRun, 1);
+  const short = async (texts) => texts.slice(1).map(() => [1]);
+  assert.match((await askFactsSemantic('Acme', { embed: short, cacheKey: 'x', vectorsPath: vp, domain: 'sem', factsPath: fp })).branches[1].error, /vectors for/);
+  await assert.rejects(askFactsSemantic('Acme', { domain: 'sem', factsPath: fp }), /needs an embed\(texts\) function/);
+});
+
+test('listEntities shows what the store knows about whom; --entity reads both directions; --center anchors an ask on one entity', async () => {
+  const fp = path.join(tmp, 'entities.jsonl');
+  const add = (input) => ratifyFactItem(decideReviewItem(proposeFact({ domain: 'ent', by: 'a', ...input }, { factsPath: fp }).id, 'approve', { by: 'rene' }), { factsPath: fp }).fact;
+  add({ subject: 'Acme GmbH', predicate: 'prefers', object: 'invoices as PDF' });
+  add({ subject: 'acme gmbh', predicate: 'pays within', object: '14 days' });
+  add({ subject: 'cluster-2', predicate: 'hosts', object: 'billing service' });
+  add({ subject: 'billing service', predicate: 'runs on', object: 'cluster-2' });
+  const fax = add({ subject: 'Acme GmbH', predicate: 'uses', object: 'fax' });
+  ratifyFactItem(decideReviewItem(proposeRetract({ factId: fax.id, by: 'a' }, { factsPath: fp }).id, 'approve', { by: 'rene' }), { factsPath: fp });
+
+  const { count, entities } = listEntities({ domain: 'ent', factsPath: fp });
+  assert.equal(count, 5);
+  assert.deepEqual(entities.map((e) => e.name), ['Acme GmbH', 'billing service', 'cluster-2', '14 days', 'invoices as PDF']);
+  const acme = entities[0];
+  assert.deepEqual([acme.facts, acme.asSubject, acme.asObject], [2, 2, 0], 'two spellings, one entity, shown under the spelling ratified first');
+  assert.deepEqual(acme.predicates, ['prefers', 'pays within']);
+  assert.deepEqual(acme.domains, { ent: 2 });
+  assert.ok(acme.lastValid);
+  const cluster = entities.find((e) => e.name === 'cluster-2');
+  assert.deepEqual([cluster.facts, cluster.asSubject, cluster.asObject], [2, 1, 1]);
+  assert.deepEqual(listEntities({ domain: 'ent', query: 'ACME', factsPath: fp }).entities.map((e) => e.name), ['Acme GmbH']);
+  assert.equal(listEntities({ domain: 'ent', status: 'all', factsPath: fp }).entities.find((e) => e.name === 'Acme GmbH').facts, 3, 'closed facts count when asked');
+  assert.equal(listEntities({ domain: 'ent', limit: 2, factsPath: fp }).entities.length, 2);
+
+  assert.equal(listKgFacts({ entity: 'cluster-2', factsPath: fp }).length, 2, 'both directions');
+  assert.equal(listKgFacts({ entity: 'CLUSTER', factsPath: fp }).length, 2, 'substring when nothing matches exactly');
+  assert.equal(listKgFacts({ entity: 'Acme GmbH', factsPath: fp }).length, 2);
+
+  assert.equal(askFacts('invoices', { domain: 'ent', factsPath: fp }).count, 1);
+  assert.equal(askFacts('invoices', { domain: 'ent', center: 'cluster-2', factsPath: fp }).count, 0, 'centered on another entity, the Acme fact is not a candidate');
+  const centered = askFacts('invoices', { domain: 'ent', center: 'acme', factsPath: fp });
+  assert.equal(centered.count, 1);
+  assert.equal(centered.center, 'acme');
+  const semantic = await askFactsSemantic('what does the cluster run', { embed: fakeEmbedder(), cacheKey: 'ent', vectorsPath: path.join(tmp, 'ent-vectors.json'), domain: 'ent', center: 'cluster-2', factsPath: fp });
+  assert.equal(semantic.center, 'cluster-2');
+  assert.ok(semantic.facts.length >= 1 && semantic.facts.every((f) => f.subject === 'cluster-2' || f.object === 'cluster-2'));
 });
