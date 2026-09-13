@@ -21,7 +21,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@reneza/ats-core": "^0.13.0",
-    "zod": "^4.5.4"
+    "zod": "^4.6.1"
   },
   "peerDependencies": {
     "@reneza/ats-adapter-ticktick": "^0.13.0"
