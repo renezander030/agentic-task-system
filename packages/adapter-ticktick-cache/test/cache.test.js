@@ -254,23 +254,35 @@ test('cache sync leaves the last good centralized JSON untouched when any projec
   assert.equal(fs.readFileSync(cacheFile, 'utf8'), before);
 });
 
-test('vector sync fallback delegates to the ATS TickTick adapter without a legacy CLI', async () => {
+test('vector sync indexes from the local cache, Inbox included, without delegating', async () => {
+  // Regression guard for the 2026-08-30 fix. Vector sync used to delegate to the
+  // remote adapter, which fans out over GET /project - an endpoint that has no
+  // Inbox - so Inbox tasks were silently never indexed. It now reads the local
+  // cache directly, the only source that holds them.
   const cacheFile = fixture();
   const operations = remote().__ext;
-  operations.tasks.vectorSync = async (opts) => ({ success: true, opts, source: 'ats-adapter' });
+  let delegated = false;
+  operations.tasks.vectorSync = async () => { delegated = true; return { success: true }; };
+
+  let seen = null;
+  const embedding = {
+    sync: async (fetchAllTasks, opts) => {
+      seen = await fetchAllTasks();
+      return { success: true, indexed: seen.length, opts };
+    },
+  };
   const adapter = createTickTickCacheAdapter({
-    cacheFile,
-    remote: remote(),
-    operations,
-    embedding: {},
-    vectorSyncScript: '',
+    cacheFile, remote: remote(), operations, embedding, vectorSyncScript: '',
   });
+
   const result = await adapter.__ext.tasks.vectorSync({ forceFull: true, maxEmbeddings: 7 });
-  assert.deepEqual(result, {
-    success: true,
-    opts: { forceFull: true, maxEmbeddings: 7 },
-    source: 'ats-adapter',
-  });
+
+  assert.equal(delegated, false, 'must not delegate to the remote adapter');
+  assert.deepEqual(result.opts, { forceFull: true, maxEmbeddings: 7 });
+  const ids = seen.map((task) => task.id);
+  assert.ok(ids.includes('inboxtask123456789'), 'the Inbox task must reach the index');
+  assert.ok(!ids.includes('completedtask123456789'), 'completed tasks stay out of the index');
+  assert.equal(result.indexed, 3);
 });
 
 test('central vector helper receives --full and --max options', async () => {

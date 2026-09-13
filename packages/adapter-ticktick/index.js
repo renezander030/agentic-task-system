@@ -48,6 +48,7 @@ const adapter = {
       content: input.content,
       tags: input.tags,
       dueDate: input.dueDate,
+      parentId: input.parentId,
     });
     return contractTask(r.task, input);
   },
