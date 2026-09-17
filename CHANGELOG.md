@@ -3,7 +3,7 @@
 
 ## 0.14.0 - Versioned context and reliable automation contracts
 
-Unreleased — version bump, date, tag, and npm publish follow review.
+Released 2026-09-17.
 
 - **Version-addressed task history.** Every CLI write now records a compact post-write snapshot and deterministic revision beside the existing before-image. `ats history PROJECT TASK` renders field-level changes; `--restore REVISION` reuses the guarded undo path, and `--dry-run` shows the restoration plan without touching the backend.
 - **Previewable, verifiable mutations.** Task create, update, complete, and delete accept `--dry-run`; applied writes return a receipt with the operation, target, requested and observed state, ledger action, revision, and verification result. Existing task fields remain at the top level, so scripts written against earlier responses keep working.
