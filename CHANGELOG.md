@@ -1,6 +1,20 @@
 
 # Changelog
 
+## 0.14.0 - Versioned context and reliable automation contracts
+
+Unreleased — version bump, date, tag, and npm publish follow review.
+
+- **Version-addressed task history.** Every CLI write now records a compact post-write snapshot and deterministic revision beside the existing before-image. `ats history PROJECT TASK` renders field-level changes; `--restore REVISION` reuses the guarded undo path, and `--dry-run` shows the restoration plan without touching the backend.
+- **Previewable, verifiable mutations.** Task create, update, complete, and delete accept `--dry-run`; applied writes return a receipt with the operation, target, requested and observed state, ledger action, revision, and verification result. Existing task fields remain at the top level, so scripts written against earlier responses keep working.
+- **State compatibility checks.** `ats state doctor` validates every known JSON/JSONL store, reports schema mismatches and overly broad file permissions, and performs no writes. `ats state import --dry-run` reports the exact local files it would create or replace. Core cache and usage paths now consistently honor `XDG_CONFIG_HOME`.
+- **Content-addressed snapshots.** `ats snapshot PROJECT TASK` assembles the task, intent, valid context, facts, and bounded task graph into one schema-versioned document. Its SHA-256 revision excludes capture time, so unchanged state has the same address, and `completeness` names truncation, unresolved links, metadata errors, and degraded retrieval.
+- **Explainable relationship writes.** `ats link add|remove --dry-run --explain` exposes the stable source, target, relationship type, reason, and whether the operation changes state before it writes. Applied link writes carry the same mutation receipt as task writes.
+- **Resumable mutation batches.** `ats batch FILE|-` accepts JSON arrays or JSONL for create, update, complete, delete, and link operations. Stable item ids, per-item results, partial-failure exit 5, `--dry-run`, and an append-only `--journal` make interrupted batches safe to inspect and resume.
+- **Bounded noninteractive authentication.** Every auth operation forwards a noninteractive contract to the active adapter. `--non-interactive` supplies a 15-second default deadline, while `--timeout-ms` sets an explicit one; a timeout returns a stable machine-readable error and exit 6 instead of hanging an agent process.
+- **Bounded graph traversal.** `ats graph` and `ats snapshot` validate depth, cap traversal with `--max-nodes`, and report `complete`, `truncated`, and omitted edges. Callers can distinguish a whole dependency view from a deliberately bounded one.
+- **Strict structured input and typed failures.** `ats create|update --input FILE|-` accepts one allowlisted JSON object, rejects unknown fields, and lets explicit CLI arguments override file values. JSON-mode failures use stable validation, precondition, authentication, timeout, transport, and internal categories with retryability and documented exit codes.
+
 ## 0.13.0 - Facts layer: proposal gate, supersession, point-in-time asks, entity view, semantic ask; work streams
 
 Released 2026-09-13.

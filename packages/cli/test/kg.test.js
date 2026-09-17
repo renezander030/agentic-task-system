@@ -201,7 +201,7 @@ test('export --dialect writes openCypher for Neo4j and FalkorDB, --graphiti writ
   const ladybug = runProcess(['kg', 'export', '--cypher'], { json: false });
   assert.match(ladybug.stdout, /CREATE NODE TABLE IF NOT EXISTS Entity/);
   const bad = runProcess(['kg', 'export', '--dialect', 'sparql']);
-  assert.equal(bad.status, 1);
+  assert.equal(bad.status, 2);
   assert.match(bad.stderr, /dialect must be one of/);
   const graphiti = runProcess(['kg', 'export', '--graphiti', '--domain', 'sales'], { json: false });
   assert.equal(graphiti.status, 0, graphiti.stderr);

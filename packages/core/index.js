@@ -13,7 +13,7 @@ export {
   writeRequiresApproval,
 } from './review-queue.js';
 export { guardWrite } from './write-guard.js';
-export { STATE_BUNDLE_VERSION, stateFileRegistry, exportState, importState } from './state-bundle.js';
+export { STATE_BUNDLE_VERSION, stateFileRegistry, inspectState, exportState, importState } from './state-bundle.js';
 export {
   kgFactsPath,
   loadFacts,
@@ -81,7 +81,7 @@ export {
   evaluateTaskHierarchy,
   contextForTask,
 } from './task-context.js';
-export { actionLogPath, recordAction, listActions, snapshotTask, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
+export { actionLogPath, recordAction, listActions, snapshotTask, taskHistory, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
 export {
   TASK_EVENT_STATE_VERSION,
   TASK_EVENT_SPOOL_VERSION,
@@ -105,3 +105,4 @@ export {
   formatProgressBenchmark,
 } from './progress-benchmark.js';
 export { normalizeTaskBody, contentHash, TRIAGE_TAG } from './task-format.js';
+export { stableDigest, buildReliabilitySnapshot } from './reliability-snapshot.js';

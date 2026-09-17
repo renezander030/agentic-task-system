@@ -78,8 +78,12 @@ export {
 } from './task-context.js';
 export type { LinkType, LifecycleStatus, ContentTrust, HierarchyKind, TaskIntent, TaskLifecycle, TaskHierarchy, TaskSecurity, TaskAccessRequest, TaskAccessDecision, TaskLink, TaskMetadata } from './task-context.js';
 
-export { actionLogPath, recordAction, listActions } from './action-ledger.js';
+export { actionLogPath, recordAction, listActions, snapshotTask, taskHistory, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
 export type { ActionLedgerEntry, ActionLedgerRecord } from './action-ledger.js';
+
+export function stableDigest(value: unknown): string;
+export function buildReliabilitySnapshot(input: { context: Record<string, any>; graph: Record<string, any>; capturedAt?: string }): Record<string, any>;
+export function inspectState(): { schemaVersion: number; compatible: boolean; files: Array<Record<string, unknown>> };
 
 export {
   TASK_EVENT_STATE_VERSION,

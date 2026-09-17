@@ -39,17 +39,64 @@ function configDir() {
 export function stateFileRegistry() {
   const dir = configDir();
   return [
-    { name: 'action-ledger', path: actionLogPath() },
-    { name: 'review-queue', path: reviewQueuePath() },
-    { name: 'event-checkpoint', path: taskEventStatePath() },
-    { name: 'event-spool', path: taskEventSpoolPath() },
-    { name: 'usage-log', path: usageLogPath() },
-    { name: 'corpus-cache', path: corpusCachePath },
-    { name: 'format-skip', path: path.join(dir, 'format-skip.txt') },
-    { name: 'triage-budget', path: path.join(dir, 'get-triage-budget.json') },
-    { name: 'vector-index-meta', path: process.env.ATS_TICKTICK_VECTOR_META || path.join(dir, 'vector-index-meta.json') },
-    { name: 'kg-facts', path: process.env.ATS_KG_FACTS || path.join(dir, 'kg-facts.jsonl') },
+    { name: 'action-ledger', path: actionLogPath(), format: 'jsonl' },
+    { name: 'review-queue', path: reviewQueuePath(), format: 'json', version: 1 },
+    { name: 'event-checkpoint', path: taskEventStatePath(), format: 'json', version: 1 },
+    { name: 'event-spool', path: taskEventSpoolPath(), format: 'json', version: 1 },
+    { name: 'usage-log', path: usageLogPath(), format: 'jsonl' },
+    { name: 'corpus-cache', path: corpusCachePath, format: 'json' },
+    { name: 'format-skip', path: path.join(dir, 'format-skip.txt'), format: 'text' },
+    { name: 'triage-budget', path: path.join(dir, 'get-triage-budget.json'), format: 'json' },
+    { name: 'vector-index-meta', path: process.env.ATS_TICKTICK_VECTOR_META || path.join(dir, 'vector-index-meta.json'), format: 'json' },
+    { name: 'kg-facts', path: process.env.ATS_KG_FACTS || path.join(dir, 'kg-facts.jsonl'), format: 'jsonl' },
   ];
+}
+
+function validateStateFile(entry, content) {
+  if (entry.format === 'text') return { records: content ? content.split('\n').filter(Boolean).length : 0 };
+  if (entry.format === 'jsonl') {
+    const lines = content.split('\n').filter((line) => line.trim());
+    lines.forEach((line, index) => {
+      try { JSON.parse(line); } catch (error) {
+        throw new Error(`invalid JSONL at line ${index + 1}: ${error.message}`, { cause: error });
+      }
+    });
+    return { records: lines.length };
+  }
+  const parsed = JSON.parse(content);
+  if (entry.version !== undefined && parsed?.version !== entry.version) {
+    throw new Error(`schema version ${parsed?.version ?? 'missing'}; expected ${entry.version}`);
+  }
+  return { version: parsed?.version ?? null };
+}
+
+/** Read-only compatibility and permissions report for every known state file. */
+export function inspectState() {
+  const files = stateFileRegistry().map((entry) => {
+    if (!fs.existsSync(entry.path)) return { name: entry.name, path: entry.path, status: 'missing', compatible: true };
+    try {
+      const stat = fs.statSync(entry.path);
+      const detail = validateStateFile(entry, fs.readFileSync(entry.path, 'utf8'));
+      const mode = stat.mode & 0o777;
+      const privateMode = (mode & 0o077) === 0;
+      return {
+        name: entry.name,
+        path: entry.path,
+        status: privateMode ? 'ok' : 'permissions-too-open',
+        compatible: true,
+        mode: mode.toString(8).padStart(3, '0'),
+        format: entry.format,
+        ...detail,
+      };
+    } catch (error) {
+      return { name: entry.name, path: entry.path, status: 'incompatible', compatible: false, error: error.message };
+    }
+  });
+  return {
+    schemaVersion: STATE_BUNDLE_VERSION,
+    compatible: files.every((file) => file.compatible),
+    files,
+  };
 }
 
 export function exportState() {
@@ -75,7 +122,7 @@ export function exportState() {
   };
 }
 
-export function importState(bundle, { force = false } = {}) {
+export function importState(bundle, { force = false, dryRun = false } = {}) {
   if (bundle?.version !== STATE_BUNDLE_VERSION || !bundle.files || typeof bundle.files !== 'object') {
     throw new Error('Unsupported state bundle.');
   }
@@ -95,8 +142,12 @@ export function importState(bundle, { force = false } = {}) {
       report.push({ name, status: 'exists — rerun with --force to overwrite' });
       continue;
     }
+    if (dryRun) {
+      report.push({ name, status: fs.existsSync(target) ? 'would overwrite' : 'would write', path: target });
+      continue;
+    }
     withLockSync(target, () => writeFileAtomicSync(target, file.content), { label: `state file ${name}` });
     report.push({ name, status: 'written', path: target });
   }
-  return { imported: report.filter((r) => r.status === 'written').length, report };
+  return { dryRun, imported: report.filter((r) => r.status === 'written').length, report };
 }

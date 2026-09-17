@@ -198,9 +198,12 @@ ats promote <src-proj> <src-task> <target-proj> --outcome ".." --done-when "a,b"
 ats hierarchy set <project> <task> --kind task
 ats hierarchy evaluate <project> <task>
 ats lifecycle set <project> <task> --status active --valid-until 2026-12-31
-ats link add <src-proj> <src-task> <dst-proj> <dst-task> --type decision
-ats graph <project> <task>
+ats link add <src-proj> <src-task> <dst-proj> <dst-task> --type decision --dry-run --explain
+ats graph <project> <task> --depth 3 --max-nodes 500
 ats context <project> <task>
+ats snapshot <project> <task> --depth 3 --max-nodes 500  # content-addressed context with completeness
+ats history <project> <task>                   # revisions and field-level changes
+ats history <project> <task> --restore <revision> --dry-run
 
 # Facts layer (proposed by agents, ratified by you)
 ats kg propose "Acme GmbH" "prefers" "invoices as PDF" --domain sales --source "call 2026-08-01"
@@ -223,6 +226,12 @@ ats security check <project> <task> --action read --resource task:self --reason 
 ats events watch --json            # NDJSON observations; never launches agents
 
 # Ops
+ats create --input task.json --dry-run       # strict JSON file, or --input - for stdin
+ats batch changes.jsonl --dry-run             # validate a mutation batch
+ats batch changes.jsonl --journal run.jsonl   # apply and resume by stable item id
+ats state doctor                              # validate local schemas and file permissions
+ats state import bundle.json --force --dry-run
+ats auth status --non-interactive             # bounded to 15s; override with --timeout-ms
 ats review list                 # writes staged by approvalRequired targets
 ats review approve ID && ats review apply --all
 ats cache sync                  # refresh the corpus cache (find also refreshes a stale one in the background)

@@ -139,14 +139,21 @@ test('routes TickTick auth and project extensions', () => {
 });
 
 test('routes TickTick task lifecycle and filter options', () => {
-  assert.deepEqual(run('tasks', 'create', 'p1', 'Task', '--reminder', '15m'), {
+  const created = run('tasks', 'create', 'p1', 'Task', '--reminder', '15m');
+  const { receipt: createReceipt, ...createResult } = created;
+  assert.deepEqual(createResult, {
     op: 'tasks.create',
     args: ['p1', 'Task', { reminder: '15m' }],
   });
-  assert.deepEqual(run('tasks', 'update', 'p1', 't1', '--reminder', '1h'), {
+  assert.equal(createReceipt.operation, 'create');
+
+  const updated = run('tasks', 'update', 'p1', 't1', '--reminder', '1h');
+  const { receipt: updateReceipt, ...updateResult } = updated;
+  assert.deepEqual(updateResult, {
     op: 'tasks.update',
     args: ['p1', 't1', { reminder: '1h' }],
   });
+  assert.equal(updateReceipt.operation, 'update');
   assert.equal(run('tasks', 'complete', 'p1', 't1').op, 'tasks.complete');
   assert.equal(run('tasks', 'delete', 'p1', 't1').op, 'tasks.remove');
   assert.deepEqual(run('tasks', 'search', '--tags', 'one,two', '--priority', 'high'), {

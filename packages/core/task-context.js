@@ -1142,7 +1142,9 @@ function graphNode(key, state, fallback) {
   };
 }
 
-export async function buildTaskGraph(adapter, root, { depth = 2, cache = false } = {}) {
+export async function buildTaskGraph(adapter, root, { depth = 2, maxNodes = 500, cache = false } = {}) {
+  if (!Number.isInteger(depth) || depth < 0 || depth > 50) throw new Error('Graph depth must be an integer between 0 and 50.');
+  if (!Number.isInteger(maxNodes) || maxNodes < 1 || maxNodes > 10_000) throw new Error('Graph maxNodes must be an integer between 1 and 10000.');
   const { corpus, fromCache, ageMs } = await loadCorpus(adapter, { cache });
   const state = inspectCorpus(corpus);
   const rootKey = refKey(root.projectId, root.taskId);
@@ -1155,9 +1157,15 @@ export async function buildTaskGraph(adapter, root, { depth = 2, cache = false }
   const edges = new Map();
   const queue = [{ key: rootKey, level: 0 }];
   const visited = new Set();
+  let truncated = false;
+  let omittedEdges = 0;
   while (queue.length > 0) {
     const current = queue.shift();
     if (visited.has(current.key)) continue;
+    if (visited.size >= maxNodes) {
+      truncated = true;
+      break;
+    }
     visited.add(current.key);
     nodes.set(current.key, graphNode(current.key, state));
     if (current.level >= depth) continue;
@@ -1172,8 +1180,13 @@ export async function buildTaskGraph(adapter, root, { depth = 2, cache = false }
     ];
     for (const edge of adjacent) {
       const edgeKey = `${edge.sourceKey}|${edge.type}|${edge.targetKey}`;
-      edges.set(edgeKey, edge);
       const nextKey = edge.sourceKey === current.key ? edge.targetKey : edge.sourceKey;
+      if (!nodes.has(nextKey) && nodes.size >= maxNodes) {
+        truncated = true;
+        omittedEdges += 1;
+        continue;
+      }
+      edges.set(edgeKey, edge);
       const fallback = edge.targetKey === nextKey ? edge : undefined;
       nodes.set(nextKey, graphNode(nextKey, state, fallback));
       if (!visited.has(nextKey)) queue.push({ key: nextKey, level: current.level + 1 });
@@ -1182,6 +1195,10 @@ export async function buildTaskGraph(adapter, root, { depth = 2, cache = false }
   return {
     root: rootKey,
     depth,
+    maxNodes,
+    truncated,
+    complete: !truncated,
+    omittedEdges,
     corpus: { size: corpus.length, fromCache, ageMs },
     nodes: [...nodes.values()],
     edges: [...edges.values()],
@@ -1407,6 +1424,12 @@ export async function contextForTask(adapter, root, { limit = 8, semanticLimit =
     else discovered.push(item);
   }
   const ordered = [...explicit, ...discovered].slice(0, limit);
+  const totalCandidates = explicit.length + discovered.length;
+  const completenessReasons = [];
+  if (ordered.length < totalCandidates) completenessReasons.push('context-limit');
+  if (unresolvedLinks.length) completenessReasons.push('unresolved-links');
+  if (state.errors.length) completenessReasons.push('metadata-errors');
+  if ((retrieval?.branches || []).some((branch) => branch.ok === false)) completenessReasons.push('retrieval-degraded');
   return {
     task,
     intent: rootMetadata.intent,
@@ -1419,5 +1442,6 @@ export async function contextForTask(adapter, root, { limit = 8, semanticLimit =
     unresolvedLinks,
     retrieval: retrieval ? { query: retrieval.query, branches: retrieval.branches, elapsedMs: retrieval.elapsedMs } : null,
     metadataErrors: state.errors,
+    completeness: { complete: completenessReasons.length === 0, reasons: completenessReasons },
   };
 }

@@ -71,6 +71,7 @@ import {
   recordAction,
   listActions,
   snapshotTask,
+  taskHistory,
   revertAction,
   mostRecentUndoable,
   taskEventStatePath,
@@ -92,6 +93,8 @@ import {
   markReviewItemApplied,
   exportState,
   importState,
+  inspectState,
+  buildReliabilitySnapshot,
   gardenSweep,
   formatGarden,
   loadFacts,
@@ -115,6 +118,16 @@ import { meta as corpusMeta, clear as corpusClear } from '@reneza/ats-core/corpu
 import { scaffoldAdapter } from '../scaffold.js';
 import { runDoctor, formatDoctor } from '../doctor.js';
 import { resolveOpen, formatOpenResult, launchUrl, shouldLaunch } from '../open.js';
+import {
+  readStructuredInput,
+  parseBatchInput,
+  readBatchJournal,
+  appendBatchJournal,
+  withTimeout,
+  classifyError,
+  errorEnvelope,
+  mutationReceipt,
+} from '../reliability.js';
 
 const args = parseArgs(process.argv.slice(2));
 
@@ -261,6 +274,15 @@ async function main() {
       case 'state':
         result = await handleState();
         break;
+      case 'history':
+        result = await handleHistory();
+        break;
+      case 'snapshot':
+        result = await handleSnapshot();
+        break;
+      case 'batch':
+        result = await handleBatch();
+        break;
       case 'agent-setup':
         result = await handleAgentSetup();
         break;
@@ -398,9 +420,10 @@ async function main() {
       }
     }
   } catch (err) {
-    console.error(`Error: ${err.message}`);
-    // Exit codes an agent can branch on: 3 = precondition failed (--if-match).
-    process.exit(Number.isInteger(err?.exitCode) ? err.exitCode : 1);
+    const classified = classifyError(err);
+    if (args.options.format === 'json') console.error(JSON.stringify(errorEnvelope(err), null, 2));
+    else console.error(`Error [${classified.kind}]: ${err.message}`);
+    process.exit(Number.isInteger(err?.exitCode) ? err.exitCode : classified.exitCode);
   }
 }
 
@@ -537,6 +560,9 @@ function helpFor(command) {
     case 'cache': return getCacheHelp();
     case 'review': return getReviewHelp();
     case 'state': return getStateHelp();
+    case 'history': return 'Usage: ats history PROJECT_ID TASK_ID [--limit N] [--restore REVISION] [--dry-run]\n\nLists version-addressable ledger revisions with field diffs. --restore applies the selected before-image; use --dry-run to preview.';
+    case 'snapshot': return 'Usage: ats snapshot PROJECT_ID TASK_ID [--depth N] [--max-nodes N] [--limit N] [--no-facts]\n\nEmits one content-addressed context + graph snapshot with an explicit completeness verdict.';
+    case 'batch': return 'Usage: ats batch FILE|- [--dry-run] [--journal FILE] [--json]\n\nRuns JSON/JSONL create, update, complete, delete, link.add, and link.remove operations with a stable id per item, per-item outcomes, and a resumable journal.';
     case 'kg': return getKgHelp();
     case 'bench': return getBenchHelp();
     case 'completion': return getCompletionHelp();
@@ -559,7 +585,7 @@ function helpFor(command) {
 const COMPLETION_COMMANDS = [
   'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
-  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'agent-setup', 'garden', 'kg',
+  'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'history', 'snapshot', 'batch', 'agent-setup', 'garden', 'kg',
   'projects', 'tasks', 'notes', 'help', 'completion', 'undo',
 ];
 
@@ -843,18 +869,28 @@ async function handleSetup() {
 async function handleAuth() {
   const adapter = await loadAdapter();
   const auth = adapter.__ext?.auth;
+  const nonInteractive = args.options['non-interactive'] === true;
+  const requestedTimeout = Number.parseInt(args.options['timeout-ms'], 10);
+  const timeoutMs = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+    ? requestedTimeout
+    : nonInteractive ? 15_000 : 0;
+  const run = (label, fn) => withTimeout(
+    Promise.resolve().then(() => fn({ nonInteractive, timeoutMs })),
+    timeoutMs,
+    `auth ${label}`
+  );
   switch (args.subcommand) {
-    case 'status': return adapter.authStatus();
-    case 'login':  return adapter.authLogin();
+    case 'status': return run('status', (options) => adapter.authStatus(options));
+    case 'login':  return run('login', (options) => adapter.authLogin(options));
     case 'exchange':
       if (!args.positional[0]) { console.error('Usage: ats auth exchange CODE'); process.exit(1); }
-      return adapter.authExchange(args.positional[0]);
+      return run('exchange', (options) => adapter.authExchange(args.positional[0], options));
     case 'refresh':
       if (!auth?.refresh) throw new Error("'ats auth refresh' is not supported by the active adapter.");
-      return auth.refresh();
+      return run('refresh', (options) => auth.refresh(options));
     case 'logout':
       if (!auth?.logout) throw new Error("'ats auth logout' is not supported by the active adapter.");
-      return auth.logout();
+      return run('logout', (options) => auth.logout(options));
     default:
       console.log(getAuthHelp());
   }
@@ -925,20 +961,37 @@ function taskRefFromResult(result, fallback = {}) {
 
 function auditCliWrite(action, result, fallback, metadata, advanced = false, before = undefined, approvals = undefined) {
   const task = taskRefFromResult(result, fallback);
-  if (!task.projectId || !task.taskId) return;
+  if (!task.projectId || !task.taskId) return null;
   try {
-    recordAction({
+    return recordAction({
       agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
       action,
       task,
       advanced,
       metadata,
       ...(before !== undefined ? { before } : {}),
+      ...(result !== undefined ? { after: snapshotTask(result) } : {}),
       ...(approvals ? { approvals } : {}),
     });
   } catch (err) {
     console.error(`Warning: action ledger write failed: ${err.message}`);
+    return null;
   }
+}
+
+function taskValue(result) {
+  return result?.task || result || {};
+}
+
+function patchVerified(result, patch) {
+  const observed = taskValue(result);
+  const fields = Object.entries(patch).filter(([, value]) => value !== undefined);
+  return fields.every(([key, value]) => JSON.stringify(observed?.[key]) === JSON.stringify(key === 'tags' ? tagsToArray(value) : value));
+}
+
+function attachMutationReceipt(result, receipt) {
+  if (result && typeof result === 'object' && !Array.isArray(result)) return { ...result, receipt };
+  return { result, receipt };
 }
 
 // Enforcement half of the declared approval metadata, shared with every other
@@ -1209,6 +1262,8 @@ async function handleKg() {
 
 async function handleState() {
   switch (args.subcommand) {
+    case 'doctor':
+      return inspectState();
     case 'export': {
       const bundle = exportState();
       const out = args.options.out;
@@ -1221,11 +1276,144 @@ async function handleState() {
     case 'import': {
       if (!args.positional[0]) { console.error('Usage: ats state import FILE [--force]'); process.exit(1); }
       const bundle = JSON.parse(fs.readFileSync(args.positional[0], 'utf8'));
-      return importState(bundle, { force: !!args.options.force });
+      return importState(bundle, { force: !!args.options.force, dryRun: args.options['dry-run'] === true });
     }
     default:
       console.log(getStateHelp());
   }
+}
+
+async function handleHistory() {
+  const projectId = args.subcommand;
+  const taskId = args.positional[0];
+  if (!projectId || !taskId) throw new Error('Usage: ats history PROJECT_ID TASK_ID [--restore REVISION] [--dry-run]');
+  const history = taskHistory(projectId, taskId, { limit: parseInt(args.options.limit) || undefined });
+  if (!args.options.restore) return history;
+  const matches = history.revisions.filter((revision) =>
+    revision.revision === args.options.restore
+    || revision.revision.startsWith(String(args.options.restore))
+    || revision.actionId === args.options.restore
+    || revision.actionId.startsWith(String(args.options.restore))
+  );
+  if (matches.length !== 1) throw new Error(matches.length ? `Revision ${args.options.restore} is ambiguous.` : `Revision ${args.options.restore} was not found for ${projectId}/${taskId}.`);
+  if (!matches[0].restorable) throw new Error(`Revision ${matches[0].revision} has no before-image to restore.`);
+  const dryRun = args.options['dry-run'] === true;
+  const adapter = dryRun ? {} : await loadAdapter();
+  const restored = await revertAction(adapter, matches[0].actionId, { apply: !dryRun });
+  return { revision: matches[0].revision, dryRun, ...restored };
+}
+
+async function handleSnapshot() {
+  const projectId = args.subcommand;
+  const taskId = args.positional[0];
+  if (!projectId || !taskId) throw new Error('Usage: ats snapshot PROJECT_ID TASK_ID [--depth N] [--max-nodes N] [--limit N]');
+  const adapter = await loadAdapter();
+  const context = await contextForTask(adapter, { projectId, taskId }, { limit: parseInt(args.options.limit) || 8 });
+  if (!args.options['no-facts']) {
+    const query = [context.task?.title, context.intent?.outcome, context.intent?.why].filter(Boolean).join(' ');
+    context.facts = factsForTask({ projectId, taskId, query, domain: args.options.domain, limit: parseInt(args.options['facts-limit']) || 5 });
+  }
+  const graph = await buildTaskGraph(adapter, { projectId, taskId }, {
+    depth: Number.isFinite(Number(args.options.depth)) ? Number(args.options.depth) : 2,
+    maxNodes: Number.isFinite(Number(args.options['max-nodes'])) ? Number(args.options['max-nodes']) : 500,
+  });
+  return buildReliabilitySnapshot({ context, graph });
+}
+
+async function executeBatchOperation(adapter, t, item, dryRun) {
+  const op = item.op;
+  if (op === 'create') {
+    if (!item.title) throw new Error('create requires title');
+    const input = {
+      title: item.title,
+      projectId: item.projectId,
+      content: item.content,
+      dueDate: item.dueDate,
+      priority: item.priority,
+      tags: tagsToArray(item.tags),
+    };
+    if (dryRun) return { status: 'planned', plan: { op, input } };
+    const gate = reviewGate('task.created', null, { projectId: item.projectId || '', title: item.title, opts: input });
+    if (gate) return { status: 'staged', result: gate };
+    const result = t?.create
+      ? await t.create(item.projectId || '', item.title, input)
+      : await adapter.createTask(input);
+    const action = auditCliWrite('task.created', result, { projectId: item.projectId }, { batchId: item.id, title: item.title });
+    return { status: 'applied', result, receipt: mutationReceipt({ operation: op, action, requested: input, observed: snapshotTask(result), verified: taskValue(result).title === item.title, target: taskRefFromResult(result, item) }) };
+  }
+  if (op === 'update') {
+    if (!item.projectId || !item.taskId || !item.patch || typeof item.patch !== 'object') throw new Error('update requires projectId, taskId, and patch');
+    const current = t?.get ? await t.get(item.projectId, item.taskId) : await adapter.getTask(item.projectId, item.taskId);
+    const task = current?.task || current;
+    if (item.ifMatch !== undefined) {
+      const actual = contentHash(task?.content || '');
+      if (String(item.ifMatch) !== actual) throw withExitCode(new Error(`Precondition failed: ${item.projectId}/${item.taskId} content hash is ${actual}, expected ${item.ifMatch}.`), 3);
+    }
+    if (dryRun) return { status: 'planned', plan: { op, target: { projectId: item.projectId, taskId: item.taskId }, before: snapshotTask(task), patch: item.patch } };
+    const gate = reviewGate('task.updated', current, { projectId: item.projectId, taskId: item.taskId, patch: item.patch, ...(item.ifMatch ? { ifMatch: String(item.ifMatch) } : {}) });
+    if (gate) return { status: 'staged', result: gate };
+    const result = t?.update
+      ? await t.update(item.projectId, item.taskId, item.patch)
+      : await adapter.updateTask(item.projectId, item.taskId, { ...item.patch, tags: tagsToArray(item.patch.tags) });
+    const action = auditCliWrite('task.updated', result, item, { batchId: item.id, fields: Object.keys(item.patch) }, false, snapshotTask(task));
+    return { status: 'applied', result, receipt: mutationReceipt({ operation: op, action, requested: item.patch, observed: snapshotTask(result), verified: patchVerified(result, item.patch), target: { projectId: item.projectId, taskId: item.taskId } }) };
+  }
+  if (op === 'complete' || op === 'delete') {
+    if (!item.projectId || !item.taskId) throw new Error(`${op} requires projectId and taskId`);
+    const current = t?.get ? await t.get(item.projectId, item.taskId) : await adapter.getTask(item.projectId, item.taskId);
+    if (dryRun) return { status: 'planned', plan: { op, target: { projectId: item.projectId, taskId: item.taskId }, before: snapshotTask(current) } };
+    const actionName = op === 'complete' ? 'task.completed' : 'task.deleted';
+    const gate = reviewGate(actionName, current, { projectId: item.projectId, taskId: item.taskId });
+    if (gate) return { status: 'staged', result: gate };
+    const fn = op === 'complete' ? t?.complete : t?.remove;
+    if (!fn) throw new Error(`Active adapter does not support batch ${op}.`);
+    const result = await fn.call(t, item.projectId, item.taskId);
+    const action = auditCliWrite(actionName, result, item, { batchId: item.id }, op === 'complete', snapshotTask(current));
+    return { status: 'applied', result, receipt: mutationReceipt({ operation: op, action, requested: {}, observed: op === 'delete' ? null : snapshotTask(result), verified: true, target: { projectId: item.projectId, taskId: item.taskId } }) };
+  }
+  if (op === 'link.add' || op === 'link.remove') {
+    const required = ['sourceProjectId', 'sourceTaskId', 'targetProjectId', 'targetTaskId', 'type'];
+    const missing = required.filter((key) => !item[key]);
+    if (missing.length) throw new Error(`${op} requires ${missing.join(', ')}`);
+    const source = { projectId: item.sourceProjectId, taskId: item.sourceTaskId };
+    const target = { projectId: item.targetProjectId, taskId: item.targetTaskId };
+    if (dryRun) return { status: 'planned', plan: { op, source, target, type: item.type } };
+    const result = op === 'link.add'
+      ? await addTaskLink(adapter, source, target, item.type, { allowMissing: item.allowMissing === true, title: item.title })
+      : await removeTaskLink(adapter, source, target, item.type);
+    const action = auditCliWrite(op === 'link.add' ? 'task.link.added' : 'task.link.removed', result, source, { batchId: item.id, target, type: item.type });
+    return { status: 'applied', result, receipt: mutationReceipt({ operation: op, action, requested: { source, target, type: item.type }, observed: result.metadata?.links, verified: true, target: source }) };
+  }
+  throw new Error(`unsupported batch op ${op}`);
+}
+
+async function handleBatch() {
+  const file = args.subcommand || args.positional[0];
+  const items = parseBatchInput(file);
+  const journal = typeof args.options.journal === 'string' ? args.options.journal : null;
+  const completed = readBatchJournal(journal);
+  const dryRun = args.options['dry-run'] === true;
+  const adapter = await loadAdapter();
+  const t = adapter.__ext?.tasks;
+  const outcomes = [];
+  for (const item of items) {
+    if (completed.has(item.id)) {
+      outcomes.push({ id: item.id, op: item.op, status: 'skipped', reason: 'already applied in journal' });
+      continue;
+    }
+    let outcome;
+    try {
+      const executed = await executeBatchOperation(adapter, t, item, dryRun);
+      outcome = { id: item.id, op: item.op, ...executed };
+    } catch (error) {
+      outcome = { id: item.id, op: item.op, status: 'failed', error: errorEnvelope(error).error };
+    }
+    outcomes.push(outcome);
+    appendBatchJournal(journal, outcome);
+  }
+  const summary = Object.fromEntries(['planned', 'applied', 'staged', 'skipped', 'failed'].map((status) => [status, outcomes.filter((outcome) => outcome.status === status).length]));
+  if (summary.failed) process.exitCode = 5;
+  return { ok: summary.failed === 0, dryRun, summary, outcomes };
 }
 
 // Emit the paste-able system-prompt policy block that makes agents use the
@@ -1482,16 +1670,21 @@ async function handleTasks() {
       return res.task || res;
     }
     case 'create': {
-      let projectId = args.options.project || '';
-      let title = args.positional[0];
+      const input = args.options.input
+        ? readStructuredInput(args.options.input, {
+          allowed: ['title', 'projectId', 'content', 'dueDate', 'priority', 'tags', 'reminder', 'parentId'],
+        })
+        : {};
+      let projectId = args.options.project || input.projectId || '';
+      let title = args.positional[0] || input.title;
       if (args.positional.length >= 2) { projectId = args.positional[0]; title = args.positional[1]; }
       let opts = {
-        content: args.options.content,
-        dueDate: args.options.due,
-        priority: args.options.priority,
-        tags: args.options.tags,
-        reminder: args.options.reminder,
-        parentId: args.options.parent,
+        content: args.options.content ?? input.content,
+        dueDate: args.options.due ?? input.dueDate,
+        priority: args.options.priority ?? input.priority,
+        tags: args.options.tags ?? input.tags,
+        reminder: args.options.reminder ?? input.reminder,
+        parentId: args.options.parent ?? input.parentId,
       };
       if (!title && process.stdin.isTTY && adapter.__ext?.interactive?.promptTaskCreate) {
         const input = await adapter.__ext.interactive.promptTaskCreate({ projectId, title, ...opts });
@@ -1517,6 +1710,17 @@ async function handleTasks() {
       // a body rendered deterministically by a tool must survive byte-for-byte.
       if (opts.content && !formatSkipped(projectId) && args.options.raw !== true) {
         opts.content = normalizeTaskBody(opts.content).content;
+      }
+      if (args.options['dry-run'] === true) {
+        return {
+          dryRun: true,
+          operation: 'create',
+          input: { projectId: projectId || null, title, ...opts },
+          preconditions: {
+            ifAbsent: args.options['if-absent'] === true,
+            idempotencyKey: typeof args.options['idempotency-key'] === 'string' ? args.options['idempotency-key'] : null,
+          },
+        };
       }
       // Idempotent creates: a key that already produced something returns it;
       // --if-absent returns the active task that already carries this title.
@@ -1553,7 +1757,7 @@ async function handleTasks() {
           dueDate: opts.dueDate,
           tags: tagsToArray(opts.tags),
         });
-      auditCliWrite('task.created', result, { projectId }, { title, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
+      const action = auditCliWrite('task.created', result, { projectId }, { title, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
       if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(result, projectId), { configDir: atsConfigDir() });
       const relevance = adapter.__ext?.relevance;
       if (relevance?.isEnabled?.({
@@ -1573,23 +1777,41 @@ async function handleTasks() {
           console.error(`Warning: relevance enrichment failed: ${err.message}`);
         }
       }
-      return result;
+      return attachMutationReceipt(result, mutationReceipt({
+        operation: 'create',
+        action,
+        requested: { projectId: projectId || null, title, ...opts },
+        observed: snapshotTask(result),
+        verified: taskValue(result).title === title,
+        target: taskRefFromResult(result, { projectId }),
+      }));
     }
     case 'update': {
-      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
-      const [up, uid] = args.positional;
+      const input = args.options.input
+        ? readStructuredInput(args.options.input, {
+          allowed: ['projectId', 'taskId', 'title', 'content', 'append', 'prepend', 'dueDate', 'priority', 'tags', 'reminder'],
+        })
+        : {};
+      const up = args.positional[0] || input.projectId;
+      const uid = args.positional[1] || input.taskId;
+      if (!up || !uid) { console.error('Usage: ats tasks update PROJECT_ID TASK_ID [opts]'); process.exit(1); }
       // Body modes: --content replaces, --append/--prepend add to what is there.
-      const bodyModes = ['content', 'append', 'prepend'].filter((k) => args.options[k] !== undefined && args.options[k] !== true);
+      const bodyValues = {
+        content: args.options.content ?? input.content,
+        append: args.options.append ?? input.append,
+        prepend: args.options.prepend ?? input.prepend,
+      };
+      const bodyModes = ['content', 'append', 'prepend'].filter((k) => bodyValues[k] !== undefined && bodyValues[k] !== true);
       if (bodyModes.length > 1) { console.error('Use one of --content, --append, --prepend.'); process.exit(1); }
       const bodyMode = bodyModes[0];
       const ifMatch = args.options['if-match'];
       const patch = {
-        title: args.options.title,
-        content: args.options.content,
-        dueDate: args.options.due,
-        priority: args.options.priority,
-        tags: args.options.tags,
-        reminder: args.options.reminder,
+        title: args.options.title ?? input.title,
+        content: bodyValues.content,
+        dueDate: args.options.due ?? input.dueDate,
+        priority: args.options.priority ?? input.priority,
+        tags: args.options.tags ?? input.tags,
+        reminder: args.options.reminder ?? input.reminder,
       };
       // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
       let before;
@@ -1615,7 +1837,7 @@ async function handleTasks() {
       }
       if (bodyMode === 'append' || bodyMode === 'prepend') {
         const base = String(currentTask.content || '').replace(/\s+$/, '');
-        const add = String(args.options[bodyMode]);
+        const add = String(bodyValues[bodyMode]);
         patch.content = !base ? add : bodyMode === 'append' ? `${base}\n\n${add}` : `${add}\n\n${base}`;
       }
       // Normalize the body whenever content is being written (no extra fetch when it isn't).
@@ -1624,6 +1846,16 @@ async function handleTasks() {
       // deterministically by a tool must survive the write byte-for-byte.
       if (patch.content !== undefined && !formatSkipped(up) && args.options.raw !== true) {
         patch.content = normalizeTaskBody(patch.content).content;
+      }
+      if (args.options['dry-run'] === true) {
+        return {
+          dryRun: true,
+          operation: 'update',
+          target: { projectId: up, taskId: uid },
+          before,
+          patch: Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+          preconditions: { ifMatch: ifMatch === undefined ? null : String(ifMatch) },
+        };
       }
       const gate = reviewGate('task.updated', current, {
         projectId: up,
@@ -1636,36 +1868,45 @@ async function handleTasks() {
         ? await t.update(up, uid, patch,
           ...(args.options.live === true ? [{ live: true }] : []))
         : await adapter.updateTask(up, uid, { ...patch, tags: tagsToArray(patch.tags) });
-      auditCliWrite('task.updated', result, { projectId: up, taskId: uid }, {
+      const action = auditCliWrite('task.updated', result, { projectId: up, taskId: uid }, {
         fields: Object.keys(patch).filter((key) => patch[key] !== undefined),
         ...(bodyMode && bodyMode !== 'content' ? { mode: bodyMode } : {}),
         ...(ifMatch !== undefined ? { ifMatch: String(ifMatch) } : {}),
       }, false, before);
-      return withContentHash(result);
+      return attachMutationReceipt(withContentHash(result), mutationReceipt({
+        operation: 'update',
+        action,
+        requested: Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+        observed: snapshotTask(result),
+        verified: patchVerified(result, patch),
+        target: { projectId: up, taskId: uid },
+      }));
     }
     case 'complete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
       let current = null;
-      if (process.env.ATS_REVIEW_ALL !== '1') {
+      if (process.env.ATS_REVIEW_ALL !== '1' || args.options['dry-run'] === true) {
         try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
       }
+      if (args.options['dry-run'] === true) return { dryRun: true, operation: 'complete', target: { projectId: args.positional[0], taskId: args.positional[1] }, before: snapshotTask(current) };
       const gate = reviewGate('task.completed', current, { projectId: args.positional[0], taskId: args.positional[1] });
       if (gate) return gate;
       const result = t?.complete ? await t.complete(args.positional[0], args.positional[1]) : needsTaskExt('complete', 'complete');
-      auditCliWrite('task.completed', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, true);
-      return result;
+      const action = auditCliWrite('task.completed', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, true, snapshotTask(current));
+      return attachMutationReceipt(result, mutationReceipt({ operation: 'complete', action, requested: {}, observed: snapshotTask(result), verified: true, target: { projectId: args.positional[0], taskId: args.positional[1] } }));
     }
     case 'delete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks delete PROJECT_ID TASK_ID'); process.exit(1); }
       let current = null;
-      if (process.env.ATS_REVIEW_ALL !== '1') {
+      if (process.env.ATS_REVIEW_ALL !== '1' || args.options['dry-run'] === true) {
         try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
       }
+      if (args.options['dry-run'] === true) return { dryRun: true, operation: 'delete', target: { projectId: args.positional[0], taskId: args.positional[1] }, before: snapshotTask(current) };
       const gate = reviewGate('task.deleted', current, { projectId: args.positional[0], taskId: args.positional[1] });
       if (gate) return gate;
       const result = t?.remove ? await t.remove(args.positional[0], args.positional[1]) : needsTaskExt('remove', 'delete');
-      auditCliWrite('task.deleted', result, { projectId: args.positional[0], taskId: args.positional[1] });
-      return result;
+      const action = auditCliWrite('task.deleted', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, false, snapshotTask(current));
+      return attachMutationReceipt(result, mutationReceipt({ operation: 'delete', action, requested: {}, observed: null, verified: true, target: { projectId: args.positional[0], taskId: args.positional[1] } }));
     }
     case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats tasks find QUERY'); process.exit(1); }
@@ -1883,6 +2124,16 @@ async function handleLink() {
       console.error('Usage: ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
       process.exit(1);
     }
+    const current = await listTaskLinks(adapter, sourceProjectId, sourceTaskId);
+    const exists = current.links.some((link) => link.type === args.options.type && link.projectId === targetProjectId && link.taskId === targetTaskId);
+    const explain = {
+      reason: 'explicit stable source and target ids supplied by the caller',
+      source: { projectId: sourceProjectId, taskId: sourceTaskId },
+      target: { projectId: targetProjectId, taskId: targetTaskId },
+      type: args.options.type,
+      wouldChange: !exists,
+    };
+    if (args.options['dry-run'] === true) return { dryRun: true, operation: 'link.add', explain };
     const result = await addTaskLink(
       adapter,
       { projectId: sourceProjectId, taskId: sourceTaskId },
@@ -1890,11 +2141,11 @@ async function handleLink() {
       args.options.type,
       { allowMissing: args.options['allow-missing'] === true, title: args.options.title }
     );
-    auditCliWrite('task.link.added', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
+    const action = auditCliWrite('task.link.added', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
       type: args.options.type,
       target: { projectId: targetProjectId, taskId: targetTaskId },
     });
-    return result;
+    return { ...result, receipt: mutationReceipt({ operation: 'link.add', action, requested: explain, observed: result.metadata?.links, verified: true, target: explain.source }), ...(args.options.explain ? { explain } : {}) };
   }
   if (args.subcommand === 'resolve') {
     const [projectId, taskId] = args.positional;
@@ -1909,18 +2160,28 @@ async function handleLink() {
       console.error('Usage: ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
       process.exit(1);
     }
+    const current = await listTaskLinks(adapter, sourceProjectId, sourceTaskId);
+    const exists = current.links.some((link) => link.type === args.options.type && link.projectId === targetProjectId && link.taskId === targetTaskId);
+    const explain = {
+      reason: 'explicit stable source and target ids supplied by the caller',
+      source: { projectId: sourceProjectId, taskId: sourceTaskId },
+      target: { projectId: targetProjectId, taskId: targetTaskId },
+      type: args.options.type,
+      wouldChange: exists,
+    };
+    if (args.options['dry-run'] === true) return { dryRun: true, operation: 'link.remove', explain };
     const result = await removeTaskLink(
       adapter,
       { projectId: sourceProjectId, taskId: sourceTaskId },
       { projectId: targetProjectId, taskId: targetTaskId },
       args.options.type
     );
-    auditCliWrite('task.link.removed', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
+    const action = auditCliWrite('task.link.removed', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
       type: args.options.type,
       target: { projectId: targetProjectId, taskId: targetTaskId },
       removed: result.removed,
     });
-    return result;
+    return { ...result, receipt: mutationReceipt({ operation: 'link.remove', action, requested: explain, observed: result.metadata?.links, verified: result.removed === exists, target: explain.source }), ...(args.options.explain ? { explain } : {}) };
   }
   if (args.subcommand === 'list') {
     const [projectId, taskId] = args.positional;
@@ -1993,7 +2254,10 @@ async function handleGraph() {
   const taskId = args.positional[0];
   if (!projectId || !taskId) { console.error('Usage: ats graph PROJECT_ID TASK_ID [--depth N]'); process.exit(1); }
   const adapter = await loadAdapter();
-  return buildTaskGraph(adapter, { projectId, taskId }, { depth: parseInt(args.options.depth) || 2 });
+  return buildTaskGraph(adapter, { projectId, taskId }, {
+    depth: Number.isFinite(Number(args.options.depth)) ? Number(args.options.depth) : 2,
+    maxNodes: Number.isFinite(Number(args.options['max-nodes'])) ? Number(args.options['max-nodes']) : 500,
+  });
 }
 
 async function handleContext() {
