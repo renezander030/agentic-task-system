@@ -62,6 +62,28 @@ Nothing about *why* an item reached the agent is hidden.
 A ranker you can't inspect is a harness that re-renders state in the dark.
 Trace-first is the opposite stance.
 
+### 4. Reliable automation boundaries
+
+Agent callers need to know what a command intended, what it changed, and
+whether the state they received is complete.
+
+- Task and link writes support `--dry-run`; an applied write returns a receipt
+  with requested and observed state, its ledger revision, and a verification
+  verdict.
+- `ats snapshot` gives a context handoff a content address and an explicit
+  completeness verdict. Capture time is metadata and does not change the
+  revision.
+- `ats graph --max-nodes` reports truncation instead of returning a bounded
+  traversal as if it were whole.
+- `ats batch --journal` records each item outcome, so a stopped batch resumes
+  by stable item id. Partial failure exits 5 and keeps successful item results.
+- `ats state doctor` checks local schemas and permissions without rewriting
+  files; `ats state import --dry-run` previews its local write set.
+- JSON errors use stable categories (`validation`, `precondition`,
+  `authentication`, `timeout`, `transport`, `internal`) and say whether a
+  retry can help. Exit 3 is a failed write precondition, 5 a partial batch, and
+  6 an operation timeout.
+
 ## The disclosure corollary
 
 Trace-first cuts both ways: you must also be able to trace what *leaves* the

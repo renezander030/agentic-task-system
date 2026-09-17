@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { withLock, withLockSync } from './fs-lock.js';
 
 export function actionLogPath() {
@@ -30,6 +30,9 @@ function buildRecord(entry) {
   if (entry.before !== undefined && entry.before !== null && typeof entry.before !== 'object') {
     throw new Error('Action ledger before-image must be an object or null.');
   }
+  if (entry.after !== undefined && entry.after !== null && typeof entry.after !== 'object') {
+    throw new Error('Action ledger after-image must be an object or null.');
+  }
   const record = {
     id: entry.id || randomUUID(),
     ts: entry.ts || new Date().toISOString(),
@@ -45,6 +48,19 @@ function buildRecord(entry) {
   // Before-image: the pre-write snapshot that makes a write reversible via `ats undo`.
   // Only stored when supplied (updates), so the ledger stays lean for reads/creates.
   if (entry.before !== undefined) record.before = entry.before || null;
+  if (entry.after !== undefined) record.after = entry.after || null;
+  record.revision = entry.revision || createHash('sha256')
+    .update(JSON.stringify({
+      id: record.id,
+      ts: record.ts,
+      action: record.action,
+      task: record.task,
+      before: record.before,
+      after: record.after,
+      metadata: record.metadata,
+    }))
+    .digest('hex')
+    .slice(0, 16);
   return record;
 }
 
@@ -94,6 +110,34 @@ export function snapshotTask(task = {}) {
   if (t.dueDate !== undefined) snap.dueDate = t.dueDate;
   else if (t.due !== undefined) snap.dueDate = t.due;
   return snap;
+}
+
+function snapshotDiff(before = {}, after = {}) {
+  const fields = [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])].sort();
+  return fields
+    .filter((field) => JSON.stringify(before?.[field]) !== JSON.stringify(after?.[field]))
+    .map((field) => ({ field, before: before?.[field], after: after?.[field] }));
+}
+
+/** Return version-addressable write history for one task. */
+export function taskHistory(projectId, taskId, { limit, logPath = actionLogPath() } = {}) {
+  const actions = listActions({ projectId, taskId, limit }, { logPath });
+  return {
+    task: { projectId, taskId },
+    count: actions.length,
+    revisions: actions.map((entry) => ({
+      revision: entry.revision || entry.id,
+      actionId: entry.id,
+      ts: entry.ts,
+      action: entry.action,
+      agent: entry.agent,
+      restorable: Boolean(entry.before && Object.keys(entry.before).length),
+      before: entry.before,
+      after: entry.after,
+      changes: snapshotDiff(entry.before, entry.after),
+      metadata: entry.metadata,
+    })),
+  };
 }
 
 // Append order == chronological, and is unambiguous even when many writes share a

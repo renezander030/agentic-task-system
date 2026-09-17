@@ -16,7 +16,7 @@ process.env.ATS_EVENT_STATE = path.join(tmp, 'task-events.json');
 process.env.ATS_EVENT_SPOOL = path.join(tmp, 'task-event-spool.json');
 process.env.ATS_KG_FACTS = path.join(tmp, 'kg-facts.jsonl');
 
-const { exportState, importState, stateFileRegistry } = await import('../state-bundle.js');
+const { exportState, importState, inspectState, stateFileRegistry } = await import('../state-bundle.js');
 
 test('export bundles existing state files and lists missing ones', () => {
   fs.writeFileSync(process.env.ATS_ACTION_LOG, '{"action":"task.created"}\n');
@@ -59,6 +59,18 @@ test('import ignores unknown names and bundle-supplied paths', () => {
   assert.equal(fs.existsSync(path.join(tmp, 'elsewhere.txt')), false);
   // Content landed at the LOCAL registry path, not the bundle's claimed path.
   assert.equal(fs.readFileSync(process.env.ATS_ACTION_LOG, 'utf8'), 'redirected?\n');
+});
+
+test('state doctor is read-only and import dry-run does not write', () => {
+  fs.writeFileSync(process.env.ATS_REVIEW_QUEUE, '{"version":99,"items":[]}\n');
+  const report = inspectState();
+  assert.equal(report.compatible, false);
+  assert.equal(report.files.find((entry) => entry.name === 'review-queue').status, 'incompatible');
+
+  fs.rmSync(process.env.ATS_ACTION_LOG, { force: true });
+  const preview = importState({ version: 1, files: { 'action-ledger': { content: '{"action":"x"}\n' } } }, { dryRun: true });
+  assert.ok(preview.report.find((entry) => entry.status === 'would write'));
+  assert.equal(fs.existsSync(process.env.ATS_ACTION_LOG), false);
 });
 
 test('the registry whitelists state only — no credential-bearing names', () => {

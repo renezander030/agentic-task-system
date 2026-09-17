@@ -16,7 +16,7 @@ import path from 'path';
 import os from 'os';
 
 const LOG_PATH = process.env.ATS_USAGE_LOG ||
-  path.join(os.homedir(), '.config', 'ats', 'search-log.jsonl');
+  path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'ats', 'search-log.jsonl');
 
 let dirEnsured = false;
 

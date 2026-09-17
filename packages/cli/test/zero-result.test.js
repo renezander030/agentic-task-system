@@ -109,6 +109,8 @@ test('search adds suggestions only when it comes back empty', () => {
 test('a missed notes get names the nearest items in its error', () => {
   const proc = runProcess('get', 'deploy playbook');
   assert.equal(proc.status, 1);
-  assert.match(proc.stderr, /No note matching "deploy playbook"/);
-  assert.match(proc.stderr, /Nearest via ats find: "Deploy runbook" \(p1\/t1\)/);
+  const failure = JSON.parse(proc.stderr);
+  assert.equal(failure.ok, false);
+  assert.match(failure.error.message, /No note matching "deploy playbook"/);
+  assert.match(failure.error.message, /Nearest via ats find: "Deploy runbook" \(p1\/t1\)/);
 });

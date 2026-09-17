@@ -11,6 +11,9 @@ export interface ActionLedgerEntry {
   metadata?: Record<string, unknown> | null;
   /** Pre-write snapshot that makes the write reversible via `revertAction`. */
   before?: TaskSnapshot | null;
+  /** Post-write snapshot used to render a field-level revision diff. */
+  after?: TaskSnapshot | null;
+  revision?: string;
 }
 
 export interface ActionLedgerRecord extends ActionLedgerEntry {
@@ -40,6 +43,11 @@ export function actionLogPath(): string;
 export function recordAction(entry: ActionLedgerEntry, options?: { logPath?: string }): ActionLedgerRecord | null;
 export function listActions(filters?: { agent?: string; action?: string; projectId?: string; taskId?: string; advanced?: boolean; limit?: number }, options?: { logPath?: string }): ActionLedgerRecord[];
 export function snapshotTask(task?: unknown): TaskSnapshot;
+export function taskHistory(projectId: string, taskId: string, options?: { limit?: number; logPath?: string }): {
+  task: { projectId: string; taskId: string };
+  count: number;
+  revisions: Array<Record<string, unknown>>;
+};
 export function findAction(id: string, options?: { logPath?: string }): ActionLedgerRecord | null;
 export function mostRecentUndoable(options?: { logPath?: string }): ActionLedgerRecord | null;
 export function revertAction(adapter: unknown, id?: string, options?: { logPath?: string; apply?: boolean }): Promise<RevertResult>;

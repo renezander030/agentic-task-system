@@ -426,6 +426,9 @@ Commands:
   link           Add or list typed relationships between tasks
   graph          Traverse the typed task graph around an item
   context        Assemble valid linked + retrieved context with provenance
+  snapshot       Emit a content-addressed context + graph snapshot
+  history        Inspect or restore version-addressed task write history
+  batch          Apply resumable JSON/JSONL mutation batches
   ledger         Record or inspect agent actions and work advancement
   undo [id]      Reverse the last write (or a named one) from the ledger before-image
   security       Define task trust/resource scope and audit access decisions
@@ -498,8 +501,8 @@ ${common}`,
     link: `ats link - Typed relationships to other active or note tasks
 
 Usage:
-  ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE [--allow-missing] [--title HINT]
-  ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE
+  ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE [--allow-missing] [--title HINT] [--dry-run] [--explain]
+  ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE [--dry-run] [--explain]
   ats link list PROJECT_ID TASK_ID
   ats link resolve PROJECT_ID TASK_ID
 
@@ -508,6 +511,8 @@ Types: blocks, depends-on, parent, conflicts-with, supports, evidence, decision,
 --allow-missing records a forward link to a task that does not exist yet; it back-resolves
 on the next graph read once the target is created. 'ats link resolve' refreshes the stored
 placeholder title to the real one after the target lands.
+--dry-run returns the causal plan without writing; --explain includes the explicit
+source, target, type, reason and whether the operation changed state.
 
 Links render in a "## Related" section at the bottom of the body. "related" is the
 generic up-link / Map-of-Content pointer and renders bare (- [Title](url)); the
@@ -780,11 +785,13 @@ export function getStateHelp() {
   return `ats state — move ATS derived state between machines
 
 Usage:
+  ats state doctor                Validate known state schemas and permissions
   ats state export [--out FILE]   Bundle the ledger, undo before-images,
                                   review queue, event checkpoint + spool,
                                   usage log, caches, and index metadata into
                                   one JSON document (stdout by default)
-  ats state import FILE [--force] Restore a bundle. Existing files are kept
+  ats state import FILE [--force] [--dry-run]
+                                  Restore or preview a bundle. Existing files are kept
                                   unless --force; import writes only to the
                                   known state paths on THIS machine, never
                                   to paths named inside the bundle.
@@ -918,6 +925,11 @@ Subcommands:
   exchange   Exchange authorization code for tokens
   refresh    Manually refresh access token
   logout     Clear stored tokens
+
+Options:
+  --non-interactive   Pass a noninteractive contract to the adapter and bound
+                      the operation to 15 seconds unless --timeout-ms is set
+  --timeout-ms <n>    Fail with typed timeout error after N milliseconds
 
 Examples:
   ats auth status
@@ -1057,6 +1069,9 @@ Create/Update options:
                          contentHash (from 'tasks get'); exit 3 if it changed
   --parent <task_id>     (create) Make this a sub-task of that task
   --raw                  Store --content verbatim; skip body normalization
+  --input <FILE|->       Read a strict typed JSON object; explicit flags and
+                         positional ids override fields from the object
+  --dry-run              Return the normalized mutation plan without writing
   --live                 (get/update) Bypass the local cache and read TickTick
                          directly. On update it also makes the merge base live,
                          so a concurrent change is not clobbered.
