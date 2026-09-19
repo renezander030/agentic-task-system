@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import remoteAdapter from '../adapter-ticktick/index.js';
 import * as embedding from '../adapter-ticktick/embedding.js';
+import { drainVectorRounds } from '../adapter-ticktick/tasks.js';
 import { apiRequest as tickTickApiRequest, parseReminder } from '../adapter-ticktick/api.js';
 
 const DEFAULT_CACHE_FILE = path.join(os.homedir(), 'ticktick-mcp', '.ticktick-cache.json');
@@ -474,6 +475,7 @@ export function createTickTickCacheAdapter(options = {}) {
       vectorFindSimilar: embedder.findSimilar,
     }),
     vectorSync: (opts = {}) => syncVectors(opts),
+    vectorSyncDrain: (opts = {}) => syncVectorsDrain(opts),
     vectorStatus: async () => {
       const status = await embedder.indexStats();
       if (!status.available) return status;
@@ -533,7 +535,25 @@ export function createTickTickCacheAdapter(options = {}) {
     return { ...result, cache: cacheStatus() };
   }
 
-  async function syncVectors(opts = {}) {
+  // Index from the local cache, not the remote Open API project fan-out.
+  // GET /project has no Inbox, so the fan-out silently left ~250 Inbox tasks
+  // (and everything else the cache holds but /project/{id}/data omits) out of
+  // semantic search. Ids here are full TickTick ids, identical to the
+  // payload.taskId keys already in Qdrant, so this re-uses the existing index.
+  const cachedVectorTasks = async () => load().tasks
+    .filter((task) => task.status !== 2)
+    .map((task) => ({
+      id: task.id,
+      title: task.title || '',
+      content: task.content || '',
+      projectId: task.projectId,
+      projectName: task.projectName,
+      priority: task.priority || 'none',
+      tags: task.tags || [],
+      dueDate: task.dueDate || null,
+    }));
+
+  async function syncVectors(opts = {}, fetchAllTasks = cachedVectorTasks) {
     if (vectorSyncScript) {
       const output = execFileSync(process.execPath, [vectorSyncScript, JSON.stringify({
         forceFull: !!opts.forceFull,
@@ -545,23 +565,6 @@ export function createTickTickCacheAdapter(options = {}) {
       });
       return JSON.parse(output);
     }
-    // Index from the local cache, not the remote Open API project fan-out.
-    // GET /project has no Inbox, so the fan-out silently left ~250 Inbox tasks
-    // (and everything else the cache holds but /project/{id}/data omits) out of
-    // semantic search. Ids here are full TickTick ids, identical to the
-    // payload.taskId keys already in Qdrant, so this re-uses the existing index.
-    const fetchAllTasks = async () => load().tasks
-      .filter((task) => task.status !== 2)
-      .map((task) => ({
-        id: task.id,
-        title: task.title || '',
-        content: task.content || '',
-        projectId: task.projectId,
-        projectName: task.projectName,
-        priority: task.priority || 'none',
-        tags: task.tags || [],
-        dueDate: task.dueDate || null,
-      }));
     // `embedder`, not the module import: options.embedding is the injection seam
     // every other vector call already uses, and bypassing it here made syncVectors
     // untestable and silently ignored an injected embedder.
@@ -569,6 +572,15 @@ export function createTickTickCacheAdapter(options = {}) {
       forceFull: !!opts.forceFull,
       maxEmbeddings: Number(opts.maxEmbeddings) || 200,
     });
+  }
+
+  // `ats sync vector --all`. Every round reconciles Qdrant against one snapshot
+  // of the cache, read once: `ats cache sync` can rewrite the JSON mid-drain,
+  // and a round deletes the points of every task absent from its input.
+  async function syncVectorsDrain(opts = {}) {
+    let snapshot;
+    const fetchAllTasks = () => (snapshot ??= cachedVectorTasks());
+    return drainVectorRounds(() => syncVectors(opts, fetchAllTasks), { maxRounds: opts.maxRounds || 50 });
   }
 
   let adapter;
