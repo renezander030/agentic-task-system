@@ -285,6 +285,42 @@ test('vector sync indexes from the local cache, Inbox included, without delegati
   assert.equal(result.indexed, 3);
 });
 
+test('vector sync drain runs capped rounds on one cache snapshot until drained', async () => {
+  // `ats sync vector --all` needs vectorSyncDrain. A cache refresh landing
+  // between two rounds must not change what the next round reconciles against.
+  const cacheFile = fixture();
+  const rounds = [
+    { indexed: 2, reindexed: 0, skippedLimit: 1, errors: 0 },
+    { indexed: 1, reindexed: 0, skippedLimit: 0, errors: 0 },
+  ];
+  const seen = [];
+  const embedding = {
+    sync: async (fetchAllTasks, opts) => {
+      seen.push({ ids: (await fetchAllTasks()).map((task) => task.id), opts });
+      const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      cache.tasks.push({
+        id: `refresh${seen.length}task123456789`, title: 'Arrived mid-drain', content: '',
+        projectId: 'project123456789', rawProjectId: 'project123456789', projectName: 'Work',
+        priority: 'none', priorityNum: 0, status: 0, dueDate: null, tags: [], items: [],
+      });
+      fs.writeFileSync(cacheFile, JSON.stringify(cache));
+      return rounds[seen.length - 1];
+    },
+  };
+  const adapter = createTickTickCacheAdapter({ cacheFile, remote: remote(), embedding, vectorSyncScript: '' });
+
+  const result = await adapter.__ext.tasks.vectorSyncDrain({ maxEmbeddings: 2 });
+
+  assert.equal(result.drained, true);
+  assert.equal(result.rounds, 2);
+  assert.equal(result.indexedTotal, 3);
+  assert.equal(result.errors, 0);
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen[1].ids, seen[0].ids, 'every round reconciles against the same snapshot');
+  assert.ok(!seen[1].ids.includes('refresh1task123456789'), 'a mid-drain refresh waits for the next sync');
+  assert.deepEqual(seen[0].opts, { forceFull: false, maxEmbeddings: 2 });
+});
+
 test('central vector helper receives --full and --max options', async () => {
   const cacheFile = fixture();
   const script = path.join(path.dirname(cacheFile), 'vector-sync.mjs');

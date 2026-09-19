@@ -861,16 +861,38 @@ export async function vectorSync(options = {}, deps = {}) {
 }
 
 /**
- * Run vectorSync repeatedly until the backfill is drained.
+ * Run capped vector-sync rounds until the backfill is drained.
  *
  * Each round embeds at most `maxEmbeddings` (default 200) — the per-run cap
  * that protects Ollama. Rounds continue while the previous round reported
  * `skippedLimit > 0` AND made forward progress (indexed or reindexed
- * something), so a wedged embedder cannot spin forever.
+ * something), so a wedged embedder cannot spin forever. The ticktick-cache
+ * adapter drains through this same loop from its local JSON.
+ */
+export async function drainVectorRounds(runRound, { maxRounds = 50 } = {}) {
+  const totals = { indexed: 0, reindexed: 0, rounds: 0 };
+  let last = null;
+  for (let i = 0; i < maxRounds; i++) {
+    last = await runRound();
+    totals.rounds += 1;
+    totals.indexed += last.indexed || 0;
+    totals.reindexed += last.reindexed || 0;
+    const progress = (last.indexed || 0) + (last.reindexed || 0) > 0;
+    if (!(last.skippedLimit > 0) || !progress) break;
+  }
+  return {
+    ...last,
+    rounds: totals.rounds,
+    indexedTotal: totals.indexed,
+    reindexedTotal: totals.reindexed,
+    drained: !(last?.skippedLimit > 0),
+  };
+}
+
+/**
+ * Run vectorSync repeatedly until the backfill is drained (see drainVectorRounds).
  */
 export async function vectorSyncDrain(options = {}, deps = {}) {
-  const maxRounds = options.maxRounds || 50;
-  const totals = { indexed: 0, reindexed: 0, rounds: 0 };
   const vectorSyncFn = deps.vectorSyncFn || vectorFunctions.sync;
   let corpusPromise;
   // A TickTick corpus fetch costs one request per project. Re-fetching it for
@@ -885,22 +907,7 @@ export async function vectorSyncDrain(options = {}, deps = {}) {
       return corpusPromise;
     }, roundOptions),
   };
-  let last = null;
-  for (let i = 0; i < maxRounds; i++) {
-    last = await vectorSync(options, drainDeps);
-    totals.rounds += 1;
-    totals.indexed += last.indexed || 0;
-    totals.reindexed += last.reindexed || 0;
-    const progress = (last.indexed || 0) + (last.reindexed || 0) > 0;
-    if (!(last.skippedLimit > 0) || !progress) break;
-  }
-  return {
-    ...last,
-    rounds: totals.rounds,
-    indexedTotal: totals.indexed,
-    reindexedTotal: totals.reindexed,
-    drained: !(last?.skippedLimit > 0),
-  };
+  return drainVectorRounds(() => vectorSync(options, drainDeps), { maxRounds: options.maxRounds || 50 });
 }
 
 /**
