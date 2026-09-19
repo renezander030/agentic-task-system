@@ -546,7 +546,14 @@ export async function fetchCorpus(deps = {}, { includeCompleted = false } = {}) 
   const projects = await apiRequest('GET', '/project', undefined, deps);
   const tasks = [];
   const sourcesFailed = [];
-  for (const p of projects) {
+  // TickTick omits Inbox from GET /project even though /project/inbox/data is
+  // available. Treat it as a first-class source or every "full" corpus and
+  // vector sync silently drops the user's Inbox.
+  const sources = [
+    { id: 'inbox', name: 'Inbox' },
+    ...projects.filter((project) => project.id !== 'inbox'),
+  ];
+  for (const p of sources) {
     try {
       const data = await apiRequest('GET', `/project/${encodeURIComponent(p.id)}/data`, undefined, deps);
       for (const t of data.tasks || []) {
@@ -827,42 +834,30 @@ export async function vectorSync(options = {}, deps = {}) {
     vectorSyncFn = vectorFunctions.sync,
   } = deps;
 
-  const skippedProjects = [];
   async function fetchAllTasks() {
-    const projects = await apiRequest('GET', '/project', undefined, deps);
-    const allTasks = [];
-    for (const project of projects) {
-      try {
-        const data = await apiRequest('GET', `/project/${encodeURIComponent(project.id)}/data`, undefined, deps);
-        for (const t of data.tasks) {
-          if (t.status === 2) continue; // skip completed
-          allTasks.push({
-            id: t.id,
-            title: t.title,
-            content: t.content || '',
-            projectId: project.id,
-            projectName: project.name,
-            priority: formatPriority(t.priority),
-            tags: t.tags || [],
-            dueDate: t.dueDate || '',
-          });
-        }
-      } catch (err) {
-        // A skipped project means its tasks are absent from the vector index —
-        // say so in the sync report instead of under-indexing silently.
-        skippedProjects.push({ projectId: project.id, name: project.name, error: err.message });
-      }
+    const { tasks: corpus, sourcesFailed } = await fetchCorpus({ apiRequest, formatPriority });
+    // Vector reconciliation is destructive for ids absent from its input. A
+    // partial TickTick fetch can therefore never be treated as authoritative:
+    // fail before touching Qdrant and let the next run retry the whole corpus.
+    if (sourcesFailed.length) {
+      const detail = sourcesFailed.map((source) => `${source.name || source.source}: ${source.error}`).join('; ');
+      throw new Error(`refusing partial vector sync; ${sourcesFailed.length} source(s) failed: ${detail}`);
     }
-    return allTasks;
+    return corpus
+      .filter((task) => task.status !== 'completed')
+      .map((task) => ({
+        id: task.fullId || task.id,
+        title: task.title,
+        content: task.content || '',
+        projectId: task.fullProjectId || task.projectId,
+        projectName: task.projectName,
+        priority: task.priority,
+        tags: task.tags || [],
+        dueDate: task.dueDate || '',
+      }));
   }
 
-  const result = await vectorSyncFn(fetchAllTasks, options);
-  if (!skippedProjects.length) return result;
-  return {
-    ...result,
-    skippedProjects,
-    warning: `${skippedProjects.length} project(s) could not be fetched; their tasks are missing from the vector index`,
-  };
+  return vectorSyncFn(fetchAllTasks, options);
 }
 
 /**
@@ -876,9 +871,23 @@ export async function vectorSync(options = {}, deps = {}) {
 export async function vectorSyncDrain(options = {}, deps = {}) {
   const maxRounds = options.maxRounds || 50;
   const totals = { indexed: 0, reindexed: 0, rounds: 0 };
+  const vectorSyncFn = deps.vectorSyncFn || vectorFunctions.sync;
+  let corpusPromise;
+  // A TickTick corpus fetch costs one request per project. Re-fetching it for
+  // every capped embedding round can cross the API's per-minute query limit
+  // and also lets the authoritative snapshot change halfway through a drain.
+  // Cache the first complete, validated corpus while keeping each Qdrant round
+  // independently checkpointed.
+  const drainDeps = {
+    ...deps,
+    vectorSyncFn: (fetchAllTasks, roundOptions) => vectorSyncFn(async () => {
+      corpusPromise ??= fetchAllTasks();
+      return corpusPromise;
+    }, roundOptions),
+  };
   let last = null;
   for (let i = 0; i < maxRounds; i++) {
-    last = await vectorSync(options, deps);
+    last = await vectorSync(options, drainDeps);
     totals.rounds += 1;
     totals.indexed += last.indexed || 0;
     totals.reindexed += last.reindexed || 0;

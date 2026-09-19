@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 
 process.env.ATS_USAGE_DISABLE = '1';
 
-import { vectorSyncDrain } from '../tasks.js';
+import { vectorSync, vectorSyncDrain } from '../tasks.js';
 
 function depsWithRounds(rounds) {
   let call = 0;
@@ -43,4 +43,77 @@ test('a single clean round drains immediately', async () => {
   assert.equal(res.rounds, 1);
   assert.equal(res.drained, true);
   assert.equal(res.reindexedTotal, 2);
+});
+
+test('vector sync includes Inbox and refuses a partial source before touching the index', async () => {
+  let syncCalled = false;
+  const deps = {
+    apiRequest: async (_method, endpoint) => {
+      if (endpoint === '/project') return [{ id: 'ok', name: 'Work' }, { id: 'bad', name: 'Locked' }];
+      if (endpoint === '/project/inbox/data') return { tasks: [{ id: 'i1', projectId: 'inbox-user', title: 'Inbox item', status: 0 }] };
+      if (endpoint === '/project/ok/data') return { tasks: [{ id: 'w1', projectId: 'ok', title: 'Work item', status: 0 }] };
+      if (endpoint === '/project/bad/data') throw new Error('forbidden');
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+    formatPriority: () => 'none',
+    vectorSyncFn: async (fetchAllTasks) => {
+      await fetchAllTasks();
+      syncCalled = true;
+    },
+  };
+
+  await assert.rejects(() => vectorSync({}, deps), /refusing partial vector sync.*Locked: forbidden/);
+  assert.equal(syncCalled, false);
+});
+
+test('vector sync hands a complete corpus including Inbox to the index', async () => {
+  let indexed;
+  const deps = {
+    apiRequest: async (_method, endpoint) => {
+      if (endpoint === '/project') return [{ id: 'work', name: 'Work' }];
+      if (endpoint === '/project/inbox/data') return { tasks: [{ id: 'i1', projectId: 'inbox-user', title: 'Inbox item', status: 0 }] };
+      if (endpoint === '/project/work/data') return { tasks: [{ id: 'w1', projectId: 'work', title: 'Work item', status: 0 }] };
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+    formatPriority: () => 'none',
+    vectorSyncFn: async (fetchAllTasks) => {
+      indexed = await fetchAllTasks();
+      return { total: indexed.length };
+    },
+  };
+
+  const result = await vectorSync({}, deps);
+  assert.equal(result.total, 2);
+  assert.deepEqual(indexed.map((task) => task.id).sort(), ['i1', 'w1']);
+});
+
+test('drain reuses one complete TickTick snapshot across embedding rounds', async () => {
+  const calls = new Map();
+  let round = 0;
+  const deps = {
+    apiRequest: async (_method, endpoint) => {
+      calls.set(endpoint, (calls.get(endpoint) || 0) + 1);
+      if (endpoint === '/project') return [{ id: 'work', name: 'Work' }];
+      if (endpoint === '/project/inbox/data') return { tasks: [] };
+      if (endpoint === '/project/work/data') return { tasks: [{ id: 'w1', projectId: 'work', title: 'Work item', status: 0 }] };
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+    formatPriority: () => 'none',
+    vectorSyncFn: async (fetchAllTasks) => {
+      const corpus = await fetchAllTasks();
+      assert.equal(corpus.length, 1);
+      round++;
+      return round === 1
+        ? { indexed: 1, reindexed: 0, skippedLimit: 1 }
+        : { indexed: 1, reindexed: 0, skippedLimit: 0 };
+    },
+  };
+
+  const result = await vectorSyncDrain({}, deps);
+  assert.equal(result.rounds, 2);
+  assert.deepEqual(Object.fromEntries(calls), {
+    '/project': 1,
+    '/project/inbox/data': 1,
+    '/project/work/data': 1,
+  });
 });

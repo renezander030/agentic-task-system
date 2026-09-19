@@ -21,13 +21,17 @@ test('fetchCorpus returns retrieval-shaped items across every project', async ()
   const apiRequest = apiWith(
     [{ id: 'proj1', name: 'Work' }, { id: 'proj2', name: 'Home' }],
     {
+      inbox: [{ id: 'i1', projectId: 'inbox-user', title: 'Captured thought', status: 0 }],
       proj1: [{ id: 'a1', projectId: 'proj1', title: 'Renew cert', content: 'certbot', priority: 5, tags: ['ops'], status: 0, modifiedTime: '2026-09-01T00:00:00.000Z' }],
       proj2: [{ id: 'b1', projectId: 'proj2', title: 'Groceries', status: 2, kind: 'NOTE' }],
     }
   );
   const { tasks, sourcesFailed } = await fetchCorpus({ apiRequest, formatPriority: (p) => (p === 5 ? 'high' : 'none') });
   assert.deepEqual(sourcesFailed, []);
-  assert.equal(tasks.length, 2);
+  assert.equal(tasks.length, 3);
+  const inbox = tasks.find((t) => t.id === 'i1');
+  assert.equal(inbox.projectName, 'Inbox');
+  assert.equal(inbox.fullProjectId, 'inbox-user');
   const a = tasks.find((t) => t.id === 'a1');
   assert.equal(a.fullId, 'a1');
   assert.equal(a.projectId, 'proj1');

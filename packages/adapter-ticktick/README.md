@@ -42,6 +42,14 @@ ats sync vector --full
 Use the same three variables for subsequent search commands. Do not enable only
 the query prefix against an existing unprefixed collection.
 
+Vector sync treats TickTick's complete active, non-empty corpus as authoritative.
+It includes Inbox even though TickTick omits Inbox from `GET /project`, paginates
+the whole Qdrant collection, removes points whose task disappeared, and repairs
+missing or duplicate points. A failed project fetch aborts before reconciliation,
+so a partial API response can never erase a healthy project's vectors. Completed
+or deleted tasks disappear from Qdrant on the next successful sync; Qdrant never
+deletes or changes the source task in TickTick.
+
 ## What this adapter implements
 
 All six required methods of the ATS adapter contract:
