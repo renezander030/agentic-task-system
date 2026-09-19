@@ -155,6 +155,52 @@ async function ensureCollection() {
   });
 }
 
+function meaningfulTask(task) {
+  return Boolean(String(task?.title || '').trim() || String(task?.content || '').trim());
+}
+
+async function scrollTaskPoints() {
+  const points = [];
+  let offset;
+  do {
+    const page = await httpJson(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/scroll`, 'POST', {
+      limit: 256,
+      with_payload: ['taskId'],
+      with_vector: false,
+      ...(offset === undefined ? {} : { offset }),
+    });
+    points.push(...(page.result?.points || []));
+    offset = page.result?.next_page_offset ?? null;
+  } while (offset !== null);
+  return points;
+}
+
+async function deleteTaskPoints(taskId) {
+  await httpJson(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/delete?wait=true`, 'POST', {
+    filter: { must: [{ key: 'taskId', match: { value: taskId } }] },
+  });
+}
+
+export function auditTaskPoints(points, tasks) {
+  const expected = new Set(tasks.filter(meaningfulTask).map((task) => task.id));
+  const byTask = new Map();
+  let payloadless = 0;
+  for (const point of points) {
+    const taskId = point.payload?.taskId;
+    if (!taskId) { payloadless++; continue; }
+    if (!byTask.has(taskId)) byTask.set(taskId, []);
+    byTask.get(taskId).push(point.id);
+  }
+  return {
+    expected,
+    byTask,
+    payloadless,
+    stale: [...byTask.keys()].filter((id) => !expected.has(id)),
+    missing: [...expected].filter((id) => !byTask.has(id)),
+    duplicates: [...byTask].filter(([id, ids]) => expected.has(id) && ids.length > 1).map(([id]) => id),
+  };
+}
+
 // --- Metadata persistence ---
 
 async function loadMeta() {
@@ -225,7 +271,8 @@ export async function sync(fetchAllTasks, options = {}) {
 
   await ensureCollection();
 
-  const tasks = await fetchAllTasks();
+  const fetchedTasks = await fetchAllTasks();
+  const tasks = fetchedTasks.filter(meaningfulTask);
   const meta = forceFull ? { contentHashes: {}, lastSync: null } : await loadMeta();
   const taskIdSet = new Set(tasks.map((t) => t.id));
 
@@ -238,31 +285,49 @@ export async function sync(fetchAllTasks, options = {}) {
     skippedLimit: 0,
     errors: 0,
     total: tasks.length,
+    ignoredEmpty: fetchedTasks.length - tasks.length,
+    deduplicated: 0,
+    missingRebuilt: 0,
   };
 
-  // --- Delete removed tasks ---
+  // Reconcile against Qdrant itself rather than trusting the local hash
+  // manifest. The manifest can lag after a killed run or an older client can
+  // have written duplicate point ids. Scroll every page, remove task ids that
+  // disappeared from TickTick, and force missing/duplicated live tasks through
+  // the normal embedding path below.
+  const rebuildIds = new Set();
   try {
-    const scrollRes = await httpJson(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/scroll`, 'POST', {
-      limit: 10000,
-      with_payload: ['taskId'],
-    });
-    const toDelete = (scrollRes.result?.points || [])
-      .filter((p) => !taskIdSet.has(p.payload?.taskId))
-      .map((p) => p.id);
-    if (toDelete.length > 0) {
-      await httpJson(`${QDRANT_URL}/collections/${COLLECTION_NAME}/points/delete`, 'POST', {
-        points: toDelete,
-      });
-      stats.deleted = toDelete.length;
+    const audit = auditTaskPoints(await scrollTaskPoints(), tasks);
+    if (audit.payloadless > 0) {
+      throw new Error(`${audit.payloadless} point(s) have no taskId payload`);
     }
-  } catch { /* non-fatal */ }
+    for (const taskId of audit.stale) {
+      await deleteTaskPoints(taskId);
+      stats.deleted += audit.byTask.get(taskId).length;
+      delete meta.contentHashes[taskId];
+    }
+    for (const taskId of audit.duplicates) {
+      await deleteTaskPoints(taskId);
+      stats.deduplicated += audit.byTask.get(taskId).length - 1;
+      rebuildIds.add(taskId);
+      delete meta.contentHashes[taskId];
+    }
+    for (const taskId of audit.missing) {
+      rebuildIds.add(taskId);
+      delete meta.contentHashes[taskId];
+    }
+    stats.missingRebuilt = audit.missing.length;
+  } catch (error) {
+    throw new Error(`vector reconciliation failed: ${error.message}`, { cause: error });
+  }
 
   // --- Upsert tasks ---
   let embeddingsUsed = 0;
   const batches = [];
   let currentBatch = [];
 
-  for (const task of tasks) {
+  const orderedTasks = [...tasks].sort((a, b) => Number(rebuildIds.has(b.id)) - Number(rebuildIds.has(a.id)));
+  for (const task of orderedTasks) {
     const hash = contentHash(task);
     const oldHash = meta.contentHashes[task.id];
     const needsEmbedding = !oldHash || oldHash !== hash;
@@ -276,7 +341,7 @@ export async function sync(fetchAllTasks, options = {}) {
         });
         stats.metadataUpdated++;
       } catch {
-        stats.skippedUnchanged++;
+        stats.errors++;
       }
       continue;
     }
