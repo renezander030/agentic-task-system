@@ -154,6 +154,22 @@ ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 
 ## Verification and operational evidence
 
+The [50-question synthetic recall benchmark](packages/core/bench/agent-recall.md)
+compares identical memories and queries against ATS and Engram v2.2.1:
+
+| Retrieval Path | Recall@5 |
+| --- | ---: |
+| ATS keyword only | 12/50 (24%) |
+| ATS local dense + sparse, hybrid RRF | 47/50 (94%) |
+| Engram SQLite FTS5, default `all` | 20/50 (40%) |
+| Engram SQLite FTS5, `any` | 32/50 (64%) |
+
+Engram and ATS hybrid both recalled all exact-title and terse-query targets.
+This small author-written fixture tests raw natural questions over ten distinct
+decision memories; it does not establish overall product superiority. The hybrid
+result requires local embeddings, though it needs no vector database or hosted
+model key. Dataset, raw output, failures, and reproduction steps are linked above.
+
 - [CI](https://github.com/renezander030/agentic-task-system/actions/workflows/ci.yml) runs the full repository gate on Node 20 and 22: lint, public-claim checks, PII checks, unit tests, adapter and intent proofs, and the progress benchmark.
 - The [publish-safety gate](scripts/check-no-pii.mjs) scans both the repository surface and npm package tarballs for secrets, personal paths, configured personal-data patterns, and locally configured denylist terms. It protects publication surfaces. At runtime, the composite adapter can additionally enforce per-backend trust levels with configured redaction patterns — a write routed to a `"trust": "public"` child that matches a pattern is blocked, not silently stripped (see the composite README). That screen guards ATS's own composite write path; it is not general data-loss prevention.
 - [State-integrity tests and conventions](docs/state-integrity.md) cover patch-style writes, preservation of unknown fields, explicit store-to-`Task` mapping, result provenance, and explainable RRF contributions.
