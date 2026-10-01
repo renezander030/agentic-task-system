@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { guardWrite } from '../write-guard.js';
+import { guardWrite, reviewTargetRevision } from '../write-guard.js';
 import { listReviewItems } from '../review-queue.js';
 import { setTaskIntent } from '../task-context.js';
 
@@ -40,7 +40,7 @@ test('a target that declares approvalRequired stages the write with its payload'
   assert.equal(item.id, staged.reviewId);
   assert.equal(item.kind, 'task.write');
   assert.equal(item.stagedBy, 'agent-a');
-  assert.deepEqual(item.payload, { action: 'task.updated', projectId: 'p1', taskId: 't2', patch: { title: 'renamed' } });
+  assert.deepEqual(item.payload, { action: 'task.updated', projectId: 'p1', taskId: 't2', patch: { title: 'renamed' }, expectedRevision: reviewTargetRevision(target) });
   assert.equal(item.note, 'approvalRequired on target');
 });
 

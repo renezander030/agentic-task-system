@@ -9,10 +9,11 @@ export {
   listReviewItems,
   findReviewItem,
   decideReviewItem,
+  claimReviewItem,
   markReviewItemApplied,
   writeRequiresApproval,
 } from './review-queue.js';
-export { guardWrite } from './write-guard.js';
+export { guardWrite, reviewTargetRevision } from './write-guard.js';
 export { STATE_BUNDLE_VERSION, stateFileRegistry, inspectState, exportState, importState } from './state-bundle.js';
 export {
   kgFactsPath,

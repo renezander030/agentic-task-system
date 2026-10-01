@@ -97,7 +97,7 @@ export function classifyError(error) {
   if (/ECONN|ENOTFOUND|network|socket|fetch failed|transport/i.test(message)) {
     return { kind: 'transport', code: 'ATS_TRANSPORT', retryable: true, exitCode: 7 };
   }
-  if (/required|unknown field|invalid|usage|must be|cannot read structured input/i.test(message)) {
+  if (/requires? (?:a value|an?|JSON)|required|unknown field|invalid|usage|must be|cannot read structured input/i.test(message)) {
     return { kind: 'validation', code: 'ATS_VALIDATION', retryable: false, exitCode: 2 };
   }
   return { kind: 'internal', code, retryable: false, exitCode: Number.isInteger(error?.exitCode) ? error.exitCode : 1 };

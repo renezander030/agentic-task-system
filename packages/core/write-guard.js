@@ -12,6 +12,15 @@
  * metadata — set `ATS_REVIEW_ALL` for a hard gate.
  */
 import { stageReviewItem, writeRequiresApproval } from './review-queue.js';
+import { stableDigest } from './reliability-snapshot.js';
+
+/** Logical target fields, excluding backend-specific raw and volatile read data. */
+export function reviewTargetRevision(task) {
+  const t = task?.task || task;
+  if (!t || typeof t !== 'object') throw new Error('Cannot fingerprint an unreadable review target.');
+  const fields = ['id', 'projectId', 'title', 'content', 'tags', 'dueDate', 'priority', 'status', 'modifiedTime', 'parentId', 'childIds', 'links'];
+  return stableDigest(Object.fromEntries(fields.filter((key) => t[key] !== undefined).map((key) => [key, t[key]])));
+}
 
 /**
  * Decide whether a write must stage. Returns null when it may proceed, else
@@ -27,7 +36,11 @@ export function guardWrite({ action, target = null, payload, by, note }, { queue
   const item = stageReviewItem(
     {
       kind: 'task.write',
-      payload: { action, ...(payload || {}) },
+      payload: {
+        ...(payload || {}),
+        action,
+        ...(action === 'task.created' ? {} : { expectedRevision: target ? reviewTargetRevision(target) : null }),
+      },
       by: by || env.ATS_AGENT_ID || 'unknown-agent',
       note: note || (forced ? 'staged by ATS_REVIEW_ALL' : 'approvalRequired on target'),
     },

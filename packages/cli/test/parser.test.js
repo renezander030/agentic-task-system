@@ -144,3 +144,23 @@ test('formatOutput find handles zero matches', () => {
   assert.match(out, /find "nothing" — 0 results in 5ms/);
   assert.match(out, /\(no matches\)/);
 });
+
+test('known boolean flags preserve positionals anywhere and false stays false', () => {
+  const parsed = parseArgs(['tasks', '--dry-run', 'delete', '--live=false', 'p1', '--force', 't1']);
+  assert.equal(parsed.subcommand, 'delete');
+  assert.deepEqual(parsed.positional, ['p1', 't1']);
+  assert.equal(parsed.options['dry-run'], true);
+  assert.equal(parsed.options.live, false);
+  assert.equal(parseArgs(['--if-absent', 'create', 'title']).subcommand, 'title');
+  assert.throws(() => parseArgs(['--force=yes']), /must be true or false/);
+});
+
+test('terminator preserves literal flag-shaped positionals; value flags fail early', () => {
+  const parsed = parseArgs(['tasks', 'find', '--', '--deployment', '--json']);
+  assert.deepEqual(parsed.positional, ['--deployment', '--json']);
+  assert.equal(parsed.options.format, 'text');
+  for (const flag of ['--title', '--limit', '--format', '--input']) {
+    assert.throws(() => parseArgs(['find', 'x', flag]), /requires a value/);
+    assert.throws(() => parseArgs(['find', 'x', flag, '--json']), /requires a value/);
+  }
+});

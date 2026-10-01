@@ -78,7 +78,20 @@ whether the state they received is complete.
 - `ats batch --journal` records each item outcome, so a stopped batch resumes
   by stable item id. Partial failure exits 5 and keeps successful item results.
 - `ats state doctor` checks local schemas and permissions without rewriting
-  files; `ats state import --dry-run` previews its local write set.
+  files; `ats state import --dry-run` validates its contents and previews its local write set.
+- State imports validate every recognized file before writing; exported SHA-256
+  checksums detect changed content. This is preflight validation, not a cross-file
+  transaction: a later filesystem failure may still leave a partial restore.
+- Reviewed task writes bind approval to a payload digest and claim each item
+  before an external call. Target revisions are checked immediately before apply.
+  Backend-native compare-and-swap is required to eliminate the remaining race
+  between that read and the backend write.
+- `--require-complete` keeps read output but exits 2 for stale, degraded or
+  explicitly incomplete results. Default read exits remain permissive.
+- CLI corpus caches are scoped to adapter, working directory and configuration.
+  Library callers using the cache directly can supply a `scope`; custom CLI
+  adapters can set `ATS_CACHE_NAMESPACE` when their source identity is otherwise
+  outside the standard configuration.
 - JSON errors use stable categories (`validation`, `precondition`,
   `authentication`, `timeout`, `transport`, `internal`) and say whether a
   retry can help. Exit 3 is a failed write precondition, 5 a partial batch, and
