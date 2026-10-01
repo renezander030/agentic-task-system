@@ -1,0 +1,2603 @@
+{
+  "format": 1,
+  "metadata": {
+    "datasetSha256": "adeb03b79a94db75f9f5794c608722f64f1934f51651289a3fcb46eae52162c6",
+    "runnerSha256": "d5b5020efd0c88d3fca3384ad4a5afb8ad3180f8ba4f33a6c7fd43ea6c5d2826",
+    "atsRevision": "eb1da9db1a06d39e49b2ce1353cf2243d7918712",
+    "engramVersion": "engram 2.2.1",
+    "engramSha256": "639b8faed93085164d72c31e7a53e9b112922ea826d726e8cd40c08bb0f420c1",
+    "node": "v20.19.2",
+    "platform": "linux",
+    "arch": "x64",
+    "model": "Xenova/all-MiniLM-L6-v2",
+    "modelRevision": "751bff37182d3f1213fa05d7196b954e230abad9",
+    "runtime": "@huggingface/transformers@4.3.0",
+    "dtype": "q8",
+    "documents": 30,
+    "questions": 50,
+    "embeddingWarmupExcluded": true
+  },
+  "summary": {
+    "ats-keyword": {
+      "questions": 50,
+      "hit1": 0.24,
+      "recall5": 0.24,
+      "mrr": 0.24
+    },
+    "ats-hybrid-rrf": {
+      "questions": 50,
+      "hit1": 0.86,
+      "recall5": 0.94,
+      "mrr": 0.8966666666666666
+    },
+    "engram-all": {
+      "questions": 50,
+      "hit1": 0.4,
+      "recall5": 0.4,
+      "mrr": 0.4
+    },
+    "engram-any": {
+      "questions": 50,
+      "hit1": 0.5,
+      "recall5": 0.64,
+      "mrr": 0.5403333333333332
+    }
+  },
+  "buckets": {
+    "exact-title": {
+      "ats-keyword": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      },
+      "ats-hybrid-rrf": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      },
+      "engram-all": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      },
+      "engram-any": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      }
+    },
+    "terse": {
+      "ats-keyword": {
+        "questions": 10,
+        "hit1": 0.2,
+        "recall5": 0.2,
+        "mrr": 0.2
+      },
+      "ats-hybrid-rrf": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      },
+      "engram-all": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      },
+      "engram-any": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      }
+    },
+    "natural-question": {
+      "ats-keyword": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0,
+        "mrr": 0
+      },
+      "ats-hybrid-rrf": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      },
+      "engram-all": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0,
+        "mrr": 0
+      },
+      "engram-any": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0.2,
+        "mrr": 0.075
+      }
+    },
+    "paraphrase": {
+      "ats-keyword": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0,
+        "mrr": 0
+      },
+      "ats-hybrid-rrf": {
+        "questions": 10,
+        "hit1": 0.3,
+        "recall5": 0.7,
+        "mrr": 0.4833333333333333
+      },
+      "engram-all": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0,
+        "mrr": 0
+      },
+      "engram-any": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0.3,
+        "mrr": 0.07333333333333333
+      }
+    },
+    "constraint": {
+      "ats-keyword": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0,
+        "mrr": 0
+      },
+      "ats-hybrid-rrf": {
+        "questions": 10,
+        "hit1": 1,
+        "recall5": 1,
+        "mrr": 1
+      },
+      "engram-all": {
+        "questions": 10,
+        "hit1": 0,
+        "recall5": 0,
+        "mrr": 0
+      },
+      "engram-any": {
+        "questions": 10,
+        "hit1": 0.5,
+        "recall5": 0.7,
+        "mrr": 0.5533333333333333
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "q01",
+      "question": "Payment webhook deduplication",
+      "bucket": "exact-title",
+      "gold": "d01",
+      "method": "ats-keyword",
+      "top": [
+        "d01"
+      ],
+      "elapsedMs": 4.82
+    },
+    {
+      "id": "q01",
+      "question": "Payment webhook deduplication",
+      "bucket": "exact-title",
+      "gold": "d01",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d01",
+        "x01",
+        "x02",
+        "d07",
+        "x18"
+      ],
+      "elapsedMs": 11.82
+    },
+    {
+      "id": "q01",
+      "question": "Payment webhook deduplication",
+      "bucket": "exact-title",
+      "gold": "d01",
+      "method": "engram-all",
+      "top": [
+        "d01"
+      ],
+      "elapsedMs": 21.1
+    },
+    {
+      "id": "q01",
+      "question": "Payment webhook deduplication",
+      "bucket": "exact-title",
+      "gold": "d01",
+      "method": "engram-any",
+      "top": [
+        "d01",
+        "x01",
+        "x02"
+      ],
+      "elapsedMs": 13.85
+    },
+    {
+      "id": "q02",
+      "question": "Release approval boundary",
+      "bucket": "exact-title",
+      "gold": "d02",
+      "method": "ats-keyword",
+      "top": [
+        "d02"
+      ],
+      "elapsedMs": 0.24
+    },
+    {
+      "id": "q02",
+      "question": "Release approval boundary",
+      "bucket": "exact-title",
+      "gold": "d02",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d02",
+        "x03",
+        "x04",
+        "d09",
+        "x07"
+      ],
+      "elapsedMs": 5.16
+    },
+    {
+      "id": "q02",
+      "question": "Release approval boundary",
+      "bucket": "exact-title",
+      "gold": "d02",
+      "method": "engram-all",
+      "top": [
+        "d02"
+      ],
+      "elapsedMs": 5.81
+    },
+    {
+      "id": "q02",
+      "question": "Release approval boundary",
+      "bucket": "exact-title",
+      "gold": "d02",
+      "method": "engram-any",
+      "top": [
+        "d02",
+        "x04",
+        "x03"
+      ],
+      "elapsedMs": 6.15
+    },
+    {
+      "id": "q03",
+      "question": "Search cache invalidation",
+      "bucket": "exact-title",
+      "gold": "d03",
+      "method": "ats-keyword",
+      "top": [
+        "d03"
+      ],
+      "elapsedMs": 0.22
+    },
+    {
+      "id": "q03",
+      "question": "Search cache invalidation",
+      "bucket": "exact-title",
+      "gold": "d03",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d03",
+        "x06",
+        "x17",
+        "x05",
+        "x16"
+      ],
+      "elapsedMs": 12.89
+    },
+    {
+      "id": "q03",
+      "question": "Search cache invalidation",
+      "bucket": "exact-title",
+      "gold": "d03",
+      "method": "engram-all",
+      "top": [
+        "d03"
+      ],
+      "elapsedMs": 11.97
+    },
+    {
+      "id": "q03",
+      "question": "Search cache invalidation",
+      "bucket": "exact-title",
+      "gold": "d03",
+      "method": "engram-any",
+      "top": [
+        "d03",
+        "x06",
+        "x17",
+        "x05"
+      ],
+      "elapsedMs": 7.24
+    },
+    {
+      "id": "q04",
+      "question": "Tenant export authorization",
+      "bucket": "exact-title",
+      "gold": "d04",
+      "method": "ats-keyword",
+      "top": [
+        "d04"
+      ],
+      "elapsedMs": 0.26
+    },
+    {
+      "id": "q04",
+      "question": "Tenant export authorization",
+      "bucket": "exact-title",
+      "gold": "d04",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d04",
+        "x07",
+        "x08",
+        "d08",
+        "x15"
+      ],
+      "elapsedMs": 4.57
+    },
+    {
+      "id": "q04",
+      "question": "Tenant export authorization",
+      "bucket": "exact-title",
+      "gold": "d04",
+      "method": "engram-all",
+      "top": [
+        "d04"
+      ],
+      "elapsedMs": 12.36
+    },
+    {
+      "id": "q04",
+      "question": "Tenant export authorization",
+      "bucket": "exact-title",
+      "gold": "d04",
+      "method": "engram-any",
+      "top": [
+        "d04",
+        "x08",
+        "x07",
+        "d08"
+      ],
+      "elapsedMs": 13.96
+    },
+    {
+      "id": "q05",
+      "question": "Queue retry backoff",
+      "bucket": "exact-title",
+      "gold": "d05",
+      "method": "ats-keyword",
+      "top": [
+        "d05"
+      ],
+      "elapsedMs": 0.22
+    },
+    {
+      "id": "q05",
+      "question": "Queue retry backoff",
+      "bucket": "exact-title",
+      "gold": "d05",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d05",
+        "x09",
+        "x10",
+        "x19",
+        "d07"
+      ],
+      "elapsedMs": 4.6
+    },
+    {
+      "id": "q05",
+      "question": "Queue retry backoff",
+      "bucket": "exact-title",
+      "gold": "d05",
+      "method": "engram-all",
+      "top": [
+        "d05"
+      ],
+      "elapsedMs": 19.25
+    },
+    {
+      "id": "q05",
+      "question": "Queue retry backoff",
+      "bucket": "exact-title",
+      "gold": "d05",
+      "method": "engram-any",
+      "top": [
+        "d05",
+        "x09",
+        "x10",
+        "x19"
+      ],
+      "elapsedMs": 14.06
+    },
+    {
+      "id": "q06",
+      "question": "Database migration rollback",
+      "bucket": "exact-title",
+      "gold": "d06",
+      "method": "ats-keyword",
+      "top": [
+        "d06"
+      ],
+      "elapsedMs": 0.32
+    },
+    {
+      "id": "q06",
+      "question": "Database migration rollback",
+      "bucket": "exact-title",
+      "gold": "d06",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d06",
+        "x12",
+        "d01",
+        "x11",
+        "x04"
+      ],
+      "elapsedMs": 5.18
+    },
+    {
+      "id": "q06",
+      "question": "Database migration rollback",
+      "bucket": "exact-title",
+      "gold": "d06",
+      "method": "engram-all",
+      "top": [
+        "d06"
+      ],
+      "elapsedMs": 6.27
+    },
+    {
+      "id": "q06",
+      "question": "Database migration rollback",
+      "bucket": "exact-title",
+      "gold": "d06",
+      "method": "engram-any",
+      "top": [
+        "d06",
+        "x12",
+        "x11",
+        "d01"
+      ],
+      "elapsedMs": 7.3
+    },
+    {
+      "id": "q07",
+      "question": "Customer support escalation",
+      "bucket": "exact-title",
+      "gold": "d07",
+      "method": "ats-keyword",
+      "top": [
+        "d07"
+      ],
+      "elapsedMs": 0.29
+    },
+    {
+      "id": "q07",
+      "question": "Customer support escalation",
+      "bucket": "exact-title",
+      "gold": "d07",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d07",
+        "x13",
+        "x14",
+        "d01",
+        "d05"
+      ],
+      "elapsedMs": 7
+    },
+    {
+      "id": "q07",
+      "question": "Customer support escalation",
+      "bucket": "exact-title",
+      "gold": "d07",
+      "method": "engram-all",
+      "top": [
+        "d07"
+      ],
+      "elapsedMs": 7.34
+    },
+    {
+      "id": "q07",
+      "question": "Customer support escalation",
+      "bucket": "exact-title",
+      "gold": "d07",
+      "method": "engram-any",
+      "top": [
+        "d07",
+        "x13",
+        "x14",
+        "x02",
+        "d10"
+      ],
+      "elapsedMs": 11.19
+    },
+    {
+      "id": "q08",
+      "question": "Credential log redaction",
+      "bucket": "exact-title",
+      "gold": "d08",
+      "method": "ats-keyword",
+      "top": [
+        "d08"
+      ],
+      "elapsedMs": 0.22
+    },
+    {
+      "id": "q08",
+      "question": "Credential log redaction",
+      "bucket": "exact-title",
+      "gold": "d08",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d08",
+        "x16",
+        "x15",
+        "d04",
+        "x08"
+      ],
+      "elapsedMs": 5.48
+    },
+    {
+      "id": "q08",
+      "question": "Credential log redaction",
+      "bucket": "exact-title",
+      "gold": "d08",
+      "method": "engram-all",
+      "top": [
+        "d08"
+      ],
+      "elapsedMs": 8.34
+    },
+    {
+      "id": "q08",
+      "question": "Credential log redaction",
+      "bucket": "exact-title",
+      "gold": "d08",
+      "method": "engram-any",
+      "top": [
+        "d08",
+        "x16",
+        "x15",
+        "x06",
+        "x09"
+      ],
+      "elapsedMs": 9.69
+    },
+    {
+      "id": "q09",
+      "question": "Document ingestion size limits",
+      "bucket": "exact-title",
+      "gold": "d09",
+      "method": "ats-keyword",
+      "top": [
+        "d09"
+      ],
+      "elapsedMs": 0.24
+    },
+    {
+      "id": "q09",
+      "question": "Document ingestion size limits",
+      "bucket": "exact-title",
+      "gold": "d09",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d09",
+        "x17",
+        "x18",
+        "x04",
+        "d03"
+      ],
+      "elapsedMs": 4.83
+    },
+    {
+      "id": "q09",
+      "question": "Document ingestion size limits",
+      "bucket": "exact-title",
+      "gold": "d09",
+      "method": "engram-all",
+      "top": [
+        "d09"
+      ],
+      "elapsedMs": 6.96
+    },
+    {
+      "id": "q09",
+      "question": "Document ingestion size limits",
+      "bucket": "exact-title",
+      "gold": "d09",
+      "method": "engram-any",
+      "top": [
+        "d09",
+        "x17",
+        "x18"
+      ],
+      "elapsedMs": 8.13
+    },
+    {
+      "id": "q10",
+      "question": "Calendar booking timezone",
+      "bucket": "exact-title",
+      "gold": "d10",
+      "method": "ats-keyword",
+      "top": [
+        "d10"
+      ],
+      "elapsedMs": 0.3
+    },
+    {
+      "id": "q10",
+      "question": "Calendar booking timezone",
+      "bucket": "exact-title",
+      "gold": "d10",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d10",
+        "x20",
+        "x19",
+        "x14",
+        "d01"
+      ],
+      "elapsedMs": 6.54
+    },
+    {
+      "id": "q10",
+      "question": "Calendar booking timezone",
+      "bucket": "exact-title",
+      "gold": "d10",
+      "method": "engram-all",
+      "top": [
+        "d10",
+        "x20"
+      ],
+      "elapsedMs": 8.52
+    },
+    {
+      "id": "q10",
+      "question": "Calendar booking timezone",
+      "bucket": "exact-title",
+      "gold": "d10",
+      "method": "engram-any",
+      "top": [
+        "d10",
+        "x20",
+        "x19"
+      ],
+      "elapsedMs": 9.3
+    },
+    {
+      "id": "q11",
+      "question": "webhook deduplication",
+      "bucket": "terse",
+      "gold": "d01",
+      "method": "ats-keyword",
+      "top": [
+        "d01"
+      ],
+      "elapsedMs": 0.36
+    },
+    {
+      "id": "q11",
+      "question": "webhook deduplication",
+      "bucket": "terse",
+      "gold": "d01",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d01",
+        "x01",
+        "d04",
+        "d09",
+        "d08"
+      ],
+      "elapsedMs": 5.59
+    },
+    {
+      "id": "q11",
+      "question": "webhook deduplication",
+      "bucket": "terse",
+      "gold": "d01",
+      "method": "engram-all",
+      "top": [
+        "d01"
+      ],
+      "elapsedMs": 8.47
+    },
+    {
+      "id": "q11",
+      "question": "webhook deduplication",
+      "bucket": "terse",
+      "gold": "d01",
+      "method": "engram-any",
+      "top": [
+        "d01",
+        "x01"
+      ],
+      "elapsedMs": 8.42
+    },
+    {
+      "id": "q12",
+      "question": "artifact digest approval",
+      "bucket": "terse",
+      "gold": "d02",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.25
+    },
+    {
+      "id": "q12",
+      "question": "artifact digest approval",
+      "bucket": "terse",
+      "gold": "d02",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d02",
+        "x04",
+        "d09",
+        "d08",
+        "d01"
+      ],
+      "elapsedMs": 5.33
+    },
+    {
+      "id": "q12",
+      "question": "artifact digest approval",
+      "bucket": "terse",
+      "gold": "d02",
+      "method": "engram-all",
+      "top": [
+        "d02"
+      ],
+      "elapsedMs": 9.97
+    },
+    {
+      "id": "q12",
+      "question": "artifact digest approval",
+      "bucket": "terse",
+      "gold": "d02",
+      "method": "engram-any",
+      "top": [
+        "d02",
+        "x04"
+      ],
+      "elapsedMs": 10.17
+    },
+    {
+      "id": "q13",
+      "question": "incomplete corpus cache",
+      "bucket": "terse",
+      "gold": "d03",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.2
+    },
+    {
+      "id": "q13",
+      "question": "incomplete corpus cache",
+      "bucket": "terse",
+      "gold": "d03",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d03",
+        "d09",
+        "x17",
+        "x16",
+        "x04"
+      ],
+      "elapsedMs": 5.06
+    },
+    {
+      "id": "q13",
+      "question": "incomplete corpus cache",
+      "bucket": "terse",
+      "gold": "d03",
+      "method": "engram-all",
+      "top": [
+        "d03"
+      ],
+      "elapsedMs": 7.6
+    },
+    {
+      "id": "q13",
+      "question": "incomplete corpus cache",
+      "bucket": "terse",
+      "gold": "d03",
+      "method": "engram-any",
+      "top": [
+        "d03"
+      ],
+      "elapsedMs": 8.22
+    },
+    {
+      "id": "q14",
+      "question": "export membership session",
+      "bucket": "terse",
+      "gold": "d04",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.94
+    },
+    {
+      "id": "q14",
+      "question": "export membership session",
+      "bucket": "terse",
+      "gold": "d04",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d04",
+        "x08",
+        "d08",
+        "x12",
+        "x16"
+      ],
+      "elapsedMs": 5.62
+    },
+    {
+      "id": "q14",
+      "question": "export membership session",
+      "bucket": "terse",
+      "gold": "d04",
+      "method": "engram-all",
+      "top": [
+        "d04"
+      ],
+      "elapsedMs": 8.37
+    },
+    {
+      "id": "q14",
+      "question": "export membership session",
+      "bucket": "terse",
+      "gold": "d04",
+      "method": "engram-any",
+      "top": [
+        "d04"
+      ],
+      "elapsedMs": 8.81
+    },
+    {
+      "id": "q15",
+      "question": "retry backoff jitter",
+      "bucket": "terse",
+      "gold": "d05",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.19
+    },
+    {
+      "id": "q15",
+      "question": "retry backoff jitter",
+      "bucket": "terse",
+      "gold": "d05",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d05",
+        "x09",
+        "d03",
+        "x11",
+        "d07"
+      ],
+      "elapsedMs": 5.67
+    },
+    {
+      "id": "q15",
+      "question": "retry backoff jitter",
+      "bucket": "terse",
+      "gold": "d05",
+      "method": "engram-all",
+      "top": [
+        "d05"
+      ],
+      "elapsedMs": 6.76
+    },
+    {
+      "id": "q15",
+      "question": "retry backoff jitter",
+      "bucket": "terse",
+      "gold": "d05",
+      "method": "engram-any",
+      "top": [
+        "d05",
+        "x09"
+      ],
+      "elapsedMs": 7.1
+    },
+    {
+      "id": "q16",
+      "question": "expand contract backfill",
+      "bucket": "terse",
+      "gold": "d06",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.19
+    },
+    {
+      "id": "q16",
+      "question": "expand contract backfill",
+      "bucket": "terse",
+      "gold": "d06",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d06",
+        "d07",
+        "x02",
+        "d05",
+        "x14"
+      ],
+      "elapsedMs": 5.31
+    },
+    {
+      "id": "q16",
+      "question": "expand contract backfill",
+      "bucket": "terse",
+      "gold": "d06",
+      "method": "engram-all",
+      "top": [
+        "d06"
+      ],
+      "elapsedMs": 11.22
+    },
+    {
+      "id": "q16",
+      "question": "expand contract backfill",
+      "bucket": "terse",
+      "gold": "d06",
+      "method": "engram-any",
+      "top": [
+        "d06"
+      ],
+      "elapsedMs": 8.9
+    },
+    {
+      "id": "q17",
+      "question": "refund supervisor escalation",
+      "bucket": "terse",
+      "gold": "d07",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.15
+    },
+    {
+      "id": "q17",
+      "question": "refund supervisor escalation",
+      "bucket": "terse",
+      "gold": "d07",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d07",
+        "x14",
+        "d05",
+        "x09",
+        "x13"
+      ],
+      "elapsedMs": 6.06
+    },
+    {
+      "id": "q17",
+      "question": "refund supervisor escalation",
+      "bucket": "terse",
+      "gold": "d07",
+      "method": "engram-all",
+      "top": [
+        "d07"
+      ],
+      "elapsedMs": 6.73
+    },
+    {
+      "id": "q17",
+      "question": "refund supervisor escalation",
+      "bucket": "terse",
+      "gold": "d07",
+      "method": "engram-any",
+      "top": [
+        "d07",
+        "x14"
+      ],
+      "elapsedMs": 6.57
+    },
+    {
+      "id": "q18",
+      "question": "authorization headers redaction",
+      "bucket": "terse",
+      "gold": "d08",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.11
+    },
+    {
+      "id": "q18",
+      "question": "authorization headers redaction",
+      "bucket": "terse",
+      "gold": "d08",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d08",
+        "x01",
+        "d04",
+        "x16",
+        "x08"
+      ],
+      "elapsedMs": 5.09
+    },
+    {
+      "id": "q18",
+      "question": "authorization headers redaction",
+      "bucket": "terse",
+      "gold": "d08",
+      "method": "engram-all",
+      "top": [
+        "d08"
+      ],
+      "elapsedMs": 14.42
+    },
+    {
+      "id": "q18",
+      "question": "authorization headers redaction",
+      "bucket": "terse",
+      "gold": "d08",
+      "method": "engram-any",
+      "top": [
+        "d08",
+        "d04",
+        "x01",
+        "x16",
+        "x08"
+      ],
+      "elapsedMs": 9.98
+    },
+    {
+      "id": "q19",
+      "question": "upload parser quarantine",
+      "bucket": "terse",
+      "gold": "d09",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.16
+    },
+    {
+      "id": "q19",
+      "question": "upload parser quarantine",
+      "bucket": "terse",
+      "gold": "d09",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d09",
+        "x07",
+        "x18",
+        "d02",
+        "d05"
+      ],
+      "elapsedMs": 5.16
+    },
+    {
+      "id": "q19",
+      "question": "upload parser quarantine",
+      "bucket": "terse",
+      "gold": "d09",
+      "method": "engram-all",
+      "top": [
+        "d09"
+      ],
+      "elapsedMs": 9.52
+    },
+    {
+      "id": "q19",
+      "question": "upload parser quarantine",
+      "bucket": "terse",
+      "gold": "d09",
+      "method": "engram-any",
+      "top": [
+        "d09",
+        "x18",
+        "x07"
+      ],
+      "elapsedMs": 8.24
+    },
+    {
+      "id": "q20",
+      "question": "ambiguous daylight saving",
+      "bucket": "terse",
+      "gold": "d10",
+      "method": "ats-keyword",
+      "top": [
+        "d10"
+      ],
+      "elapsedMs": 0.28
+    },
+    {
+      "id": "q20",
+      "question": "ambiguous daylight saving",
+      "bucket": "terse",
+      "gold": "d10",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d10",
+        "x20",
+        "x14",
+        "x19",
+        "d01"
+      ],
+      "elapsedMs": 5.26
+    },
+    {
+      "id": "q20",
+      "question": "ambiguous daylight saving",
+      "bucket": "terse",
+      "gold": "d10",
+      "method": "engram-all",
+      "top": [
+        "d10"
+      ],
+      "elapsedMs": 8.11
+    },
+    {
+      "id": "q20",
+      "question": "ambiguous daylight saving",
+      "bucket": "terse",
+      "gold": "d10",
+      "method": "engram-any",
+      "top": [
+        "d10"
+      ],
+      "elapsedMs": 8.8
+    },
+    {
+      "id": "q21",
+      "question": "How do we prevent repeated payment events from charging a customer twice?",
+      "bucket": "natural-question",
+      "gold": "d01",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.18
+    },
+    {
+      "id": "q21",
+      "question": "How do we prevent repeated payment events from charging a customer twice?",
+      "bucket": "natural-question",
+      "gold": "d01",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d01",
+        "d07",
+        "x02",
+        "d10",
+        "x14"
+      ],
+      "elapsedMs": 7.23
+    },
+    {
+      "id": "q21",
+      "question": "How do we prevent repeated payment events from charging a customer twice?",
+      "bucket": "natural-question",
+      "gold": "d01",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 8.03
+    },
+    {
+      "id": "q21",
+      "question": "How do we prevent repeated payment events from charging a customer twice?",
+      "bucket": "natural-question",
+      "gold": "d01",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 7.3
+    },
+    {
+      "id": "q22",
+      "question": "What evidence is required before deploying a production build?",
+      "bucket": "natural-question",
+      "gold": "d02",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.45
+    },
+    {
+      "id": "q22",
+      "question": "What evidence is required before deploying a production build?",
+      "bucket": "natural-question",
+      "gold": "d02",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d02",
+        "x04",
+        "d08",
+        "d04",
+        "x03"
+      ],
+      "elapsedMs": 7.14
+    },
+    {
+      "id": "q22",
+      "question": "What evidence is required before deploying a production build?",
+      "bucket": "natural-question",
+      "gold": "d02",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 7.41
+    },
+    {
+      "id": "q22",
+      "question": "What evidence is required before deploying a production build?",
+      "bucket": "natural-question",
+      "gold": "d02",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 5.29
+    },
+    {
+      "id": "q23",
+      "question": "When should retrieval entries be invalidated after changing a task?",
+      "bucket": "natural-question",
+      "gold": "d03",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.17
+    },
+    {
+      "id": "q23",
+      "question": "When should retrieval entries be invalidated after changing a task?",
+      "bucket": "natural-question",
+      "gold": "d03",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d03",
+        "d05",
+        "x04",
+        "d06",
+        "x17"
+      ],
+      "elapsedMs": 6.95
+    },
+    {
+      "id": "q23",
+      "question": "When should retrieval entries be invalidated after changing a task?",
+      "bucket": "natural-question",
+      "gold": "d03",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 4.94
+    },
+    {
+      "id": "q23",
+      "question": "When should retrieval entries be invalidated after changing a task?",
+      "bucket": "natural-question",
+      "gold": "d03",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 4.38
+    },
+    {
+      "id": "q24",
+      "question": "Where does an export job obtain the organization it is allowed to read?",
+      "bucket": "natural-question",
+      "gold": "d04",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.17
+    },
+    {
+      "id": "q24",
+      "question": "Where does an export job obtain the organization it is allowed to read?",
+      "bucket": "natural-question",
+      "gold": "d04",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d04",
+        "x07",
+        "x03",
+        "x08",
+        "d02"
+      ],
+      "elapsedMs": 7.11
+    },
+    {
+      "id": "q24",
+      "question": "Where does an export job obtain the organization it is allowed to read?",
+      "bucket": "natural-question",
+      "gold": "d04",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.16
+    },
+    {
+      "id": "q24",
+      "question": "Where does an export job obtain the organization it is allowed to read?",
+      "bucket": "natural-question",
+      "gold": "d04",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 7.12
+    },
+    {
+      "id": "q25",
+      "question": "What happens after a worker exhausts its retry attempts?",
+      "bucket": "natural-question",
+      "gold": "d05",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.18
+    },
+    {
+      "id": "q25",
+      "question": "What happens after a worker exhausts its retry attempts?",
+      "bucket": "natural-question",
+      "gold": "d05",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d05",
+        "x09",
+        "d07",
+        "d01",
+        "x16"
+      ],
+      "elapsedMs": 7.89
+    },
+    {
+      "id": "q25",
+      "question": "What happens after a worker exhausts its retry attempts?",
+      "bucket": "natural-question",
+      "gold": "d05",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 4.99
+    },
+    {
+      "id": "q25",
+      "question": "What happens after a worker exhausts its retry attempts?",
+      "bucket": "natural-question",
+      "gold": "d05",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 5.94
+    },
+    {
+      "id": "q26",
+      "question": "When is it safe to remove the old database column?",
+      "bucket": "natural-question",
+      "gold": "d06",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.2
+    },
+    {
+      "id": "q26",
+      "question": "When is it safe to remove the old database column?",
+      "bucket": "natural-question",
+      "gold": "d06",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d06",
+        "x16",
+        "x11",
+        "d01",
+        "d03"
+      ],
+      "elapsedMs": 9.06
+    },
+    {
+      "id": "q26",
+      "question": "When is it safe to remove the old database column?",
+      "bucket": "natural-question",
+      "gold": "d06",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.02
+    },
+    {
+      "id": "q26",
+      "question": "When is it safe to remove the old database column?",
+      "bucket": "natural-question",
+      "gold": "d06",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 4.21
+    },
+    {
+      "id": "q27",
+      "question": "Who can authorize a refund beyond the automated allowance?",
+      "bucket": "natural-question",
+      "gold": "d07",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.18
+    },
+    {
+      "id": "q27",
+      "question": "Who can authorize a refund beyond the automated allowance?",
+      "bucket": "natural-question",
+      "gold": "d07",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d07",
+        "d01",
+        "x14",
+        "x08",
+        "x09"
+      ],
+      "elapsedMs": 6.78
+    },
+    {
+      "id": "q27",
+      "question": "Who can authorize a refund beyond the automated allowance?",
+      "bucket": "natural-question",
+      "gold": "d07",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.03
+    },
+    {
+      "id": "q27",
+      "question": "Who can authorize a refund beyond the automated allowance?",
+      "bucket": "natural-question",
+      "gold": "d07",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 4.24
+    },
+    {
+      "id": "q28",
+      "question": "Which values must be removed before diagnostic logs are written?",
+      "bucket": "natural-question",
+      "gold": "d08",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.19
+    },
+    {
+      "id": "q28",
+      "question": "Which values must be removed before diagnostic logs are written?",
+      "bucket": "natural-question",
+      "gold": "d08",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d08",
+        "x16",
+        "d05",
+        "d06",
+        "d09"
+      ],
+      "elapsedMs": 6.39
+    },
+    {
+      "id": "q28",
+      "question": "Which values must be removed before diagnostic logs are written?",
+      "bucket": "natural-question",
+      "gold": "d08",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 11.42
+    },
+    {
+      "id": "q28",
+      "question": "Which values must be removed before diagnostic logs are written?",
+      "bucket": "natural-question",
+      "gold": "d08",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "x19",
+        "d10",
+        "d05"
+      ],
+      "elapsedMs": 7.1
+    },
+    {
+      "id": "q29",
+      "question": "What do we do when parsing an uploaded document times out?",
+      "bucket": "natural-question",
+      "gold": "d09",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.34
+    },
+    {
+      "id": "q29",
+      "question": "What do we do when parsing an uploaded document times out?",
+      "bucket": "natural-question",
+      "gold": "d09",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d09",
+        "d03",
+        "x17",
+        "x18",
+        "x13"
+      ],
+      "elapsedMs": 36.6
+    },
+    {
+      "id": "q29",
+      "question": "What do we do when parsing an uploaded document times out?",
+      "bucket": "natural-question",
+      "gold": "d09",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 18.97
+    },
+    {
+      "id": "q29",
+      "question": "What do we do when parsing an uploaded document times out?",
+      "bucket": "natural-question",
+      "gold": "d09",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "x19",
+        "d10",
+        "d05"
+      ],
+      "elapsedMs": 6.58
+    },
+    {
+      "id": "q30",
+      "question": "How do we accept appointments during ambiguous daylight saving times?",
+      "bucket": "natural-question",
+      "gold": "d10",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.19
+    },
+    {
+      "id": "q30",
+      "question": "How do we accept appointments during ambiguous daylight saving times?",
+      "bucket": "natural-question",
+      "gold": "d10",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d10",
+        "x20",
+        "x14",
+        "x07",
+        "d09"
+      ],
+      "elapsedMs": 8.33
+    },
+    {
+      "id": "q30",
+      "question": "How do we accept appointments during ambiguous daylight saving times?",
+      "bucket": "natural-question",
+      "gold": "d10",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 6.07
+    },
+    {
+      "id": "q30",
+      "question": "How do we accept appointments during ambiguous daylight saving times?",
+      "bucket": "natural-question",
+      "gold": "d10",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "x19",
+        "d10",
+        "x05"
+      ],
+      "elapsedMs": 5.91
+    },
+    {
+      "id": "q31",
+      "question": "How do we make duplicate notifications financially harmless?",
+      "bucket": "paraphrase",
+      "gold": "d01",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.16
+    },
+    {
+      "id": "q31",
+      "question": "How do we make duplicate notifications financially harmless?",
+      "bucket": "paraphrase",
+      "gold": "d01",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "x02",
+        "x14",
+        "d01",
+        "x19",
+        "d07"
+      ],
+      "elapsedMs": 6.76
+    },
+    {
+      "id": "q31",
+      "question": "How do we make duplicate notifications financially harmless?",
+      "bucket": "paraphrase",
+      "gold": "d01",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.53
+    },
+    {
+      "id": "q31",
+      "question": "How do we make duplicate notifications financially harmless?",
+      "bucket": "paraphrase",
+      "gold": "d01",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "x05",
+        "x14",
+        "x16"
+      ],
+      "elapsedMs": 5.5
+    },
+    {
+      "id": "q32",
+      "question": "Can the assistant ship a changed build using an earlier signoff?",
+      "bucket": "paraphrase",
+      "gold": "d02",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.16
+    },
+    {
+      "id": "q32",
+      "question": "Can the assistant ship a changed build using an earlier signoff?",
+      "bucket": "paraphrase",
+      "gold": "d02",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d02",
+        "d07",
+        "x04",
+        "d06",
+        "x13"
+      ],
+      "elapsedMs": 9.77
+    },
+    {
+      "id": "q32",
+      "question": "Can the assistant ship a changed build using an earlier signoff?",
+      "bucket": "paraphrase",
+      "gold": "d02",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.62
+    },
+    {
+      "id": "q32",
+      "question": "Can the assistant ship a changed build using an earlier signoff?",
+      "bucket": "paraphrase",
+      "gold": "d02",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 5.91
+    },
+    {
+      "id": "q33",
+      "question": "Should a broken data source leave a saved partial index behind?",
+      "bucket": "paraphrase",
+      "gold": "d03",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.15
+    },
+    {
+      "id": "q33",
+      "question": "Should a broken data source leave a saved partial index behind?",
+      "bucket": "paraphrase",
+      "gold": "d03",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d03",
+        "x05",
+        "d09",
+        "x04",
+        "d01"
+      ],
+      "elapsedMs": 8.56
+    },
+    {
+      "id": "q33",
+      "question": "Should a broken data source leave a saved partial index behind?",
+      "bucket": "paraphrase",
+      "gold": "d03",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 10.82
+    },
+    {
+      "id": "q33",
+      "question": "Should a broken data source leave a saved partial index behind?",
+      "bucket": "paraphrase",
+      "gold": "d03",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 4.54
+    },
+    {
+      "id": "q34",
+      "question": "Can an asynchronous download trust the account identifier supplied by the caller?",
+      "bucket": "paraphrase",
+      "gold": "d04",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.13
+    },
+    {
+      "id": "q34",
+      "question": "Can an asynchronous download trust the account identifier supplied by the caller?",
+      "bucket": "paraphrase",
+      "gold": "d04",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d01",
+        "d04",
+        "x08",
+        "x18",
+        "d10"
+      ],
+      "elapsedMs": 7.44
+    },
+    {
+      "id": "q34",
+      "question": "Can an asynchronous download trust the account identifier supplied by the caller?",
+      "bucket": "paraphrase",
+      "gold": "d04",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.04
+    },
+    {
+      "id": "q34",
+      "question": "Can an asynchronous download trust the account identifier supplied by the caller?",
+      "bucket": "paraphrase",
+      "gold": "d04",
+      "method": "engram-any",
+      "top": [
+        "d09",
+        "x19",
+        "d10",
+        "d05",
+        "d03"
+      ],
+      "elapsedMs": 4.73
+    },
+    {
+      "id": "q35",
+      "question": "Should malformed jobs be attempted again?",
+      "bucket": "paraphrase",
+      "gold": "d05",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.15
+    },
+    {
+      "id": "q35",
+      "question": "Should malformed jobs be attempted again?",
+      "bucket": "paraphrase",
+      "gold": "d05",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d04",
+        "d05",
+        "x10",
+        "d01",
+        "d06"
+      ],
+      "elapsedMs": 5.04
+    },
+    {
+      "id": "q35",
+      "question": "Should malformed jobs be attempted again?",
+      "bucket": "paraphrase",
+      "gold": "d05",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 3.66
+    },
+    {
+      "id": "q35",
+      "question": "Should malformed jobs be attempted again?",
+      "bucket": "paraphrase",
+      "gold": "d05",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "x19",
+        "d10",
+        "d05"
+      ],
+      "elapsedMs": 4.92
+    },
+    {
+      "id": "q36",
+      "question": "How do we evolve storage while keeping downgrade compatibility?",
+      "bucket": "paraphrase",
+      "gold": "d06",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.26
+    },
+    {
+      "id": "q36",
+      "question": "How do we evolve storage while keeping downgrade compatibility?",
+      "bucket": "paraphrase",
+      "gold": "d06",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "x04",
+        "x18",
+        "x03",
+        "d09",
+        "x02"
+      ],
+      "elapsedMs": 5.83
+    },
+    {
+      "id": "q36",
+      "question": "How do we evolve storage while keeping downgrade compatibility?",
+      "bucket": "paraphrase",
+      "gold": "d06",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 7.38
+    },
+    {
+      "id": "q36",
+      "question": "How do we evolve storage while keeping downgrade compatibility?",
+      "bucket": "paraphrase",
+      "gold": "d06",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "x05",
+        "x14",
+        "x16"
+      ],
+      "elapsedMs": 5
+    },
+    {
+      "id": "q37",
+      "question": "What should the bot do when a reimbursement is above its authority?",
+      "bucket": "paraphrase",
+      "gold": "d07",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.18
+    },
+    {
+      "id": "q37",
+      "question": "What should the bot do when a reimbursement is above its authority?",
+      "bucket": "paraphrase",
+      "gold": "d07",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "x14",
+        "x19",
+        "d01",
+        "x13",
+        "x01"
+      ],
+      "elapsedMs": 7.36
+    },
+    {
+      "id": "q37",
+      "question": "What should the bot do when a reimbursement is above its authority?",
+      "bucket": "paraphrase",
+      "gold": "d07",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 6.11
+    },
+    {
+      "id": "q37",
+      "question": "What should the bot do when a reimbursement is above its authority?",
+      "bucket": "paraphrase",
+      "gold": "d07",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 7.69
+    },
+    {
+      "id": "q38",
+      "question": "How do we keep authentication material out of observability output?",
+      "bucket": "paraphrase",
+      "gold": "d08",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.16
+    },
+    {
+      "id": "q38",
+      "question": "How do we keep authentication material out of observability output?",
+      "bucket": "paraphrase",
+      "gold": "d08",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d09",
+        "x04",
+        "x16",
+        "x02",
+        "x17"
+      ],
+      "elapsedMs": 6.77
+    },
+    {
+      "id": "q38",
+      "question": "How do we keep authentication material out of observability output?",
+      "bucket": "paraphrase",
+      "gold": "d08",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.05
+    },
+    {
+      "id": "q38",
+      "question": "How do we keep authentication material out of observability output?",
+      "bucket": "paraphrase",
+      "gold": "d08",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "d10",
+        "d05",
+        "x05"
+      ],
+      "elapsedMs": 4.63
+    },
+    {
+      "id": "q39",
+      "question": "Can a failed extraction still enter the knowledge index?",
+      "bucket": "paraphrase",
+      "gold": "d09",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.19
+    },
+    {
+      "id": "q39",
+      "question": "Can a failed extraction still enter the knowledge index?",
+      "bucket": "paraphrase",
+      "gold": "d09",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d09",
+        "d06",
+        "d03",
+        "d01",
+        "x06"
+      ],
+      "elapsedMs": 6.03
+    },
+    {
+      "id": "q39",
+      "question": "Can a failed extraction still enter the knowledge index?",
+      "bucket": "paraphrase",
+      "gold": "d09",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 4.63
+    },
+    {
+      "id": "q39",
+      "question": "Can a failed extraction still enter the knowledge index?",
+      "bucket": "paraphrase",
+      "gold": "d09",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 6.35
+    },
+    {
+      "id": "q40",
+      "question": "How should we handle a local clock time that occurs twice?",
+      "bucket": "paraphrase",
+      "gold": "d10",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.15
+    },
+    {
+      "id": "q40",
+      "question": "How should we handle a local clock time that occurs twice?",
+      "bucket": "paraphrase",
+      "gold": "d10",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d01",
+        "d10",
+        "x04",
+        "x10",
+        "x19"
+      ],
+      "elapsedMs": 6.37
+    },
+    {
+      "id": "q40",
+      "question": "How should we handle a local clock time that occurs twice?",
+      "bucket": "paraphrase",
+      "gold": "d10",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 9.24
+    },
+    {
+      "id": "q40",
+      "question": "How should we handle a local clock time that occurs twice?",
+      "bucket": "paraphrase",
+      "gold": "d10",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 6.89
+    },
+    {
+      "id": "q41",
+      "question": "How long do we retain provider event identifiers?",
+      "bucket": "constraint",
+      "gold": "d01",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.16
+    },
+    {
+      "id": "q41",
+      "question": "How long do we retain provider event identifiers?",
+      "bucket": "constraint",
+      "gold": "d01",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d01",
+        "d08",
+        "d10",
+        "x14",
+        "x02"
+      ],
+      "elapsedMs": 5.58
+    },
+    {
+      "id": "q41",
+      "question": "How long do we retain provider event identifiers?",
+      "bucket": "constraint",
+      "gold": "d01",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 4.69
+    },
+    {
+      "id": "q41",
+      "question": "How long do we retain provider event identifiers?",
+      "bucket": "constraint",
+      "gold": "d01",
+      "method": "engram-any",
+      "top": [
+        "x17",
+        "d09",
+        "d10",
+        "x05",
+        "x14"
+      ],
+      "elapsedMs": 5.48
+    },
+    {
+      "id": "q42",
+      "question": "Does a chat message count as deployment approval?",
+      "bucket": "constraint",
+      "gold": "d02",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.16
+    },
+    {
+      "id": "q42",
+      "question": "Does a chat message count as deployment approval?",
+      "bucket": "constraint",
+      "gold": "d02",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d02",
+        "x04",
+        "x07",
+        "x03",
+        "x09"
+      ],
+      "elapsedMs": 6.29
+    },
+    {
+      "id": "q42",
+      "question": "Does a chat message count as deployment approval?",
+      "bucket": "constraint",
+      "gold": "d02",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 4.79
+    },
+    {
+      "id": "q42",
+      "question": "Does a chat message count as deployment approval?",
+      "bucket": "constraint",
+      "gold": "d02",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 5.98
+    },
+    {
+      "id": "q43",
+      "question": "How many minutes may the corpus cache remain valid?",
+      "bucket": "constraint",
+      "gold": "d03",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.19
+    },
+    {
+      "id": "q43",
+      "question": "How many minutes may the corpus cache remain valid?",
+      "bucket": "constraint",
+      "gold": "d03",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d03",
+        "x20",
+        "d01",
+        "x16",
+        "x09"
+      ],
+      "elapsedMs": 15.6
+    },
+    {
+      "id": "q43",
+      "question": "How many minutes may the corpus cache remain valid?",
+      "bucket": "constraint",
+      "gold": "d03",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 6.5
+    },
+    {
+      "id": "q43",
+      "question": "How many minutes may the corpus cache remain valid?",
+      "bucket": "constraint",
+      "gold": "d03",
+      "method": "engram-any",
+      "top": [
+        "d03",
+        "x02",
+        "x07",
+        "x05",
+        "x08"
+      ],
+      "elapsedMs": 15.36
+    },
+    {
+      "id": "q44",
+      "question": "Must background export jobs repeat the membership check?",
+      "bucket": "constraint",
+      "gold": "d04",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.2
+    },
+    {
+      "id": "q44",
+      "question": "Must background export jobs repeat the membership check?",
+      "bucket": "constraint",
+      "gold": "d04",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d04",
+        "d05",
+        "d01",
+        "x16",
+        "x09"
+      ],
+      "elapsedMs": 12.37
+    },
+    {
+      "id": "q44",
+      "question": "Must background export jobs repeat the membership check?",
+      "bucket": "constraint",
+      "gold": "d04",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 16.27
+    },
+    {
+      "id": "q44",
+      "question": "Must background export jobs repeat the membership check?",
+      "bucket": "constraint",
+      "gold": "d04",
+      "method": "engram-any",
+      "top": [
+        "d04",
+        "x10",
+        "d05",
+        "d01",
+        "d07"
+      ],
+      "elapsedMs": 10.62
+    },
+    {
+      "id": "q45",
+      "question": "How many transient worker attempts are allowed?",
+      "bucket": "constraint",
+      "gold": "d05",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.13
+    },
+    {
+      "id": "q45",
+      "question": "How many transient worker attempts are allowed?",
+      "bucket": "constraint",
+      "gold": "d05",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d05",
+        "x11",
+        "x15",
+        "x12",
+        "d01"
+      ],
+      "elapsedMs": 4.96
+    },
+    {
+      "id": "q45",
+      "question": "How many transient worker attempts are allowed?",
+      "bucket": "constraint",
+      "gold": "d05",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.58
+    },
+    {
+      "id": "q45",
+      "question": "How many transient worker attempts are allowed?",
+      "bucket": "constraint",
+      "gold": "d05",
+      "method": "engram-any",
+      "top": [
+        "d05",
+        "x11",
+        "x05",
+        "x02",
+        "x12"
+      ],
+      "elapsedMs": 8.71
+    },
+    {
+      "id": "q46",
+      "question": "Must backfill finish before switching database readers?",
+      "bucket": "constraint",
+      "gold": "d06",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.16
+    },
+    {
+      "id": "q46",
+      "question": "Must backfill finish before switching database readers?",
+      "bucket": "constraint",
+      "gold": "d06",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d06",
+        "x12",
+        "x11",
+        "d04",
+        "d05"
+      ],
+      "elapsedMs": 5.73
+    },
+    {
+      "id": "q46",
+      "question": "Must backfill finish before switching database readers?",
+      "bucket": "constraint",
+      "gold": "d06",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 7.2
+    },
+    {
+      "id": "q46",
+      "question": "Must backfill finish before switching database readers?",
+      "bucket": "constraint",
+      "gold": "d06",
+      "method": "engram-any",
+      "top": [
+        "d06",
+        "x11",
+        "x12",
+        "d05",
+        "d01"
+      ],
+      "elapsedMs": 11.17
+    },
+    {
+      "id": "q47",
+      "question": "May the assistant itself authorize an escalated refund?",
+      "bucket": "constraint",
+      "gold": "d07",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.14
+    },
+    {
+      "id": "q47",
+      "question": "May the assistant itself authorize an escalated refund?",
+      "bucket": "constraint",
+      "gold": "d07",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d07",
+        "x14",
+        "x13",
+        "d01",
+        "x19"
+      ],
+      "elapsedMs": 6.75
+    },
+    {
+      "id": "q47",
+      "question": "May the assistant itself authorize an escalated refund?",
+      "bucket": "constraint",
+      "gold": "d07",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 3.94
+    },
+    {
+      "id": "q47",
+      "question": "May the assistant itself authorize an escalated refund?",
+      "bucket": "constraint",
+      "gold": "d07",
+      "method": "engram-any",
+      "top": [
+        "d09",
+        "x19",
+        "d10",
+        "d05",
+        "d03"
+      ],
+      "elapsedMs": 4.84
+    },
+    {
+      "id": "q48",
+      "question": "Can redaction fixtures use production API tokens?",
+      "bucket": "constraint",
+      "gold": "d08",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 1.6
+    },
+    {
+      "id": "q48",
+      "question": "Can redaction fixtures use production API tokens?",
+      "bucket": "constraint",
+      "gold": "d08",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d08",
+        "x03",
+        "d02",
+        "x16",
+        "x15"
+      ],
+      "elapsedMs": 7.88
+    },
+    {
+      "id": "q48",
+      "question": "Can redaction fixtures use production API tokens?",
+      "bucket": "constraint",
+      "gold": "d08",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 8.99
+    },
+    {
+      "id": "q48",
+      "question": "Can redaction fixtures use production API tokens?",
+      "bucket": "constraint",
+      "gold": "d08",
+      "method": "engram-any",
+      "top": [
+        "d08",
+        "x19",
+        "d06",
+        "x16",
+        "x03"
+      ],
+      "elapsedMs": 13.54
+    },
+    {
+      "id": "q49",
+      "question": "What is the maximum file size accepted before parsing?",
+      "bucket": "constraint",
+      "gold": "d09",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.21
+    },
+    {
+      "id": "q49",
+      "question": "What is the maximum file size accepted before parsing?",
+      "bucket": "constraint",
+      "gold": "d09",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d09",
+        "x20",
+        "x04",
+        "x01",
+        "x02"
+      ],
+      "elapsedMs": 6.59
+    },
+    {
+      "id": "q49",
+      "question": "What is the maximum file size accepted before parsing?",
+      "bucket": "constraint",
+      "gold": "d09",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 5.32
+    },
+    {
+      "id": "q49",
+      "question": "What is the maximum file size accepted before parsing?",
+      "bucket": "constraint",
+      "gold": "d09",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 7.27
+    },
+    {
+      "id": "q50",
+      "question": "In what timezone are appointment instants stored?",
+      "bucket": "constraint",
+      "gold": "d10",
+      "method": "ats-keyword",
+      "top": [],
+      "elapsedMs": 0.19
+    },
+    {
+      "id": "q50",
+      "question": "In what timezone are appointment instants stored?",
+      "bucket": "constraint",
+      "gold": "d10",
+      "method": "ats-hybrid-rrf",
+      "top": [
+        "d10",
+        "x20",
+        "x12",
+        "x19",
+        "x15"
+      ],
+      "elapsedMs": 11.43
+    },
+    {
+      "id": "q50",
+      "question": "In what timezone are appointment instants stored?",
+      "bucket": "constraint",
+      "gold": "d10",
+      "method": "engram-all",
+      "top": [],
+      "elapsedMs": 3.81
+    },
+    {
+      "id": "q50",
+      "question": "In what timezone are appointment instants stored?",
+      "bucket": "constraint",
+      "gold": "d10",
+      "method": "engram-any",
+      "top": [
+        "x11",
+        "x17",
+        "d09",
+        "x19",
+        "d10"
+      ],
+      "elapsedMs": 5.42
+    }
+  ]
+}

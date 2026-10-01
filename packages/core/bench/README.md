@@ -1,5 +1,9 @@
 # ATS Benchmarks
 
+For a public synthetic comparison, see [50-question agent recall](agent-recall.md).
+It runs the real ATS hybrid RRF path with local embeddings against Engram's actual
+SQLite search, including both query match modes, with no vector database.
+
 Reusable harnesses for measuring retrieval accuracy and whether agent work actually advanced.
 
 ## Retrieval accuracy
