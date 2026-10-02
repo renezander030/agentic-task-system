@@ -3,7 +3,7 @@
 
 ## 0.15.0 - Reviewed writes and CLI state integrity
 
-Pending release.
+Released 2026-10-02.
 
 - **Restore preflight.** State exports carry per-file SHA-256 checksums. Import validates all recognized files, JSON/JSONL shapes, schema versions and supplied checksums before its first write; dry-run performs the same validation. Valid older bundles remain compatible.
 - **Reviewed target checks.** Staged task writes capture a revision of the target's logical fields. Apply re-reads the target and refuses changed or unreadable state with exit 3, including title, body, tags, status and relationships. The check is optimistic: backend writes without native conditional-update support can still race after the read.
