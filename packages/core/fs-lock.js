@@ -8,8 +8,8 @@
  *
  *   - `withLockSync` / `withLock`: a mutual-exclusion lock around any
  *     read-modify-write of a state file. Lock = `<target>.lock` created
- *     with O_EXCL; a lock older than `staleMs` is treated as abandoned by
- *     a crashed process and stolen.
+ *     with O_EXCL and PID/host ownership. Old locks are reclaimed only when
+ *     their local owner is gone (or they predate owner metadata).
  *   - `writeFileAtomicSync`: temp-file + rename in the target directory,
  *     so readers only ever observe a complete file — never a torn write.
  *
@@ -20,6 +20,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
 const DEFAULT_STALE_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -37,12 +38,32 @@ function ensureParentDir(targetPath) {
 
 function tryAcquire(lockPath, staleMs) {
   try {
-    return fs.openSync(lockPath, 'wx', 0o600);
+    const fd = fs.openSync(lockPath, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, host: os.hostname() }));
+    } catch (error) {
+      fs.closeSync(fd);
+      fs.unlinkSync(lockPath);
+      throw error;
+    }
+    return fd;
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
-    // A crashed holder leaves the lock behind; steal it once it is stale.
+    // Age alone does not mean abandonment: a slow adapter call may still own it.
     try {
-      if (Date.now() - fs.statSync(lockPath).mtimeMs > staleMs) fs.unlinkSync(lockPath);
+      const stat = fs.statSync(lockPath);
+      if (Date.now() - stat.mtimeMs <= staleMs) return undefined;
+      let owner;
+      try { owner = JSON.parse(fs.readFileSync(lockPath, 'utf8')); } catch {}
+      if (owner?.host && owner.host !== os.hostname()) return undefined;
+      if (Number.isInteger(owner?.pid) && owner.pid > 0) {
+        try { process.kill(owner.pid, 0); return undefined; } catch (probeError) {
+          if (probeError.code !== 'ESRCH') return undefined;
+        }
+      }
+      // Only remove the inode inspected above, not a replacement holder.
+      const current = fs.statSync(lockPath);
+      if (current.ino === stat.ino && current.dev === stat.dev) fs.unlinkSync(lockPath);
     } catch (statError) {
       if (statError.code !== 'ENOENT') throw statError;
     }
@@ -52,13 +73,16 @@ function tryAcquire(lockPath, staleMs) {
 
 function release(lockFd, lockPath, runError) {
   let cleanupError;
+  let owned;
+  try { owned = fs.fstatSync(lockFd); } catch (error) { cleanupError = error; }
   try {
     fs.closeSync(lockFd);
   } catch (error) {
     cleanupError = error;
   }
   try {
-    fs.unlinkSync(lockPath);
+    const current = fs.statSync(lockPath);
+    if (owned && current.ino === owned.ino && current.dev === owned.dev) fs.unlinkSync(lockPath);
   } catch (error) {
     if (error.code !== 'ENOENT' && !cleanupError) cleanupError = error;
   }
@@ -76,7 +100,7 @@ function timeoutError(label, lockPath) {
  * @param {string} targetPath - state file the lock protects
  * @param {() => any} run
  * @param {object} [opts]
- * @param {number} [opts.staleMs=30000] - age after which a leftover lock is stolen
+ * @param {number} [opts.staleMs=30000] - age after which owner liveness is checked
  * @param {number} [opts.timeoutMs=5000] - how long to wait before giving up
  * @param {string} [opts.label] - human name for the timeout error
  */

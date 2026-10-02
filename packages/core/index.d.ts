@@ -36,7 +36,8 @@ export { withRetry, retryingFetch, retryPolicy, isTransientResponse, isTransient
 /** Short fingerprint of a task body for compare-and-swap writes (`ats update --if-match`). */
 export function contentHash(content?: string): string;
 
-export { guardWrite } from './write-guard.js';
+export { guardWrite, reviewTargetRevision } from './write-guard.js';
+export function claimReviewItem(id: string, opts?: { queuePath?: string }): Record<string, any>;
 export type { GuardedWrite, StagedWrite } from './write-guard.js';
 export type { RetryPolicy, RetryOptions } from './retry.js';
 

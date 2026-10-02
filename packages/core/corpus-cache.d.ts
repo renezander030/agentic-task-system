@@ -2,19 +2,19 @@
 import type { Task } from './adapter-interface.js';
 
 /** Read the cached corpus if fresh enough, else null. */
-export function read(): Task[] | null;
+export function read(opts?: { scope?: string }): Task[] | null;
 
 /**
  * Read a cache past its TTL but within the stale ceiling (ATS_CORPUS_STALE_MAX_MS,
  * default 24h). Null when missing, still fresh, or too old to serve.
  */
-export function readStale(): { tasks: Task[]; ageMs: number } | null;
+export function readStale(opts?: { scope?: string }): { tasks: Task[]; ageMs: number } | null;
 
 /** Read the cache regardless of age (delta sync). Null when missing/corrupt. */
-export function readAny(): { tasks: Task[]; timestamp: number | null; cursor: unknown } | null;
+export function readAny(opts?: { scope?: string }): { tasks: Task[]; timestamp: number | null; cursor: unknown } | null;
 
 /** Persist corpus + timestamp (+ optional delta-sync cursor). */
-export function write(tasks: Task[], opts?: { cursor?: unknown }): void;
+export function write(tasks: Task[], opts?: { cursor?: unknown; scope?: string }): void;
 
 /** True while a background refresh holds the refresh lease. */
 export function refreshing(): boolean;
@@ -43,9 +43,10 @@ export interface CacheMeta {
   revalidating?: boolean;
   path?: string;
   error?: string;
+  scopeMismatch?: boolean;
 }
 
-export function meta(): CacheMeta;
+export function meta(opts?: { scope?: string }): CacheMeta;
 
 export function clear(): boolean;
 

@@ -18,6 +18,28 @@ function looksLikeFlag(token) {
   return /^--?[A-Za-z]/.test(token);
 }
 
+const BOOLEAN_OPTIONS = new Set([
+  'help', 'version', 'json', 'explain', 'rerank', 'include-completed', 'fresh',
+  'no-cache', 'no-format', 'no-triage', 'raw', 'print', 'exact', 'all', 'full',
+  'force', 'write', 'dry-run', 'once', 'close', 'relevance', 'no-relevance',
+  'no-facts', 'semantic', 'lexical', 'include-retracted', 'cypher', 'graphiti',
+  'additive', 'clear-parent', 'allow-missing', 'live', 'require-complete',
+  'if-absent', 'non-interactive', 'n',
+]);
+const VALUE_OPTIONS = new Set([
+  'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
+  'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
+  'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
+  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent',
+  'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
+  'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
+  'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
+  'depth', 'max-depth', 'max-nodes', 'restore', 'dir', 'keep', 'dupes',
+  'status', 'stale-days', 'as-of', 'acknowledge-rejected', 'supersedes', 'object', 'dialect', 'center', 'outcome', 'done-when', 'parent-project',
+  'parent-task', 'approval-required', 'valid-from', 'valid-until', 'allow-actions',
+  'allow-resources', 'deny-resources', 'approval-actions',
+]);
+
 export function parseArgs(args) {
   const result = {
     command: null,
@@ -31,15 +53,22 @@ export function parseArgs(args) {
   };
 
   let i = 0;
+  let positionalOnly = false;
   while (i < args.length) {
     const arg = args[i];
-
-    if (arg === '--help' || arg === '-h') {
+    if (!positionalOnly && arg === '--') {
+      positionalOnly = true;
+      i++;
+      continue;
+    }
+    if (positionalOnly) {
+      if (!result.command) result.command = arg;
+      else if (!result.subcommand) result.subcommand = arg;
+      else result.positional.push(arg);
+    } else if (arg === '--help' || arg === '-h') {
       result.options.help = true;
     } else if (arg === '--version' || arg === '-v') {
       result.options.version = true;
-    } else if (arg === '--format' && args[i + 1]) {
-      result.options.format = args[++i];
     } else if (arg === '--json') {
       // Ergonomic shorthand for `--format json`. Makes every read command emit
       // machine-readable output for piping into jq / agents.
@@ -47,8 +76,21 @@ export function parseArgs(args) {
     } else if (arg.startsWith('--') && arg.includes('=')) {
       // `--key=value` binds the whole remainder, whatever it starts with.
       const eq = arg.indexOf('=');
-      result.options[arg.slice(2, eq)] = arg.slice(eq + 1);
-    } else if (arg.startsWith('--') && args[i + 1] !== undefined && !looksLikeFlag(args[i + 1])) {
+      const key = arg.slice(2, eq);
+      const value = arg.slice(eq + 1);
+      if (BOOLEAN_OPTIONS.has(key)) {
+        if (!['true', 'false'].includes(value)) throw new Error(`--${key} must be true or false.`);
+        if (key === 'json') result.options.format = value === 'true' ? 'json' : 'text';
+        else result.options[key] = value === 'true';
+      } else result.options[key] = value;
+    } else if (arg.startsWith('--') && BOOLEAN_OPTIONS.has(arg.slice(2))) {
+      result.options[arg.slice(2)] = true;
+    } else if (arg.startsWith('--') && VALUE_OPTIONS.has(arg.slice(2))) {
+      if (args[i + 1] === undefined || args[i + 1] === '--' || looksLikeFlag(args[i + 1])) {
+        throw new Error(`--${arg.slice(2)} requires a value (use --${arg.slice(2)}=VALUE for a flag-shaped value).`);
+      }
+      result.options[arg.slice(2)] = args[++i];
+    } else if (arg.startsWith('--') && args[i + 1] !== undefined && args[i + 1] !== '--' && !looksLikeFlag(args[i + 1])) {
       // Generic option with value. A value may start with a dash when it is not
       // flag-shaped: a log bullet ("- 2026-09-05: shipped") or a negative number.
       const key = arg.slice(2);
@@ -433,7 +475,7 @@ Commands:
   undo [id]      Reverse the last write (or a named one) from the ledger before-image
   security       Define task trust/resource scope and audit access decisions
   events         Snapshot, poll, or watch observation-only task state changes
-  doctor         Diagnose adapter, auth, capabilities, cache, retrieval
+  doctor         Diagnose services (--timeout-ms N per probe, --require-complete)
   status         Alias for doctor
   cache          Inspect or refresh the adapter's centralized cache
   sync vector    Synchronize the vector index
@@ -452,6 +494,8 @@ Global options:
   --version, -v     Show version
   --format <type>   Output format: text (default) or json
   --json            Shorthand for --format json (machine-readable, pipe to jq)
+  --require-complete  Exit 2 for stale, degraded or explicitly incomplete reads
+  --                Treat remaining arguments as literal positionals
 
 Run 'ats <command> --help' for command-specific help.
 
@@ -728,8 +772,9 @@ Usage:
   ats review reject ID...  [--by NAME]  Reject pending items
   ats review apply <ID|--all>           Execute approved writes
 
-Ids may be unambiguous prefixes. A failed apply keeps the item approved
-with its error recorded, ready to retry or reject.`;
+Ids may be unambiguous prefixes. Task writes claim approved items before applying.
+Interrupted items stay applying; failed writes stay failed. Inspect the backend
+before staging a fresh proposal. Changed payloads or target revisions are refused.`;
 }
 
 export function getKgHelp() {

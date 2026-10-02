@@ -1,6 +1,21 @@
 
 # Changelog
 
+## 0.15.0 - Reviewed writes and CLI state integrity
+
+Pending release.
+
+- **Restore preflight.** State exports carry per-file SHA-256 checksums. Import validates all recognized files, JSON/JSONL shapes, schema versions and supplied checksums before its first write; dry-run performs the same validation. Valid older bundles remain compatible.
+- **Reviewed target checks.** Staged task writes capture a revision of the target's logical fields. Apply re-reads the target and refuses changed or unreadable state with exit 3, including title, body, tags, status and relationships. The check is optimistic: backend writes without native conditional-update support can still race after the read.
+- **Exclusive review apply.** One process durably claims an approved task write before calling its adapter. Other apply processes cannot execute that item. A crashed claim stays `applying`; an uncertain failure stays `failed`, requiring backend inspection and a fresh proposal instead of automatic retry.
+- **Argument contracts.** Known boolean flags preserve following positionals, `--flag=false` stays false, `--` preserves literal flag-shaped arguments, and known value flags reject missing values through the JSON error contract.
+- **Approval payload binding.** Approval records a digest of the staged kind and payload. Modified payloads and older approvals without a digest cannot apply; stage and approve a fresh proposal.
+- **Bounded diagnostics.** Doctor bounds import, auth, adapter-cache, vector and full retrieval probes with `--timeout-ms` (4 seconds per probe by default). Degraded retrieval reports warnings; timed-out commands flush their diagnostic document before exiting.
+- **Strict read option.** `--require-complete` returns exit 2 for stale, degraded or explicitly incomplete read results while preserving stdout. Doctor uses the same option for warning-only reports; hard diagnostic failures remain exit 1. `--fresh` and `--no-cache` bypass corpus cache reads.
+- **Source-scoped corpus cache.** The CLI tags its corpus cache with a digest of adapter identity, working directory and source configuration. Fresh, stale and delta paths reject other scopes. An untagged cache refreshes once; custom adapters can set `ATS_CACHE_NAMESPACE` for additional source identity.
+- **Lock ownership.** State locks record PID and host. Age alone cannot reclaim a living local owner, and a holder's cleanup preserves a replacement lock. Old metadata-free locks retain stale recovery.
+
+
 ## 0.14.0 - Versioned context and reliable automation contracts
 
 Released 2026-09-17.

@@ -41,7 +41,10 @@ after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
 function seedStaleCache() {
   // A cache older than the 1ms TTL holding a copy that differs from the adapter.
+  run('cache', 'sync');
+  const { scope } = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
   fs.writeFileSync(cachePath, JSON.stringify({
+    scope,
     timestamp: Date.now() - 60_000,
     count: 1,
     tasks: [{ id: 'old1', title: 'Release checklist (stale copy)', content: 'deployment', projectId: 'p1', projectName: 'Inbox', tags: [] }],
@@ -61,6 +64,7 @@ function run(...argv) {
     },
   });
   assert.equal(proc.status, 0, proc.stderr);
+  assert.ok(proc.stdout, JSON.stringify({ argv, status: proc.status, stderr: proc.stderr }));
   return JSON.parse(proc.stdout);
 }
 

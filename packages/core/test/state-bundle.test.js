@@ -50,7 +50,7 @@ test('import ignores unknown names and bundle-supplied paths', () => {
     version: 1,
     files: {
       'not-a-state-file': { path: path.join(tmp, 'evil.txt'), content: 'nope' },
-      'action-ledger': { path: path.join(tmp, 'elsewhere.txt'), content: 'redirected?\n' },
+      'action-ledger': { path: path.join(tmp, 'elsewhere.txt'), content: '{"action":"redirected"}\n' },
     },
   };
   const res = importState(evil, { force: true });
@@ -58,7 +58,7 @@ test('import ignores unknown names and bundle-supplied paths', () => {
   assert.equal(fs.existsSync(path.join(tmp, 'evil.txt')), false);
   assert.equal(fs.existsSync(path.join(tmp, 'elsewhere.txt')), false);
   // Content landed at the LOCAL registry path, not the bundle's claimed path.
-  assert.equal(fs.readFileSync(process.env.ATS_ACTION_LOG, 'utf8'), 'redirected?\n');
+  assert.equal(fs.readFileSync(process.env.ATS_ACTION_LOG, 'utf8'), '{"action":"redirected"}\n');
 });
 
 test('state doctor is read-only and import dry-run does not write', () => {
@@ -78,4 +78,33 @@ test('the registry whitelists state only — no credential-bearing names', () =>
   for (const forbidden of ['config.json', 'qdrant.env', 'github.json', 'notion.json', 'google.json', 'airtable.json']) {
     assert.ok(!names.includes(forbidden), `${forbidden} must never be bundled`);
   }
+});
+
+test('invalid restore data is rejected before any file writes, including dry-run', () => {
+  fs.writeFileSync(process.env.ATS_ACTION_LOG, '{"action":"original"}\n');
+  const bundle = { version: 1, files: {
+    'action-ledger': { content: '{"action":"replacement"}\n' },
+    'review-queue': { content: '{"version":1,"items":{}}' },
+  } };
+  for (const dryRun of [false, true]) {
+    assert.throws(() => importState(bundle, { force: true, dryRun }), /review queue requires items/);
+    assert.equal(fs.readFileSync(process.env.ATS_ACTION_LOG, 'utf8'), '{"action":"original"}\n');
+  }
+  bundle.files['review-queue'].content = '{"version":99,"items":[]}';
+  assert.throws(() => importState(bundle, { force: true }), /schema version/);
+  bundle.files['review-queue'].content = '[]';
+  assert.throws(() => importState(bundle), /state object/);
+  delete bundle.files['review-queue'];
+  bundle.files['action-ledger'].content = '{"action":"a"}\nBROKEN\n';
+  assert.throws(() => importState(bundle), /JSONL at line 2/);
+});
+
+test('export checksums detect tampering while valid legacy bundles still import', () => {
+  fs.writeFileSync(process.env.ATS_REVIEW_QUEUE, '{"version":1,"items":[]}');
+  const bundle = exportState();
+  assert.match(bundle.files['action-ledger'].sha256, /^[a-f0-9]{64}$/);
+  bundle.files['action-ledger'].content = '{"action":"tampered"}\n';
+  assert.throws(() => importState(bundle, { force: true }), /checksum mismatch/);
+  delete bundle.files['action-ledger'].sha256;
+  assert.ok(importState(bundle, { force: true }).imported > 0);
 });

@@ -30,6 +30,10 @@ const STALE_MAX_MS = Number(process.env.ATS_CORPUS_STALE_MAX_MS) || 24 * 60 * 60
 const REFRESH_MARKER = `${CACHE_PATH}.refreshing`;
 const REFRESH_LEASE_MS = Number(process.env.ATS_CORPUS_REFRESH_LEASE_MS) || 120_000;
 
+function scopeMatches(parsed, scope) {
+  return (parsed.scope ?? null) === (scope ?? process.env.ATS_CORPUS_SCOPE ?? null);
+}
+
 function ensureDir() {
   try {
     fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true, mode: 0o700 });
@@ -41,12 +45,13 @@ function ensureDir() {
  *
  * @returns {Array|null} list of task objects, or null if cache missing/stale
  */
-export function read() {
+export function read({ scope } = {}) {
   if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
   try {
     if (!fs.existsSync(CACHE_PATH)) return null;
     const raw = fs.readFileSync(CACHE_PATH, 'utf8');
     const parsed = JSON.parse(raw);
+    if (!scopeMatches(parsed, scope) || !Array.isArray(parsed.tasks) || !Number.isFinite(parsed.timestamp)) return null;
     const age = Date.now() - parsed.timestamp;
     if (age > TTL_MS) return null;
     return parsed.tasks;
@@ -60,12 +65,12 @@ export function read() {
  * stale-while-revalidate window. Returns `{ tasks, ageMs }`, or null when the
  * cache is missing, still fresh (use {@link read}), or too old to serve.
  */
-export function readStale() {
+export function readStale({ scope } = {}) {
   if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
   try {
     if (!fs.existsSync(CACHE_PATH)) return null;
     const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
-    if (!Array.isArray(parsed.tasks)) return null;
+    if (!scopeMatches(parsed, scope) || !Array.isArray(parsed.tasks) || !Number.isFinite(parsed.timestamp)) return null;
     const age = Date.now() - parsed.timestamp;
     if (age <= TTL_MS || age > STALE_MAX_MS) return null;
     return { tasks: parsed.tasks, ageMs: age };
@@ -130,7 +135,7 @@ export function beginRevalidate(run) {
  * Persist corpus + timestamp. An optional sync cursor (from an adapter's
  * `bulkFetchDelta`) rides along so the next delta sync can resume from it.
  */
-export function write(tasks, { cursor = null } = {}) {
+export function write(tasks, { cursor = null, scope } = {}) {
   if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return;
   ensureDir();
   try {
@@ -140,6 +145,7 @@ export function write(tasks, { cursor = null } = {}) {
       writeFileAtomicSync(
         CACHE_PATH,
         JSON.stringify({
+          scope: scope ?? process.env.ATS_CORPUS_SCOPE ?? null,
           timestamp: Date.now(),
           count: tasks.length,
           ...(cursor != null ? { cursor } : {}),
@@ -154,22 +160,23 @@ export function write(tasks, { cursor = null } = {}) {
  * Read the cached corpus regardless of TTL — for delta sync, which updates a
  * stale cache instead of discarding it. Returns null when missing/corrupt.
  */
-export function readAny() {
+export function readAny({ scope } = {}) {
   if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
   try {
     if (!fs.existsSync(CACHE_PATH)) return null;
     const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
-    if (!Array.isArray(parsed.tasks)) return null;
+    if (!scopeMatches(parsed, scope) || !Array.isArray(parsed.tasks)) return null;
     return { tasks: parsed.tasks, timestamp: parsed.timestamp ?? null, cursor: parsed.cursor ?? null };
   } catch {
     return null;
   }
 }
 
-export function meta() {
+export function meta({ scope } = {}) {
   try {
     if (!fs.existsSync(CACHE_PATH)) return { exists: false };
     const raw = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+    if (!scopeMatches(raw, scope)) return { exists: false, scopeMismatch: true, path: CACHE_PATH };
     const ageMs = Date.now() - raw.timestamp;
     return {
       exists: true,

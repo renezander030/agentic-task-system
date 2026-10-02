@@ -17,3 +17,4 @@ export interface StagedWrite {
 
 /** Null when the write may proceed; the staged-write response when it must wait for review. */
 export function guardWrite(write: GuardedWrite, opts?: { queuePath?: string; env?: Record<string, string | undefined> }): StagedWrite | null;
+export function reviewTargetRevision(task: object): string;

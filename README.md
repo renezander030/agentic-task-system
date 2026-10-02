@@ -262,6 +262,20 @@ npm run prove:beads
 npm run prove:progress
 ```
 
+Reviewed task writes bind approval to the exact staged payload and check the
+current task revision before applying. Only one process can claim an item.
+Inspect `ats review list --all` after an interrupted apply: `applying` or `failed`
+items require checking the backend before staging a fresh proposal. Older
+approvals without payload digests must also be staged and approved again.
+
+For automation that requires a complete read, use
+`ats find QUERY --require-complete --fresh --json`. Stale, degraded or explicitly
+incomplete results keep their JSON output and exit 2; ordinary reads preserve
+their existing permissive exit behavior. Doctor supports the same strict option and bounds
+each probe: `ats doctor --timeout-ms 1000 --require-complete --json`.
+State import validates recognized file contents and any supplied checksums even
+with `--dry-run`, before writing any file.
+
 ## Use it from any MCP client (Claude Code, Claude Desktop, Cursor, Windsurf, OpenCode)
 
 [`@reneza/ats-mcp`](packages/mcp) exposes the active adapter as a tool set spanning retrieval, CRUD, and execution context (`find`, `get_task`, `create_task`, `set_task_intent`, `add_task_link`, `resolve_task_links`, `context_for_task`, `record_action`, `undo_write`, `poll_task_events`, and more). For Claude Code this provides persistent context between sessions without replacing the task system as the source of truth; optional caches and vector indexes remain derived retrieval state.

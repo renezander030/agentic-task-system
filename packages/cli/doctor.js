@@ -15,6 +15,16 @@ const warn = (detail) => ({ status: 'warn', detail });
 const fail = (detail) => ({ status: 'fail', detail });
 const info = (detail) => ({ status: 'info', detail });
 
+async function probe(run, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(run),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
 /**
  * @param {object} args
  * @param {() => Promise<object>} args.loadAdapter - resolves + imports the active adapter
@@ -23,7 +33,8 @@ const info = (detail) => ({ status: 'info', detail });
  * @param {string} args.nodeVersion
  * @returns {Promise<{ ok: boolean, checks: Array<{ id, label, status, detail }> }>}
  */
-export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVersion }) {
+export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVersion, probeMs = 4000 }) {
+  if (!Number.isFinite(probeMs) || probeMs <= 0) throw new Error('Doctor probe timeout must be positive.');
   const checks = [];
   const add = (id, label, result) => checks.push({ id, label, ...result });
 
@@ -37,7 +48,7 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
 
   let adapter = null;
   try {
-    adapter = await loadAdapter();
+    adapter = await probe(loadAdapter, probeMs, 'Adapter import');
     add('adapter-load', 'Adapter import', pass(`imported ${adapterSource.pkg}`));
   } catch (e) {
     add('adapter-load', 'Adapter import', fail(e?.message || String(e)));
@@ -53,7 +64,7 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
 
     // Auth.
     try {
-      const status = await adapter.authStatus();
+      const status = await probe(() => adapter.authStatus(), probeMs, 'Authentication');
       if (status?.authenticated) {
         add('auth', 'Authentication', pass(status.expiresIn ? `valid (expires ${status.expiresIn})` : 'authenticated'));
       } else {
@@ -72,7 +83,7 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
     const vectorStatus = adapter.__ext?.tasks?.vectorStatus;
     if (typeof vectorStatus === 'function') {
       try {
-        const vs = await vectorStatus();
+        const vs = await probe(() => vectorStatus(), probeMs, 'Vector index');
         const n = vs?.vectorCount ?? vs?.count ?? vs?.points ?? vs?.indexed;
         add('vector-index', 'Vector index', n != null ? pass(`${n} embedded item(s)`) : info(JSON.stringify(vs)));
       } catch (e) {
@@ -83,7 +94,7 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
     const cacheStatus = adapter.__ext?.cache?.status;
     if (typeof cacheStatus === 'function') {
       try {
-        const cs = await cacheStatus();
+        const cs = await probe(() => cacheStatus(), probeMs, 'Adapter cache');
         const ageS = cs.ageMs == null ? '?' : Math.round(cs.ageMs / 1000);
         add('adapter-cache', 'Adapter cache', pass(`${cs.tasks} task(s), ${cs.projects} project(s), ${ageS}s old via ${cs.syncMethod || 'unknown'}`));
       } catch (e) {
@@ -93,8 +104,11 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
 
     // Core retrieval reachability — a cheap, short-budget query.
     try {
-      const res = await coreFind('the', { adapter, limit: 1, budgetMs: 4000, cache: false });
-      add('retrieval', 'Core retrieval', res?.mode === 'find' ? pass(`fan-out OK (${res.branches.map((b) => b.name).join('+')})`) : warn(`mode=${res?.mode}`));
+      const res = await probe(() => coreFind('the', { adapter, limit: 1, budgetMs: probeMs, cache: false }), probeMs, 'Core retrieval');
+      const healthy = res?.mode === 'find' && !res.degraded;
+      add('retrieval', 'Core retrieval', healthy
+        ? pass(`fan-out OK (${res.branches.map((b) => b.name).join('+')})`)
+        : warn(res.error || `partial retrieval: ${JSON.stringify(res.warnings || res.branches || [])}`));
     } catch (e) {
       add('retrieval', 'Core retrieval', warn(e?.message || String(e)));
     }
@@ -121,15 +135,15 @@ export async function runDoctor({ loadAdapter, adapterSource, configPath, nodeVe
   }
 
   const ok = !checks.some((c) => c.status === 'fail');
-  return { ok, checks };
+  const degraded = checks.some((c) => c.status === 'warn' || c.status === 'fail');
+  return { ok, degraded, checks };
 }
 
 /** Render a doctor report as a readable string. */
 export function formatDoctor(report) {
   const mark = { pass: '✔', warn: '!', fail: '✗', info: '·' };
   const lines = report.checks.map((c) => `  ${mark[c.status] || '·'} ${c.label}: ${c.detail}`);
-  const verdict = report.ok
-    ? 'All systems go.'
-    : 'Problems found — see ✗ above.';
+  const verdict = !report.ok ? 'Problems found — see ✗ above.'
+    : report.degraded ? 'Checks completed with warnings — see ! above.' : 'All systems go.';
   return ['ats doctor', ...lines, '', verdict].join('\n');
 }

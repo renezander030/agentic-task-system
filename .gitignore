@@ -33,3 +33,6 @@ packages/core/bench/agent-recall-results.json
 .beads-credential-key
 .beads/proxieddb/
 .beads-ats.env
+
+# MCP publisher credentials (some publisher versions store login in CWD)
+.mcpregistry_*

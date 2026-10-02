@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { actionLogPath } from './action-ledger.js';
 import { reviewQueuePath } from './review-queue.js';
 import { taskEventStatePath, taskEventSpoolPath } from './task-events.js';
@@ -57,17 +58,29 @@ function validateStateFile(entry, content) {
   if (entry.format === 'jsonl') {
     const lines = content.split('\n').filter((line) => line.trim());
     lines.forEach((line, index) => {
-      try { JSON.parse(line); } catch (error) {
+      try {
+        const row = JSON.parse(line);
+        if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('expected an object record');
+      } catch (error) {
         throw new Error(`invalid JSONL at line ${index + 1}: ${error.message}`, { cause: error });
       }
     });
     return { records: lines.length };
   }
   const parsed = JSON.parse(content);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('expected a state object');
   if (entry.version !== undefined && parsed?.version !== entry.version) {
     throw new Error(`schema version ${parsed?.version ?? 'missing'}; expected ${entry.version}`);
   }
+  if (entry.name === 'review-queue' && !Array.isArray(parsed.items)) throw new Error('review queue requires items');
+  if (entry.name === 'event-checkpoint' && (!parsed.tasks || typeof parsed.tasks !== 'object' || Array.isArray(parsed.tasks))) throw new Error('event checkpoint requires a task map');
+  if (entry.name === 'event-spool' && (!Array.isArray(parsed.pending) || parsed.pending.some((item) => typeof item?.event?.id !== 'string' || typeof item.stagedAt !== 'string'))) throw new Error('event spool requires valid pending entries');
+  if (entry.name === 'corpus-cache' && (!Number.isFinite(parsed.timestamp) || !Array.isArray(parsed.tasks))) throw new Error('corpus cache requires tasks');
   return { version: parsed?.version ?? null };
+}
+
+function contentDigest(content) {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 /** Read-only compatibility and permissions report for every known state file. */
@@ -108,7 +121,8 @@ export function exportState() {
         skipped.push(entry.name);
         continue;
       }
-      files[entry.name] = { path: entry.path, content: fs.readFileSync(entry.path, 'utf8') };
+      const content = fs.readFileSync(entry.path, 'utf8');
+      files[entry.name] = { path: entry.path, content, sha256: contentDigest(content) };
     } catch (err) {
       skipped.push(`${entry.name} (${err.message})`);
     }
@@ -123,31 +137,46 @@ export function exportState() {
 }
 
 export function importState(bundle, { force = false, dryRun = false } = {}) {
-  if (bundle?.version !== STATE_BUNDLE_VERSION || !bundle.files || typeof bundle.files !== 'object') {
+  if (bundle?.version !== STATE_BUNDLE_VERSION || !bundle.files || typeof bundle.files !== 'object' || Array.isArray(bundle.files)) {
     throw new Error('Unsupported state bundle.');
   }
-  const registry = new Map(stateFileRegistry().map((e) => [e.name, e.path]));
+  const registry = new Map(stateFileRegistry().map((e) => [e.name, e]));
   const report = [];
+  const planned = [];
+  // Validate the entire bundle before the first write, including in dry-run.
   for (const [name, file] of Object.entries(bundle.files)) {
-    const target = registry.get(name);
-    if (!target) {
+    const entry = registry.get(name);
+    if (!entry) {
       report.push({ name, status: 'unknown name — skipped' });
       continue;
     }
     if (typeof file?.content !== 'string') {
-      report.push({ name, status: 'invalid content — skipped' });
-      continue;
+      throw new Error(`Invalid state file ${name}: content must be a string.`);
     }
-    if (fs.existsSync(target) && !force) {
-      report.push({ name, status: 'exists — rerun with --force to overwrite' });
-      continue;
+    try {
+      if (file.sha256 !== undefined && file.sha256 !== contentDigest(file.content)) throw new Error('checksum mismatch');
+      validateStateFile(entry, file.content);
+    } catch (error) {
+      throw new Error(`Invalid state file ${name}: ${error.message}`, { cause: error });
     }
+    planned.push({ name, file, target: entry.path });
+  }
+  for (const { name, file, target } of planned) {
     if (dryRun) {
-      report.push({ name, status: fs.existsSync(target) ? 'would overwrite' : 'would write', path: target });
+      const exists = fs.existsSync(target);
+      report.push({ name, status: exists && !force ? 'exists — rerun with --force to overwrite' : exists ? 'would overwrite' : 'would write', path: target });
       continue;
     }
-    withLockSync(target, () => writeFileAtomicSync(target, file.content), { label: `state file ${name}` });
-    report.push({ name, status: 'written', path: target });
+    // Check existence inside the same lock as the write; a concurrent creator
+    // must not be overwritten by an import that did not request --force.
+    withLockSync(target, () => {
+      if (fs.existsSync(target) && !force) {
+        report.push({ name, status: 'exists — rerun with --force to overwrite' });
+      } else {
+        writeFileAtomicSync(target, file.content);
+        report.push({ name, status: 'written', path: target });
+      }
+    }, { label: `state file ${name}` });
   }
   return { dryRun, imported: report.filter((r) => r.status === 'written').length, report };
 }

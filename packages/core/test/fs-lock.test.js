@@ -92,3 +92,23 @@ test('concurrent processes doing read-modify-write under the lock lose no update
   // 3 processes × 30 locked increments: any lost update makes this < 90.
   assert.equal(Number(fs.readFileSync(target, 'utf8')), 90);
 });
+
+test('an aged lock held by a live local PID is never stolen', () => {
+  const target = tempTarget('state.json');
+  const lock = `${target}.lock`;
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, host: os.hostname() }));
+  const old = new Date(Date.now() - 60_000);
+  fs.utimesSync(lock, old, old);
+  assert.throws(() => withLockSync(target, () => assert.fail('entered live lock'), { staleMs: 1, timeoutMs: 60 }), /Timed out/);
+  assert.equal(JSON.parse(fs.readFileSync(lock)).pid, process.pid);
+});
+
+test('releasing a holder does not unlink a replacement lock', () => {
+  const target = tempTarget('state.json');
+  const lock = `${target}.lock`;
+  withLockSync(target, () => {
+    fs.renameSync(lock, `${lock}.old`);
+    fs.writeFileSync(lock, 'replacement');
+  });
+  assert.equal(fs.readFileSync(lock, 'utf8'), 'replacement');
+});

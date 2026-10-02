@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import {
@@ -91,6 +92,8 @@ import {
   findReviewItem,
   decideReviewItem,
   markReviewItemApplied,
+  claimReviewItem,
+  reviewTargetRevision,
   exportState,
   importState,
   inspectState,
@@ -129,7 +132,7 @@ import {
   mutationReceipt,
 } from '../reliability.js';
 
-const args = parseArgs(process.argv.slice(2));
+let args = { options: { format: process.argv.includes('--json') || process.argv.includes('--format=json') || process.argv.some((arg, i) => arg === '--format' && process.argv[i + 1] === 'json') ? 'json' : 'text' } };
 
 // Resolve config dir: prefer ~/.config/ats; fall back to legacy ~/.config/akb if it exists (akb→ats rename migration).
 function atsConfigDir() {
@@ -215,8 +218,31 @@ async function importAdapterTarget(target) {
   return mod.default || mod;
 }
 
+function configureCorpusScope() {
+  const source = resolveAdapterPkg();
+  const configDir = atsConfigDir();
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    /^(ATS_(GITHUB|NOTION|AIRTABLE|GOOGLE|OBSIDIAN|COMPOSITE|BEADS|TASKMASTER|OKF|TICKTICK|CACHE_NAMESPACE)(_|$)|TICKTICK_)/.test(key)
+  ).sort(([a], [b]) => a.localeCompare(b)));
+  const files = new Set();
+  for (const base of [configDir, path.join(os.homedir(), '.config', 'ats')]) {
+    for (const name of ['config.json', 'tokens.json', 'github.json', 'notion.json', 'airtable.json', 'google.json', 'composite.json', 'obsidian-vault']) files.add(path.join(base, name));
+  }
+  for (const [key, value] of Object.entries(environment)) {
+    if (/^ATS_.*_CONFIG$/.test(key) && value) files.add(path.resolve(value));
+  }
+  const configs = [...files].sort().map((file) => {
+    try { return [file, fs.readFileSync(file, 'utf8')]; }
+    catch (error) { if (error.code === 'ENOENT') return [file, null]; throw error; }
+  });
+  // Configuration can include credentials. Only the digest is stored, never
+  // source configuration. CWD separates adapters that discover a local root.
+  process.env.ATS_CORPUS_SCOPE = createHash('sha256').update(JSON.stringify({ adapter: source.pkg, cwd: process.cwd(), configDir, environment, configs })).digest('hex');
+}
+
 async function main() {
   try {
+    args = parseArgs(process.argv.slice(2));
     if (args.options.version) {
       const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
       console.log(pkg.version);
@@ -232,6 +258,7 @@ async function main() {
       return;
     }
 
+    configureCorpusScope();
     let result;
     switch (args.command) {
       case 'help':
@@ -400,6 +427,13 @@ async function main() {
         process.exit(1);
     }
 
+    if (args.options['require-complete'] && result && typeof result === 'object') {
+      const incomplete = result.degraded === true || result.error || result.corpus?.stale === true
+        || result.completeness?.complete === false || result.complete === false || result.truncated === true
+        || result.retrieval?.degraded === true || result.retrieval?.branches?.some((branch) => branch.ok === false)
+        || result.sourcesFailed?.length > 0 || result.corpus?.sourcesFailed?.length > 0;
+      if (incomplete) process.exitCode = 2;
+    }
     if (result !== undefined) {
       if (result && typeof result === 'object' && result.__raw !== undefined) {
         const v = result.__raw;
@@ -423,7 +457,7 @@ async function main() {
     const classified = classifyError(err);
     if (args.options.format === 'json') console.error(JSON.stringify(errorEnvelope(err), null, 2));
     else console.error(`Error [${classified.kind}]: ${err.message}`);
-    process.exit(Number.isInteger(err?.exitCode) ? err.exitCode : classified.exitCode);
+    process.exitCode = Number.isInteger(err?.exitCode) ? err.exitCode : classified.exitCode;
   }
 }
 
@@ -653,13 +687,15 @@ async function handleDoctor() {
     adapterSource: { pkg: source.pkg, origin: source.origin },
     configPath: source.configPath,
     nodeVersion: process.version,
+    probeMs: args.options['timeout-ms'] === undefined ? 4000 : Number(args.options['timeout-ms']),
   });
-  if (args.options.format === 'json') {
-    console.log(JSON.stringify(report, null, 2));
-  } else {
-    console.log(formatDoctor(report));
-  }
-  if (!report.ok) process.exit(1);
+  const output = args.options.format === 'json' ? JSON.stringify(report, null, 2) : formatDoctor(report);
+  const status = !report.ok ? 1 : args.options['require-complete'] && report.degraded ? 2 : 0;
+  await new Promise((resolve, reject) => process.stdout.write(output + '\n', (error) => error ? reject(error) : resolve()));
+  process.exitCode = status;
+  // A timed-out adapter may leave sockets or timers alive. Once the diagnostic
+  // document is flushed, end the CLI so the probe deadline bounds the command.
+  if (report.checks.some((check) => /timed out after/.test(check.detail))) process.exit(status);
 }
 
 async function handleAdapter() {
@@ -1024,6 +1060,20 @@ const summarizeReviewItem = (i) => ({
 async function applyReviewedWrite(item, adapter, t) {
   const p = item.payload;
   const approvals = [item.decidedBy].filter(Boolean);
+  if (p.expectedRevision !== undefined) {
+    let actualRevision;
+    try {
+      const current = t?.get
+        ? await t.get(p.projectId, p.taskId, { live: true })
+        : await adapter.getTask(p.projectId, p.taskId);
+      actualRevision = reviewTargetRevision(current);
+    } catch (error) {
+      throw withExitCode(new Error(`Precondition failed: cannot read reviewed target ${p.projectId}/${p.taskId}; ${error.message}`, { cause: error }), 3);
+    }
+    if (actualRevision !== p.expectedRevision) {
+      throw withExitCode(new Error(`Precondition failed: ${p.projectId}/${p.taskId} changed since review staging; stage a fresh proposal.`), 3);
+    }
+  }
   switch (p.action) {
     case 'task.updated': {
       let before;
@@ -1041,7 +1091,7 @@ async function applyReviewedWrite(item, adapter, t) {
         }
       }
       const result = t?.update
-        ? await t.update(p.projectId, p.taskId, p.patch)
+        ? await t.update(p.projectId, p.taskId, p.patch, { live: true })
         : await adapter.updateTask(p.projectId, p.taskId, { ...p.patch, tags: tagsToArray(p.patch?.tags) });
       auditCliWrite('task.updated', result, { projectId: p.projectId, taskId: p.taskId }, { fields: Object.keys(p.patch || {}), reviewId: item.id }, false, before, approvals);
       return result;
@@ -1497,12 +1547,16 @@ async function handleReview() {
       }
       const applied = [];
       for (const item of targets) {
+        let claimed;
         try {
-          const result = await applyReviewedWrite(item, adapter, t);
-          markReviewItemApplied(item.id, { result: taskRefFromResult(result, item.payload) });
+          if (item.kind !== 'task.write') throw new Error('Only task.write items can be applied here; use ats kg ratify for facts.');
+          claimed = claimReviewItem(item.id);
+          const result = await applyReviewedWrite(claimed, adapter, t);
+          markReviewItemApplied(item.id, { result: taskRefFromResult(result, claimed.payload), applyToken: claimed.applyToken });
           applied.push({ id: item.id.slice(0, 8), ok: true });
         } catch (err) {
-          markReviewItemApplied(item.id, { error: err.message });
+          if (claimed) markReviewItemApplied(item.id, { error: err.message, applyToken: claimed.applyToken });
+          process.exitCode = err.exitCode || 1;
           applied.push({ id: item.id.slice(0, 8), ok: false, error: err.message });
         }
       }
@@ -1628,8 +1682,8 @@ function spawnCacheRefresh() {
 }
 
 function corpusFreshness() {
-  const fresh = args.options.fresh === true;
-  return { staleOk: !fresh, revalidate: fresh ? false : spawnCacheRefresh };
+  const fresh = args.options.fresh === true || args.options['no-cache'] === true;
+  return { cache: !fresh, staleOk: !fresh, revalidate: fresh ? false : spawnCacheRefresh };
 }
 
 async function handleTasks() {
@@ -1817,7 +1871,7 @@ async function handleTasks() {
       let before;
       let current = null;
       try {
-        current = t?.get ? await t.get(up, uid) : await adapter.getTask(up, uid);
+        current = t?.get ? await t.get(up, uid, { live: true }) : await adapter.getTask(up, uid);
         before = snapshotTask(current?.task || current);
       } catch { before = undefined; }
       const currentTask = current?.task || current;
@@ -1885,8 +1939,8 @@ async function handleTasks() {
     case 'complete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
       let current = null;
-      if (process.env.ATS_REVIEW_ALL !== '1' || args.options['dry-run'] === true) {
-        try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
+      try { current = t?.get ? await t.get(args.positional[0], args.positional[1], { live: true }) : await adapter.getTask(args.positional[0], args.positional[1]); } catch (error) {
+        if (process.env.ATS_REVIEW_ALL === '1') throw error;
       }
       if (args.options['dry-run'] === true) return { dryRun: true, operation: 'complete', target: { projectId: args.positional[0], taskId: args.positional[1] }, before: snapshotTask(current) };
       const gate = reviewGate('task.completed', current, { projectId: args.positional[0], taskId: args.positional[1] });
@@ -1898,8 +1952,8 @@ async function handleTasks() {
     case 'delete': {
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks delete PROJECT_ID TASK_ID'); process.exit(1); }
       let current = null;
-      if (process.env.ATS_REVIEW_ALL !== '1' || args.options['dry-run'] === true) {
-        try { current = t?.get ? await t.get(args.positional[0], args.positional[1]) : await adapter.getTask(args.positional[0], args.positional[1]); } catch { current = null; }
+      try { current = t?.get ? await t.get(args.positional[0], args.positional[1], { live: true }) : await adapter.getTask(args.positional[0], args.positional[1]); } catch (error) {
+        if (process.env.ATS_REVIEW_ALL === '1') throw error;
       }
       if (args.options['dry-run'] === true) return { dryRun: true, operation: 'delete', target: { projectId: args.positional[0], taskId: args.positional[1] }, before: snapshotTask(current) };
       const gate = reviewGate('task.deleted', current, { projectId: args.positional[0], taskId: args.positional[1] });

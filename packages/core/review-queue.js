@@ -13,10 +13,10 @@
  * `kg.fact`), so every propose → review → apply flow shares one store and one
  * set of mechanics: locked mutations, atomic writes, 0600 on disk.
  *
- * Lifecycle: pending → approved → applied
- *                    ↘ rejected
- * A failed apply keeps the item approved and records `applyError`, so it can
- * be retried or rejected — never silently lost.
+ * Task-write lifecycle: pending → approved → applying → applied (or failed).
+ * An applying claim is durable before the backend call. Uncertain failures
+ * require checking the backend and staging a fresh proposal, never auto-retry.
+ * Fact proposals retain their separate ratification path.
  */
 
 import fs from 'node:fs';
@@ -25,6 +25,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
 import { taskMetadataForRead } from './task-context.js';
+import { stableDigest } from './reliability-snapshot.js';
 
 export const REVIEW_QUEUE_VERSION = 1;
 
@@ -101,6 +102,7 @@ export function decideReviewItem(idOrPrefix, decision, { by, note, queuePath = r
     const item = matchItem(queue.items, idOrPrefix);
     if (item.status !== 'pending') throw new Error(`Review item ${item.id} is ${item.status}, not pending.`);
     item.status = decision === 'approve' ? 'approved' : 'rejected';
+    if (decision === 'approve') item.approvedDigest = stableDigest({ kind: item.kind, payload: item.payload });
     item.decidedBy = by || process.env.ATS_REVIEWER || process.env.USER || 'reviewer';
     item.decidedAt = new Date().toISOString();
     if (note) item.decisionNote = note;
@@ -109,16 +111,42 @@ export function decideReviewItem(idOrPrefix, decision, { by, note, queuePath = r
   }, { label: 'review queue' });
 }
 
-/**
- * Record the outcome of executing an approved item. Success flips it to
- * `applied`; failure keeps it `approved` with `applyError` for retry.
- */
-export function markReviewItemApplied(id, { result, error, queuePath = reviewQueuePath() } = {}) {
+/** Claim the approved payload durably before any external side effect. */
+export function claimReviewItem(id, { queuePath = reviewQueuePath() } = {}) {
   return withLockSync(queuePath, () => {
     const queue = readReviewQueue({ queuePath });
     const item = matchItem(queue.items, id);
     if (item.status !== 'approved') throw new Error(`Review item ${item.id} is ${item.status}, not approved.`);
+    const digest = stableDigest({ kind: item.kind, payload: item.payload });
+    if (!item.approvedDigest || item.approvedDigest !== digest) {
+      throw new Error(`Review item ${item.id} has no matching payload approval; stage and approve it again.`);
+    }
+    item.status = 'applying';
+    item.applyToken = randomUUID();
+    item.applyStartedAt = new Date().toISOString();
+    item.applyPid = process.pid;
+    writeQueue(queue, queuePath);
+    return item;
+  }, { label: 'review queue' });
+}
+
+/**
+ * Record the outcome with the applying claim token. Claimed failures become
+ * `failed`; legacy unclaimed callers retain their approved-error behavior.
+ */
+export function markReviewItemApplied(id, { result, error, applyToken, queuePath = reviewQueuePath() } = {}) {
+  return withLockSync(queuePath, () => {
+    const queue = readReviewQueue({ queuePath });
+    const item = matchItem(queue.items, id);
+    if (item.status === 'applying') {
+      if (!applyToken || applyToken !== item.applyToken) throw new Error(`Review item ${item.id} requires its applying claim token.`);
+    } else if (item.status !== 'approved' || applyToken) {
+      throw new Error(`Review item ${item.id} is ${item.status}, not approved.`);
+    }
     if (error) {
+      // The backend may have accepted the operation before its response failed.
+      // Never automatically retry a claimed write with an uncertain outcome.
+      if (applyToken) item.status = 'failed';
       item.applyError = String(error);
     } else {
       item.status = 'applied';
