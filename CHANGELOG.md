@@ -3,6 +3,7 @@
 
 ## Unreleased
 
+- **Release preparation.** Document batching pending consumer changes before review and merging repository-only maintenance without publishing unchanged packages.
 - **Beads worker setup.** Document matching ATS and Beads actor identities for claiming and completing owned issues.
 - **Cache refresh validation.** Wait for the refreshed corpus and lease cleanup together in the stale-cache CLI proof, preserving the bounded deadline and final cleanup assertion.
 
