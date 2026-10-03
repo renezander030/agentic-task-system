@@ -360,7 +360,7 @@ so it stops re-reading the whole tree each session.
 
 ## Releases and license
 
-**v0.16.0** adds scoped native-search pagination, HTTP deadlines and cancellation, per-project failure reporting, safe mutation retries, bound create and batch replay keys, and reviewed fact freshness with separate source and learned dates. Full history: [`CHANGELOG.md`](CHANGELOG.md).
+**v0.17.0** adds blocker-aware Beads ready retrieval, named atomic claims, native dependency writes, and real CLI concurrency checks. It also fixes named undo selection and refreshes compatible dependencies. Full history: [`CHANGELOG.md`](CHANGELOG.md).
 
 MIT. See [LICENSE](LICENSE).
 
