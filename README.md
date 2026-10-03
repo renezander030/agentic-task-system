@@ -148,10 +148,13 @@ Run ATS inside the repository containing `.beads`; its directory name is the def
 ```bash
 cd /path/to/my-repo
 ats config use beads
+export ATS_AGENT_ID=worker-a BEADS_ACTOR=worker-a
 ats tasks ready --json
-ats update my-repo ISSUE --claim --agent worker-a
+ats update my-repo ISSUE --claim
 ats link add my-repo ISSUE my-repo PREREQUISITE --type depends-on --native --dry-run
 ```
+
+Use the same worker name for `ATS_AGENT_ID` and `BEADS_ACTOR`; Beads checks the claiming actor again when a claimed issue is completed.
 
 From another directory, use `ATS_ADAPTER=@reneza/ats-adapter-beads ATS_BEADS_ROOT=/path/to/my-repo ATS_BEADS_PROJECT_ID=my-repo ats tasks ready --json`. Ready work contributes a named RRF branch; claims and native dependency writes use the existing review gate. See the [Beads adapter guide](packages/adapter-beads/README.md) for worker identities, dependency semantics, and the real CLI proof.
 
