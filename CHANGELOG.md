@@ -1,9 +1,15 @@
 
 # Changelog
 
+## Unreleased
+
+- **Release preparation.** Document batching pending consumer changes before review and merging repository-only maintenance without publishing unchanged packages.
+- **Beads worker setup.** Document matching ATS and Beads actor identities for claiming and completing owned issues.
+- **Cache refresh validation.** Wait for the refreshed corpus and lease cleanup together in the stale-cache CLI proof, preserving the bounded deadline and final cleanup assertion.
+
 ## 0.17.0 - Beads ready work, atomic claims and native dependencies
 
-Unreleased.
+Released 2026-10-03.
 
 - **Ready retrieval.** `ats tasks ready` lists blocker-aware ready work through Beads. Matching ready issues add a scoped `ready` branch to RRF search; failures retain healthy results and report degradation. Project-name scopes also retain native results whose project id was resolved from the corpus.
 - **Explicit claims.** `ats update PROJECT ISSUE --claim --agent NAME` delegates to an atomic Beads claim, verifies the owner, and supports same-actor retries. Claims honor review requirements and cannot be combined with field patches.

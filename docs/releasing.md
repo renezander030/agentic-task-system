@@ -4,6 +4,21 @@ ATS is a JavaScript npm-workspaces monorepo. Publish its public npm packages,
 the existing MCP server manifest, and one matching GitHub Release. The private
 workspace is excluded. There is no Python distribution.
 
+## Prepare one complete batch
+
+Documentation, tests, and CI maintenance can merge without a version bump or
+registry publication when the published package contents and consumer behavior
+are unchanged. A merge is not itself a reason to publish.
+
+Before preparing a version bump, inventory the remaining consumer changes,
+known release blockers, and adapter integration work. Consolidate the changes
+that belong in the release into one PR, then finish the repository gates,
+package-content checks, and consumer smoke tests before requesting final review.
+Record the package versions and registry destinations for that complete batch;
+avoid publishing successive small releases while related work is still pending.
+
+## Publish the reviewed batch
+
 Before publishing, the release PR must be reviewed and accepted at its final
 commit. Merge the reviewed commit, then use a clean checkout of that merged
 revision. A changed PR needs another review. No registry publication belongs

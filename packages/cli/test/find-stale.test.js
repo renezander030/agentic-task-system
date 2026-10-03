@@ -78,13 +78,14 @@ test('find answers from the stale cache and the background refresh lands', async
   assert.equal(out.corpus.revalidating, true);
   assert.equal(out.tasks[0].id, 'old1', 'served the stale copy without blocking');
 
-  // The detached `ats cache sync` rewrites the cache with the adapter's current corpus.
+  // The detached worker writes the corpus before its finally block releases the lease.
+  // Wait for both conditions so a successful write cannot race the cleanup assertion.
   let refreshed = null;
   for (let i = 0; i < 50 && !refreshed; i++) {
     await wait(100);
     try {
       const raw = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-      if (raw.tasks?.[0]?.id === 't1') refreshed = raw;
+      if (raw.tasks?.[0]?.id === 't1' && !fs.existsSync(`${cachePath}.refreshing`)) refreshed = raw;
     } catch {}
   }
   assert.ok(refreshed, 'background refresh rewrote the cache');
