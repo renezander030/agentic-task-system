@@ -588,7 +588,10 @@ export async function find(query, cfg = {}) {
       ...(candidates ? { candidates } : {}),
     };
   }
-  const inScope = (docs) => (scopeFilter ? docs.filter(scopeFilter) : docs);
+  const scopedProjectIds = new Set(corpus.map((task) => task.projectId));
+  const inScope = (docs) => (scopeFilter
+    ? docs.filter((task) => scopedProjectIds.has(task.projectId) || scopeFilter(task))
+    : docs);
 
   // Assemble branches. Branches are pure CPU over the shared corpus (plus the
   // optional hybrid call), so we can always run them all in parallel.
@@ -635,6 +638,14 @@ export async function find(query, cfg = {}) {
       name: 'native',
       run: () =>
         adapter.searchByQuery(query).then((r) => inScope(r || []).slice(0, candidatesPerSource)),
+    });
+  }
+
+  const readySearch = adapter?.__ext?.tasks?.searchReadyByQuery;
+  if (includeNative && typeof readySearch === 'function') {
+    branchDefs.push({
+      name: 'ready',
+      run: () => Promise.resolve(readySearch(query)).then((docs) => inScope(docs || []).slice(0, candidatesPerSource)),
     });
   }
 

@@ -122,6 +122,8 @@ export function createBeadsAdapter(options = {}) {
   const root = path.resolve(options.root || process.env.ATS_BEADS_ROOT || findBeadsRoot(options.startDir));
   const projectId = String(options.projectId || process.env.ATS_BEADS_PROJECT_ID || path.basename(root));
   const binary = options.binary || process.env.ATS_BEADS_BIN || 'bd';
+  const timeoutMs = Number(options.timeoutMs ?? process.env.ATS_BEADS_TIMEOUT_MS ?? 30_000);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('Beads timeout must be a positive number.');
 
   function run(args, { json = true } = {}) {
     const commandArgs = json ? [...args, '--json'] : args;
@@ -129,6 +131,7 @@ export function createBeadsAdapter(options = {}) {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 20 * 1024 * 1024,
+      timeout: timeoutMs,
       env: { ...process.env, NO_COLOR: '1' },
     });
     if (result.error) throw new Error(`Unable to run Beads command "${binary}": ${result.error.message}`, { cause: result.error });
@@ -157,6 +160,7 @@ export function createBeadsAdapter(options = {}) {
       priority: priorityFromBeads(Number(issue.priority ?? 2)),
       beadsPriority: Number(issue.priority ?? 2),
       beadsStatus: String(issue.status || 'open'),
+      assignee: String(issue.assignee || ''),
       issueType: String(issue.issue_type || 'task'),
       design: String(issue.design || ''),
       acceptanceCriteria: String(issue.acceptance_criteria || ''),
@@ -204,6 +208,18 @@ export function createBeadsAdapter(options = {}) {
 
   async function updateTask(requestedProjectId, taskId, patch = {}) {
     assertProject(requestedProjectId);
+    if (patch.claim === true) {
+      const actor = typeof patch.actor === 'string' ? patch.actor.trim() : '';
+      if (!actor) throw new Error('Beads claims require an explicit actor: --claim --agent NAME.');
+      if (Object.entries(patch).some(([key, value]) => !['claim', 'actor'].includes(key) && value !== undefined)) {
+        throw new Error('Claim separately from field updates so a refused claim cannot partially apply a patch.');
+      }
+      const current = await getTask(projectId, taskId);
+      run(['update', current.id, '--claim', '--actor', actor]);
+      const result = await getTask(projectId, current.id);
+      if (result.assignee !== actor || result.beadsStatus !== 'in_progress') throw new Error('Beads did not confirm the requested claim.');
+      return { ...result, claimed: true };
+    }
     const args = ['update', String(taskId)];
     if (patch.title !== undefined) args.push('--title', String(patch.title));
     if (patch.content !== undefined) args.push('--description', String(patch.content || ''));
@@ -215,13 +231,47 @@ export function createBeadsAdapter(options = {}) {
     return getTask(projectId, taskId);
   }
 
-  async function searchByQuery(query) {
-    const tasks = await bulkFetch();
+  function rankTasks(tasks, query) {
     return tasks
       .map((task, index) => ({ task, index, score: scoreTask(task, query) }))
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score || a.index - b.index)
       .map((entry) => entry.task);
+  }
+
+  async function searchByQuery(query) {
+    return rankTasks(await bulkFetch(), query);
+  }
+
+  async function readyTasks({ projectId: requestedProjectId, limit } = {}) {
+    if (requestedProjectId !== undefined) assertProject(requestedProjectId);
+    const issues = run(['ready', '--limit', '0']);
+    if (!Array.isArray(issues)) throw new Error('Beads ready did not return an array.');
+    const tasks = issues.map(toTask);
+    return limit === undefined ? tasks : tasks.slice(0, limit);
+  }
+
+  async function searchReadyByQuery(query) {
+    return rankTasks(await readyTasks(), query);
+  }
+
+  async function dependencyWrite(source, target, remove = false) {
+    assertProject(source.projectId);
+    assertProject(target.projectId);
+    const task = await getTask(projectId, source.taskId);
+    const blocker = await getTask(projectId, target.taskId);
+    if (task.id === blocker.id) throw new Error('A Beads issue cannot depend on itself.');
+    const edges = (task.raw.dependencies || []).filter((edge) => dependencyTarget(edge) === blocker.id);
+    if (edges.some((edge) => dependencyType(edge) !== 'blocks')) {
+      throw new Error('A different native Beads relationship already joins these issues; preserve it and inspect it directly.');
+    }
+    const exists = edges.length > 0;
+    const changed = remove ? exists : !exists;
+    if (changed) run(['dep', remove ? 'remove' : 'add', task.id, blocker.id, ...(!remove ? ['--type', 'blocks'] : [])], { json: false });
+    const observed = await getTask(projectId, task.id);
+    const present = (observed.raw.dependencies || []).some((edge) => dependencyTarget(edge) === blocker.id && dependencyType(edge) === 'blocks');
+    if (present === remove) throw new Error('Beads did not confirm the requested dependency change.');
+    return { task: observed, links: observed.links, changed, ...(remove ? { removed: changed } : {}), native: true };
   }
 
   async function completeTask(requestedProjectId, taskId) {
@@ -261,7 +311,19 @@ export function createBeadsAdapter(options = {}) {
     bulkFetch,
     authStatus,
     authLogin,
-    __ext: { tasks: { complete: completeTask, remove: removeTask } },
+    __ext: {
+      tasks: {
+        complete: completeTask,
+        remove: removeTask,
+        ready: readyTasks,
+        searchReadyByQuery,
+        claim: (requestedProjectId, taskId, patch) => updateTask(requestedProjectId, taskId, { ...patch, claim: true }),
+      },
+      links: {
+        addDependency: (source, target) => dependencyWrite(source, target),
+        removeDependency: (source, target) => dependencyWrite(source, target, true),
+      },
+    },
   };
 }
 

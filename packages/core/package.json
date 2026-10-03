@@ -1,7 +1,7 @@
 {
   "name": "@reneza/ats-core",
-  "version": "0.16.0",
-  "description": "Adapter-agnostic core for Agentic Task System — retrieval (RRF parallel fan-out), corpus cache, usage logging, conformance kit, adapter interface",
+  "version": "0.17.0",
+  "description": "Adapter-agnostic core for Agentic Task System \u2014 retrieval (RRF parallel fan-out), corpus cache, usage logging, conformance kit, adapter interface",
   "type": "module",
   "main": "index.js",
   "types": "./index.d.ts",
@@ -81,7 +81,7 @@
   "bugs": {
     "url": "https://github.com/renezander030/agentic-task-system/issues"
   },
-  "author": "René Zander",
+  "author": "Ren\u00e9 Zander",
   "keywords": [
     "rrf",
     "reciprocal-rank-fusion",

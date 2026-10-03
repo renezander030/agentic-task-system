@@ -22,3 +22,12 @@ jobs:
         run: npm test
       - name: Npm publish disclosure gate
         run: npm run check:publish
+      - name: Install pinned Beads CLI
+        run: |
+          mkdir -p "$RUNNER_TEMP/beads-bin"
+          curl --fail --silent --show-error --location https://github.com/gastownhall/beads/releases/download/v1.3.1/beads_1.3.1_linux_amd64.tar.gz --output "$RUNNER_TEMP/beads.tar.gz"
+          printf '%s  %s\n' '3219443a9734b89b93fb16ee8d65844759fa1b3cd3cf139c606b7353cfb0715c' "$RUNNER_TEMP/beads.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/beads.tar.gz" -C "$RUNNER_TEMP/beads-bin"
+          echo "$RUNNER_TEMP/beads-bin" >> "$GITHUB_PATH"
+      - name: Real Beads integration and concurrent claims
+        run: npm run prove:beads -- --json

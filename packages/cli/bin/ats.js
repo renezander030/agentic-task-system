@@ -1025,7 +1025,10 @@ function taskValue(result) {
 function patchVerified(result, patch) {
   const observed = taskValue(result);
   const fields = Object.entries(patch).filter(([, value]) => value !== undefined);
-  return fields.every(([key, value]) => JSON.stringify(observed?.[key]) === JSON.stringify(key === 'tags' ? tagsToArray(value) : value));
+  return fields.every(([key, value]) => key === 'claim'
+    ? value === true && observed.claimed === true
+    : key === 'actor' ? observed.assignee === value
+    : JSON.stringify(observed?.[key]) === JSON.stringify(key === 'tags' ? tagsToArray(value) : value));
 }
 
 function attachMutationReceipt(result, receipt) {
@@ -1099,6 +1102,9 @@ async function applyReviewedWrite(item, adapter, t) {
       auditCliWrite('task.updated', result, { projectId: p.projectId, taskId: p.taskId }, { fields: Object.keys(p.patch || {}), reviewId: item.id }, false, before, approvals);
       return result;
     }
+    case 'task.native-link.added':
+    case 'task.native-link.removed':
+      return nativeDependencyWrite(adapter, p.action.endsWith('added') ? 'add' : 'remove', p.source, p.target, p.type, { reviewed: true });
     case 'task.completed': {
       const result = t?.complete ? await t.complete(p.projectId, p.taskId) : needsTaskExt('complete', 'complete');
       auditCliWrite('task.completed', result, { projectId: p.projectId, taskId: p.taskId }, { reviewId: item.id }, true, undefined, approvals);
@@ -1895,6 +1901,14 @@ async function handleTasks() {
         tags: args.options.tags ?? input.tags,
         reminder: args.options.reminder ?? input.reminder,
       };
+      if (args.options.claim === true) {
+        if (typeof t?.claim !== 'function') needsTaskExt('claim', 'update --claim');
+        const actor = args.options.agent || process.env.ATS_AGENT_ID;
+        if (typeof actor !== 'string' || !actor.trim()) throw new Error('--claim requires --agent NAME or ATS_AGENT_ID.');
+        if (Object.values(patch).some((value) => value !== undefined)) throw new Error('Claim separately from field updates.');
+        patch.claim = true;
+        patch.actor = actor.trim();
+      }
       // Before-image: snapshot the current task so `ats undo` can restore it after a bad write.
       let before;
       let current = null;
@@ -1990,6 +2004,8 @@ async function handleTasks() {
       const action = auditCliWrite('task.deleted', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, false, snapshotTask(current));
       return attachMutationReceipt(result, mutationReceipt({ operation: 'delete', action, requested: {}, observed: null, verified: true, target: { projectId: args.positional[0], taskId: args.positional[1] } }));
     }
+    case 'ready':
+      return t?.ready ? await t.ready({ limit, projectId: args.options.project }) : needsTaskExt('ready', 'ready');
     case 'find': {
       if (!args.positional[0]) { console.error('Usage: ats tasks find QUERY'); process.exit(1); }
       const opts = {
@@ -2198,6 +2214,30 @@ async function handleLifecycle() {
   return { ...result, evaluation: evaluateLifecycle(result.metadata) };
 }
 
+async function nativeDependencyWrite(adapter, operation, source, target, type, { reviewed = false } = {}) {
+  if (type !== 'depends-on') throw new Error('--native currently supports --type depends-on only.');
+  if (source.projectId !== target.projectId) throw new Error('Native dependencies require the same project.');
+  const method = operation === 'add' ? 'addDependency' : 'removeDependency';
+  const write = adapter.__ext?.links?.[method];
+  if (typeof write !== 'function') throw new Error('The active adapter does not support native dependency writes.');
+  const current = await adapter.getTask(source.projectId, source.taskId);
+  const blocker = await adapter.getTask(target.projectId, target.taskId);
+  source = { projectId: current.projectId, taskId: current.id };
+  target = { projectId: blocker.projectId, taskId: blocker.id };
+  if (source.taskId === target.taskId) throw new Error('A task cannot depend on itself.');
+  const exists = (current.links || []).some((link) => link.type === 'depends-on' && link.taskId === target.taskId && link.projectId === target.projectId);
+  const explain = { source, target, type, native: true, wouldChange: operation === 'add' ? !exists : exists };
+  if (!reviewed && args.options['dry-run'] === true) return { dryRun: true, operation: `link.${operation}`, explain };
+  const actionName = `task.native-link.${operation === 'add' ? 'added' : 'removed'}`;
+  if (!reviewed) {
+    const gate = reviewGate(actionName, current, { projectId: source.projectId, taskId: source.taskId, source, target, type });
+    if (gate) return gate;
+  }
+  const result = await write(source, target);
+  const action = auditCliWrite(actionName, result, source, { target, type, native: true }, false, snapshotTask(current));
+  return { ...result, receipt: mutationReceipt({ operation: `link.${operation}`, action, requested: explain, observed: result.links, verified: true, target: source }), ...(args.options.explain ? { explain } : {}) };
+}
+
 async function handleLink() {
   const adapter = await loadAdapter();
   if (args.subcommand === 'add') {
@@ -2205,6 +2245,10 @@ async function handleLink() {
     if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId || !args.options.type) {
       console.error('Usage: ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
       process.exit(1);
+    }
+    if (args.options.native === true) {
+      if (args.options['allow-missing'] === true) throw new Error('Native dependencies require an existing target.');
+      return nativeDependencyWrite(adapter, 'add', { projectId: sourceProjectId, taskId: sourceTaskId }, { projectId: targetProjectId, taskId: targetTaskId }, args.options.type);
     }
     const current = await listTaskLinks(adapter, sourceProjectId, sourceTaskId);
     const exists = current.links.some((link) => link.type === args.options.type && link.projectId === targetProjectId && link.taskId === targetTaskId);
@@ -2241,6 +2285,10 @@ async function handleLink() {
     if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId || !args.options.type) {
       console.error('Usage: ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
       process.exit(1);
+    }
+    if (args.options.native === true) {
+      if (args.options['allow-missing'] === true) throw new Error('Native dependencies require an existing target.');
+      return nativeDependencyWrite(adapter, 'remove', { projectId: sourceProjectId, taskId: sourceTaskId }, { projectId: targetProjectId, taskId: targetTaskId }, args.options.type);
     }
     const current = await listTaskLinks(adapter, sourceProjectId, sourceTaskId);
     const exists = current.links.some((link) => link.type === args.options.type && link.projectId === targetProjectId && link.taskId === targetTaskId);

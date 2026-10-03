@@ -24,7 +24,7 @@ const BOOLEAN_OPTIONS = new Set([
   'force', 'write', 'dry-run', 'once', 'close', 'relevance', 'no-relevance',
   'no-facts', 'semantic', 'lexical', 'include-retracted', 'cypher', 'graphiti',
   'additive', 'clear-parent', 'allow-missing', 'live', 'require-complete',
-  'if-absent', 'non-interactive', 'n',
+  'if-absent', 'non-interactive', 'claim', 'native', 'n',
 ]);
 const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
@@ -555,6 +555,10 @@ Types: blocks, depends-on, parent, conflicts-with, supports, evidence, decision,
 --allow-missing records a forward link to a task that does not exist yet; it back-resolves
 on the next graph read once the target is created. 'ats link resolve' refreshes the stored
 placeholder title to the real one after the target lands.
+--native writes a backend dependency (currently Beads, --type depends-on only).
+Both endpoints must exist in the same project. Native writes use the review gate;
+other native relationship types are preserved.
+
 --dry-run returns the causal plan without writing; --explain includes the explicit
 source, target, type, reason and whether the operation changed state.
 
@@ -1070,6 +1074,7 @@ Usage: ats tasks <subcommand> [options]
 
 Subcommands:
   list <project_id>                List tasks in project
+  ready                           Blocker-aware ready tasks (supported adapters)
   get <project_id> <task_id>       Get task details
   create <title>                   Create task (in default project)
   create <project_id> <title>      Create task (in specific project)
@@ -1108,6 +1113,8 @@ Create/Update options:
   --tags <tags>          Comma-separated tags
   --reminder <time>      Reminder: 15m, 1h, 1d (before due)
   --title <text>         New title (update only)
+  --claim --agent NAME  (update) Atomically claim a Beads issue for a distinct
+                         worker; use separately from field updates
   --if-absent            (create) Return the active task that already has
                          this title in the project instead of creating one
   --idempotency-key <k>  (create) A repeat with the same key returns what the

@@ -1,9 +1,20 @@
 
 # Changelog
 
-## 0.16.0 - Complete source reads, safe retries and fact freshness
+## 0.17.0 - Beads ready work, atomic claims and native dependencies
 
 Unreleased.
+
+- **Ready retrieval.** `ats tasks ready` lists blocker-aware ready work through Beads. Matching ready issues add a scoped `ready` branch to RRF search; failures retain healthy results and report degradation. Project-name scopes also retain native results whose project id was resolved from the corpus.
+- **Explicit claims.** `ats update PROJECT ISSUE --claim --agent NAME` delegates to an atomic Beads claim, verifies the owner, and supports same-actor retries. Claims honor review requirements and cannot be combined with field patches.
+- **Native dependencies.** `ats link add|remove --type depends-on --native` writes native Beads blocking edges with previews, approval gates, target revision checks and readback. Different native relationship types are preserved, and Beads cycle checks remain enabled.
+- **Real CLI validation.** The Beads proof now exercises an official CLI and disposable embedded Dolt database, including competing claims, approval application, source changes during review, dependency preservation and write conformance. CI pins Beads 1.3.1 with SHA-256 verification on Node 20 and 22. The offline fixture proof remains available as `prove:beads:synthetic`.
+- **Dependency maintenance.** Refresh compatible dependency versions to resolve seven npm audit findings while keeping the Hono Node adapter on its major-1 line.
+- **Documentation.** Correct the 0.16.0 release date, completed refactor checklist and available adapter descriptions; document per-repository Beads setup.
+
+## 0.16.0 - Complete source reads, safe retries and fact freshness
+
+Released 2026-10-03.
 
 - **Scoped native search.** GitHub and Notion search follow result pages and retain configured repository/database scope. GitHub's 1000-match cap, server incompleteness, and missing/repeated Notion cursors become explicit search warnings.
 - **HTTP deadlines and cancellation.** Shared HTTP requests use a 30-second deadline through retries and response-body consumption (`ATS_HTTP_TIMEOUT_MS`). Caller cancellation stops retry waits and prevents another attempt.
