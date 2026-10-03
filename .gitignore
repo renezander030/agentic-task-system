@@ -40,3 +40,7 @@ packages/core/bench/agent-recall-results.json
 # Local release preparation tools and install smoke checks
 .release-tools/
 .release-smoke/
+
+# Disposable local integration fixtures and tooling
+.beads-proof-*/
+.audit-tools/

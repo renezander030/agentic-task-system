@@ -132,3 +132,23 @@ test('an unreadable reviewed target fails its precondition before any write', (t
   assert.match(result.data.applied[0].error, /cannot read reviewed target/);
   assert.deepEqual(JSON.parse(fs.readFileSync(state)), initial);
 });
+
+
+test('undo targets a named older action and refuses an unknown id without writing', (t) => {
+  const { run, state, initial } = fixture(t);
+  assert.equal(run(['update', 'p1', 't1', '--title', 'First update']).status, 0);
+  assert.equal(run(['update', 'p1', 't1', '--title', 'Second update']).status, 0);
+  const history = run(['history', 'p1', 't1']).data;
+  const older = history.revisions.find((entry) => entry.before?.title === initial.title);
+  const preview = run(['undo', older.actionId, '--dry-run']);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(preview.data.id, older.actionId);
+  assert.equal(preview.data.patch.title, initial.title);
+  assert.equal(JSON.parse(fs.readFileSync(state)).title, 'Second update');
+  assert.notEqual(run(['undo', 'missing-action']).status, 0);
+  assert.equal(JSON.parse(fs.readFileSync(state)).title, 'Second update');
+  const restored = run(['undo', older.actionId]);
+  assert.equal(restored.status, 0, restored.stderr);
+  assert.equal(restored.data.undone, older.actionId);
+  assert.equal(JSON.parse(fs.readFileSync(state)).title, initial.title);
+});

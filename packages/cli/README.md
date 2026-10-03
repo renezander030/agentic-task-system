@@ -38,7 +38,8 @@ export ATS_OKF_BUNDLE="$HOME/knowledge/ga4"
 ats find "event count"
 ```
 
-Other stores (Notion / Things) are roadmap.
+Notion, GitHub, Airtable, Google, and other backends are available through
+[published adapters](https://github.com/renezander030/agentic-task-system#available-adapters).
 
 Using Beads in a code repository:
 

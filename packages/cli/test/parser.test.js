@@ -164,3 +164,14 @@ test('terminator preserves literal flag-shaped positionals; value flags fail ear
     assert.throws(() => parseArgs(['find', 'x', flag, '--json']), /requires a value/);
   }
 });
+
+
+test('claim and native switches preserve subsequent positional ids', () => {
+  const claim = parseArgs(['tasks', 'update', '--claim', 'project', 'task', '--agent', 'worker-a']);
+  assert.deepEqual(claim.positional, ['project', 'task']);
+  assert.equal(claim.options.claim, true);
+  assert.equal(claim.options.agent, 'worker-a');
+  const native = parseArgs(['link', 'add', '--native', 'project', 'source', 'project', 'target', '--type', 'depends-on']);
+  assert.deepEqual(native.positional, ['project', 'source', 'project', 'target']);
+  assert.equal(native.options.native, true);
+});

@@ -1,6 +1,6 @@
 # Refactor Plan — ~/ticktick-cli → @reneza/ats-*
 
-The framework split is staged. Today's working CLI lives at `~/ticktick-cli/` and stays untouched. The new structure lives here.
+The framework split is complete. This document records the original v0.1 migration plan; the checklist below reflects the shipped packages.
 
 ## File mapping
 
@@ -49,15 +49,15 @@ See `docs/adapter-interface.md` for full spec.
 - The interactive task-create wizard (`lib/interactive.js`) — defer to v0.2.
 - Vector index management commands (`tasks vector-sync`) — wraps `adapter-ticktick/embedding.js` but the CLI subcommand surface stays adapter-namespaced (`ats adapter-cmd <args>`).
 
-## Status
+## Status — completed
 
 - [x] Monorepo scaffolded
 - [x] Package.json skeletons in core / adapter-ticktick / cli
 - [x] Docs copied + DRAFT headers stripped
 - [x] Examples copied
-- [ ] Core code port
-- [ ] TickTick adapter port
-- [ ] CLI binary
-- [ ] Smoke test
-- [ ] Public repo creation
-- [ ] npm publish
+- [x] Core code port
+- [x] TickTick adapter port
+- [x] CLI binary
+- [x] Smoke test
+- [x] Public repo creation
+- [x] npm publish

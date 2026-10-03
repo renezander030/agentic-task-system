@@ -1,6 +1,6 @@
 {
   "name": "@reneza/ats-adapter-google",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "Google Workspace adapter for Agentic Task System. Pull Google Sheets, Docs, and Slides into ATS retrieval and MCP as a read-only corpus, authed as a dedicated share-scoped user. Adapter, not migration.",
   "type": "module",
   "main": "index.js",
@@ -12,7 +12,7 @@
     "test": "node --test"
   },
   "peerDependencies": {
-    "@reneza/ats-core": "^0.16.0"
+    "@reneza/ats-core": "^0.17.0"
   },
   "dependencies": {},
   "repository": {
@@ -24,7 +24,7 @@
   "bugs": {
     "url": "https://github.com/renezander030/agentic-task-system/issues"
   },
-  "author": "René Zander",
+  "author": "Ren\u00e9 Zander",
   "keywords": [
     "google-workspace",
     "google-sheets",

@@ -87,7 +87,7 @@ ATS is a good fit when operational context already lives in task systems or conn
 
 - **A two-way bus.** The agent reads the task fields an adapter provides; where the adapter supports writes, it writes results back where you'll see them.
 - **First-fetch relevance.** Capability-driven branches — keyword and adapter-native search, plus dense retrieval when available — are RRF-fused with provenance to reduce repeated search-and-refine loops. Every `find` carries a confidence verdict from branch agreement (`--min-sources N` is the matching gate), `--project` binds it to one project, a stale corpus cache answers immediately while it refreshes in the background, and an empty exact match (`notes find`, `search`, `get`) answers with the nearest items instead of nothing.
-- **Writes that survive retries and concurrency.** `update --append` / `--prepend` add to the body that is there; `--if-match <contentHash>` lands only while the body is unchanged; `create --if-absent` and `--idempotency-key` make a retried create return what the first one produced. One retry policy (`Retry-After`, jittered backoff, transient 5xx, dropped connections) sits under every adapter's HTTP path.
+- **Writes that survive retries and concurrency.** `update --append` / `--prepend` add to the body that is there; `--if-match <contentHash>` lands only while the body is unchanged; `create --if-absent` and `--idempotency-key` make a retried create return what the first one produced. Shared HTTP requests have deadlines and respect cancellation. Reads retry transient failures; mutations retry only explicit rate-limit rejections, so ambiguous failures do not replay a write.
 - **Durable typed links.** One agent attaches a `decision` / `depends-on` / `output` / `supersedes` link; a later agent in a fresh context receives it via `ats context`. The handoff lives in the task app, not a chat log.
 - **Execution context.** `ats intent` captures outcome/why/done-when; `ats lifecycle` keeps stale context from steering current work; `ats security` records scoped allow/deny decisions for cooperating clients; `ats ledger` records what an agent did and whether the task advanced; `ats promote` turns exploration into a committed goal; `ats hierarchy evaluate` checks local work still supports its parent.
 - **Bounded events.** `ats events watch --json` emits deterministic `task.created/updated/completed/...` NDJSON, spooled `0600` with pending/ack recovery and stable dedup IDs. ATS only emits observations — a consumer still evaluates intent, validity, and security before acting.
@@ -140,6 +140,20 @@ Per-adapter auth and mapping live in each package's README. PRs welcome — scaf
 ats adapter new linear              # writes a contract-complete skeleton
 ats adapter test ./ats-adapter-linear   # pass/fail/skip per contract check
 ```
+
+### Beads in each repository
+
+Run ATS inside the repository containing `.beads`; its directory name is the default project id. To address another repository explicitly, set its root and project id for that command:
+
+```bash
+cd /path/to/my-repo
+ats config use beads
+ats tasks ready --json
+ats update my-repo ISSUE --claim --agent worker-a
+ats link add my-repo ISSUE my-repo PREREQUISITE --type depends-on --native --dry-run
+```
+
+From another directory, use `ATS_ADAPTER=@reneza/ats-adapter-beads ATS_BEADS_ROOT=/path/to/my-repo ATS_BEADS_PROJECT_ID=my-repo ats tasks ready --json`. Ready work contributes a named RRF branch; claims and native dependency writes use the existing review gate. See the [Beads adapter guide](packages/adapter-beads/README.md) for worker identities, dependency semantics, and the real CLI proof.
 
 ## Tradeoffs and limits
 
@@ -346,7 +360,7 @@ so it stops re-reading the whole tree each session.
 
 ## Releases and license
 
-**v0.10.0** added partial-retrieval reporting, optional reranking, usage observability, duplicate/contradiction detection, and reactive OAuth refresh. **v0.9.0** added reversible writes, forward/dangling links, Obsidian path hardening, and verified stdio configuration for more clients. Full history: [`CHANGELOG.md`](CHANGELOG.md).
+**v0.16.0** adds scoped native-search pagination, HTTP deadlines and cancellation, per-project failure reporting, safe mutation retries, bound create and batch replay keys, and reviewed fact freshness with separate source and learned dates. Full history: [`CHANGELOG.md`](CHANGELOG.md).
 
 MIT. See [LICENSE](LICENSE).
 

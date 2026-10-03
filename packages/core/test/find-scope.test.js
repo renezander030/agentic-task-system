@@ -78,3 +78,22 @@ test('a project can be named, several can be given, and an empty scope says so',
   assert.equal(none.scope.matched, 0);
   assert.equal(none.degraded, false);
 });
+
+
+test('ready retrieval contributes provenance and obeys project scope', async () => {
+  const withReady = { ...adapter, __ext: { tasks: { searchReadyByQuery: async () => Object.values(corpus).flat() } } };
+  const out = await find('TLS', { adapter: withReady, project: 'ops', explain: true });
+  assert.deepEqual(out.tasks.map((task) => task.id), ['a1']);
+  assert.ok(out.tasks[0].sources.includes('ready'));
+  assert.equal(out.degraded, false);
+  const withoutNative = await find('TLS', { adapter: withReady, includeNative: false });
+  assert.ok(withoutNative.tasks.every((task) => !task.sources.includes('ready')));
+});
+
+test('failed ready retrieval retains healthy search results and reports degradation', async () => {
+  const withReady = { ...adapter, __ext: { tasks: { searchReadyByQuery: async () => { throw new Error('ready database unavailable'); } } } };
+  const out = await find('TLS', { adapter: withReady });
+  assert.ok(out.tasks.length > 0);
+  assert.equal(out.degraded, true);
+  assert.match(out.warnings.join(' '), /ready.*unavailable/);
+});
