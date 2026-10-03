@@ -99,6 +99,8 @@ try {
   const applied = ats(['review', 'apply', staged.reviewId]);
   checks.approvedNativeWriteApplies = applied.applied.length === 1 && applied.applied[0].ok === true && !(issue(blocked.id).dependencies || []).some((edge) => (edge.id || edge.depends_on_id) === blocker.id);
   checks.nativeRemovalIsIdempotent = ats(native('remove', blocked.id, blocker.id)).changed === false;
+  const nativeHistory = ats(['history', project, blocked.id]).revisions.filter((entry) => entry.action.startsWith('task.native-link.'));
+  checks.nativeWritesAreNotBodyRestores = nativeHistory.length === 4 && nativeHistory.every((entry) => !entry.restorable && ats(['undo', entry.actionId, '--dry-run'], { allowFailure: true }).status !== 0);
 
   const stale = ats(native('add', blocked.id, blocker.id), { env: { ATS_REVIEW_ALL: '1' } });
   ats(['review', 'approve', stale.reviewId, '--by', 'demo-reviewer']);
@@ -126,6 +128,10 @@ try {
   ats(['review', 'approve', stagedClaim.reviewId, '--by', 'demo-reviewer']);
   ats(['review', 'apply', stagedClaim.reviewId]);
   checks.approvedClaimApplies = issue(ready.id).assignee === 'demo-worker-d';
+  const claimHistory = ats(['history', project, race.id]).revisions.filter((entry) => entry.action === 'task.claimed');
+  checks.claimsAreNotBodyRestores = claimHistory.length === 2 && claimHistory.every((entry) => !entry.restorable && ats(['undo', entry.actionId, '--dry-run'], { allowFailure: true }).status !== 0);
+  const approvedClaimHistory = ats(['history', project, ready.id]).revisions.filter((entry) => entry.action === 'task.claimed');
+  checks.approvedClaimIsNotBodyRestore = approvedClaimHistory.length === 1 && !approvedClaimHistory[0].restorable && ats(['undo', approvedClaimHistory[0].actionId], { allowFailure: true }).status !== 0 && issue(ready.id).assignee === 'demo-worker-d';
 
   console.error('Real Beads proof: write conformance');
   const conformance = ats(['adapter', 'test', '@reneza/ats-adapter-beads', '--write']);

@@ -48,6 +48,8 @@ ATS-authored intent, hierarchy, security, and ordinary links live in the issue d
 
 `ats update PROJECT ISSUE --claim --agent NAME` delegates to Beads' atomic claim. Every worker needs a distinct name. The same actor may retry its claim; another actor cannot take it. Claims are separate from field updates and honor ATS approval requirements. Claiming a specific issue checks status and ownership, rather than its blockers; readiness can change after a `ready` read.
 
+Claims and native dependency changes are audited but have no task-body before-image, so `ats undo` and history restoration refuse them. Reverse a native dependency with the explicit `ats link add|remove --native` command; manage ownership through Beads. Native edge changes and ATS review preconditions use separate reads and writes, so direct Beads writers can race after the check.
+
 Beads subprocesses have a 30-second default timeout (`ATS_BEADS_TIMEOUT_MS`, or `timeoutMs` in `createBeadsAdapter`). The real integration proof uses Beads 1.3.1 and a disposable embedded Dolt database:
 
 ```bash

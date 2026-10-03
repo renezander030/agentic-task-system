@@ -1099,7 +1099,7 @@ async function applyReviewedWrite(item, adapter, t) {
       const result = t?.update
         ? await t.update(p.projectId, p.taskId, p.patch, { live: true })
         : await adapter.updateTask(p.projectId, p.taskId, { ...p.patch, tags: tagsToArray(p.patch?.tags) });
-      auditCliWrite('task.updated', result, { projectId: p.projectId, taskId: p.taskId }, { fields: Object.keys(p.patch || {}), reviewId: item.id }, false, before, approvals);
+      auditCliWrite(p.patch?.claim === true ? 'task.claimed' : 'task.updated', result, { projectId: p.projectId, taskId: p.taskId }, { fields: Object.keys(p.patch || {}), reviewId: item.id }, false, p.patch?.claim === true ? undefined : before, approvals);
       return result;
     }
     case 'task.native-link.added':
@@ -1964,11 +1964,11 @@ async function handleTasks() {
         ? await t.update(up, uid, patch,
           ...(args.options.live === true ? [{ live: true }] : []))
         : await adapter.updateTask(up, uid, { ...patch, tags: tagsToArray(patch.tags) });
-      const action = auditCliWrite('task.updated', result, { projectId: up, taskId: uid }, {
+      const action = auditCliWrite(patch.claim === true ? 'task.claimed' : 'task.updated', result, { projectId: up, taskId: uid }, {
         fields: Object.keys(patch).filter((key) => patch[key] !== undefined),
         ...(bodyMode && bodyMode !== 'content' ? { mode: bodyMode } : {}),
         ...(ifMatch !== undefined ? { ifMatch: String(ifMatch) } : {}),
-      }, false, before);
+      }, false, patch.claim === true ? undefined : before);
       return attachMutationReceipt(withContentHash(result), mutationReceipt({
         operation: 'update',
         action,
@@ -2234,7 +2234,7 @@ async function nativeDependencyWrite(adapter, operation, source, target, type, {
     if (gate) return gate;
   }
   const result = await write(source, target);
-  const action = auditCliWrite(actionName, result, source, { target, type, native: true }, false, snapshotTask(current));
+  const action = auditCliWrite(actionName, result, source, { target, type, native: true });
   return { ...result, receipt: mutationReceipt({ operation: `link.${operation}`, action, requested: explain, observed: result.links, verified: true, target: source }), ...(args.options.explain ? { explain } : {}) };
 }
 
