@@ -1,0 +1,3 @@
+
+# Keep the facts module reviewable across the legacy NUL separator cleanup.
+packages/core/kg.js text diff

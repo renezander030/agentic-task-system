@@ -97,6 +97,8 @@ ATS is a good fit when operational context already lives in task systems or conn
 
 ATS-managed execution metadata can be encoded in the task body, with typed links under `## Related` and consulted sources under `## References`. Managed helpers are designed to preserve human-authored rows and links; `update --content` replaces the complete body, so callers that add to a body use `--append` / `--prepend`, present the `contentHash` they read with `--if-match`, and verify the result. [`npm run prove:intent`](examples/intent-layer/) runs a deterministic synthetic proof of the execution-context path.
 
+For reliable automation and freshness workflows, see [CLI reliability](docs/cli-reliability.md): scoped pagination, bounded requests, payload-bound retry/resume keys, and reviewed fact confirmations.
+
 ## Minimal adapter-neutral workflow
 
 1. **Select and verify an adapter:** `ats config use <adapter>`, authenticate as its README describes, then run `ats doctor`.

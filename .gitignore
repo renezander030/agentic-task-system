@@ -36,3 +36,7 @@ packages/core/bench/agent-recall-results.json
 
 # MCP publisher credentials (some publisher versions store login in CWD)
 .mcpregistry_*
+
+# Local release preparation tools and install smoke checks
+.release-tools/
+.release-smoke/

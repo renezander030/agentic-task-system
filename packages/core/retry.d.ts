@@ -6,6 +6,9 @@ export interface RetryPolicy {
 }
 
 export interface RetryOptions extends Partial<RetryPolicy> {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  retrySafe?: boolean;
   label?: string;
   sleep?: (ms: number) => Promise<void>;
   onRetry?: (info: { attempt: number; waitMs: number; reason: string; label?: string }) => void;
@@ -23,4 +26,4 @@ export function withRetry<T>(attempt: (n: number) => Promise<T> | T, opts?: Retr
 export function retryingFetch(
   fetchFn?: (url: string | URL, init?: RequestInit) => Promise<Response>,
   opts?: RetryOptions
-): (url: string | URL, init?: RequestInit) => Promise<Response>;
+): (url: string | URL, init?: RequestInit & { retrySafe?: boolean }) => Promise<Response>;

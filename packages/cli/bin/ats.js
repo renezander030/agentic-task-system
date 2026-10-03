@@ -38,7 +38,7 @@ import {
   getAgentLayerHelp,
 } from '../parser.js';
 import { formatSkipped } from '../format-skip.js';
-import { lookupIdempotencyKey, recordIdempotencyKey, findActiveByTitle } from '../idempotency.js';
+import { recordIdempotencyKey, claimIdempotencyKey, claimReviewedIdempotencyKey, markIdempotencyUncertain, findActiveByTitle } from '../idempotency.js';
 import {
   validateAdapter,
   runConformance,
@@ -94,6 +94,7 @@ import {
   markReviewItemApplied,
   claimReviewItem,
   reviewTargetRevision,
+  stableDigest,
   exportState,
   importState,
   inspectState,
@@ -103,6 +104,8 @@ import {
   loadFacts,
   proposeFact,
   proposeRetract,
+  proposeConfirm,
+  staleFacts,
   ratifyFactItem,
   listKgFacts,
   askFacts,
@@ -124,8 +127,8 @@ import { resolveOpen, formatOpenResult, launchUrl, shouldLaunch } from '../open.
 import {
   readStructuredInput,
   parseBatchInput,
-  readBatchJournal,
-  appendBatchJournal,
+  claimBatchItem,
+  finishBatchItem,
   withTimeout,
   classifyError,
   errorEnvelope,
@@ -1107,23 +1110,25 @@ async function applyReviewedWrite(item, adapter, t) {
       return result;
     }
     case 'task.created': {
-      // A staged idempotent create that already landed (an earlier apply of the
-      // same key) is not created twice.
+      let claim;
       if (p.idempotencyKey !== undefined) {
-        const seen = lookupIdempotencyKey(p.idempotencyKey, { configDir: atsConfigDir() });
-        if (seen?.taskId) return { created: false, idempotent: true, key: p.idempotencyKey, task: seen };
+        if (p.idempotencyScope !== process.env.ATS_CORPUS_SCOPE) throw withExitCode(new Error('Idempotency precondition failed: active source changed since staging.'), 3);
+        claim = claimReviewedIdempotencyKey(p.idempotencyKey, item.id, p.idempotencyDigest, { configDir: atsConfigDir() });
+        if (claim.replayed) return { created: false, idempotent: true, key: p.idempotencyKey, task: claim.entry };
       }
-      const result = t?.create
-        ? await t.create(p.projectId || '', p.title, p.opts || {})
-        : await adapter.createTask({
-          title: p.title,
-          projectId: p.projectId || undefined,
-          content: p.opts?.content,
-          dueDate: p.opts?.dueDate,
-          tags: tagsToArray(p.opts?.tags),
-        });
-      auditCliWrite('task.created', result, { projectId: p.projectId }, { title: p.title, reviewId: item.id }, false, undefined, approvals);
-      return result;
+      const idemOptions = { configDir: atsConfigDir(), token: claim?.entry.token };
+      try {
+        const result = t?.create
+          ? await t.create(p.projectId || '', p.title, p.opts || {})
+          : await adapter.createTask({ title: p.title, projectId: p.projectId || undefined,
+            content: p.opts?.content, dueDate: p.opts?.dueDate, tags: tagsToArray(p.opts?.tags) });
+        auditCliWrite('task.created', result, { projectId: p.projectId }, { title: p.title, reviewId: item.id }, false, undefined, approvals);
+        if (claim) recordIdempotencyKey(p.idempotencyKey, taskRef(result, p.projectId), idemOptions);
+        return result;
+      } catch (error) {
+        if (claim) { try { markIdempotencyUncertain(p.idempotencyKey, idemOptions); } catch {} }
+        throw error;
+      }
     }
     default:
       throw new Error(`Unknown staged write action: ${p.action}`);
@@ -1154,7 +1159,7 @@ async function handleKg() {
         const text = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8');
         const report = proposeFactLines(text.split('\n'), {
           by: agentId,
-          defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence },
+          defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence, validAt: args.options['valid-at'], learnedAt: args.options['learned-at'] },
         });
         const ok = report.refused === 0 && report.invalid === 0;
         report.message = ok
@@ -1179,6 +1184,8 @@ async function handleKg() {
       try {
         item = proposeFact({
           subject, predicate, object,
+          validAt: args.options['valid-at'],
+          learnedAt: args.options['learned-at'],
           domain: args.options.domain,
           source: args.options.source,
           confidence: args.options.confidence,
@@ -1198,6 +1205,12 @@ async function handleKg() {
         ...(item.payload.supersedes ? { supersedes: item.payload.supersedes } : {}),
         message: `Fact proposed as ${item.id.slice(0, 8)}. Ratify with: ats review approve ${item.id.slice(0, 8)} && ats kg ratify --all`,
       };
+    }
+    case 'stale':
+      return staleFacts({ domain: args.options.domain, days: args.options.days === undefined ? 60 : Number(args.options.days), limit: args.options.limit === undefined ? 50 : Number(args.options.limit) });
+    case 'confirm': {
+      const item = proposeConfirm({ factId: args.positional[0], source: args.options.source, by: agentId });
+      return { staged: true, reviewId: item.id, message: 'Confirmation staged; approve it and run ats kg ratify.' };
     }
     case 'retract': {
       if (!args.positional[0]) { console.error('Usage: ats kg retract FACT_ID [--reason "..."]'); process.exit(1); }
@@ -1219,17 +1232,20 @@ async function handleKg() {
         process.exit(1);
       }
       const ratified = [];
-      for (const item of targets) {
+      for (const target of targets) {
+        let item;
         try {
+          item = claimReviewItem(target.id);
           const outcome = ratifyFactItem(item);
           const result = outcome.op === 'add'
             ? { factId: outcome.fact.id, ...(outcome.superseded ? { superseded: outcome.superseded } : {}) }
-            : { retracted: outcome.factId };
-          markReviewItemApplied(item.id, { result });
+            : { [outcome.op === 'confirm' ? 'confirmed' : 'retracted']: outcome.factId };
+          markReviewItemApplied(item.id, { result, applyToken: item.applyToken });
           ratified.push({ id: item.id.slice(0, 8), ok: true, ...result });
         } catch (err) {
-          try { markReviewItemApplied(item.id, { error: err.message }); } catch {}
-          ratified.push({ id: item.id.slice(0, 8), ok: false, error: err.message });
+          if (item) { try { markReviewItemApplied(item.id, { error: err.message, applyToken: item.applyToken }); } catch {} }
+          ratified.push({ id: target.id.slice(0, 8), ok: false, error: err.message });
+          process.exitCode = 5;
         }
       }
       return { ratified };
@@ -1441,25 +1457,30 @@ async function handleBatch() {
   const file = args.subcommand || args.positional[0];
   const items = parseBatchInput(file);
   const journal = typeof args.options.journal === 'string' ? args.options.journal : null;
-  const completed = readBatchJournal(journal);
   const dryRun = args.options['dry-run'] === true;
   const adapter = await loadAdapter();
   const t = adapter.__ext?.tasks;
   const outcomes = [];
   for (const item of items) {
-    if (completed.has(item.id)) {
-      outcomes.push({ id: item.id, op: item.op, status: 'skipped', reason: 'already applied in journal' });
-      continue;
-    }
     let outcome;
+    let claim;
     try {
+      if (!dryRun) claim = claimBatchItem(journal, item, process.env.ATS_CORPUS_SCOPE);
+      if (claim?.replayed) {
+        outcomes.push({ id: item.id, op: item.op, status: 'skipped', reason: 'matching operation already applied in journal' });
+        continue;
+      }
       const executed = await executeBatchOperation(adapter, t, item, dryRun);
       outcome = { id: item.id, op: item.op, ...executed };
     } catch (error) {
       outcome = { id: item.id, op: item.op, status: 'failed', error: errorEnvelope(error).error };
     }
+    // A dry run neither claims nor updates a real resume journal.
+    if (claim) {
+      try { finishBatchItem(journal, claim, outcome); }
+      catch (error) { outcome = { id: item.id, op: item.op, status: 'failed', error: errorEnvelope(error).error }; }
+    }
     outcomes.push(outcome);
-    appendBatchJournal(journal, outcome);
   }
   const summary = Object.fromEntries(['planned', 'applied', 'staged', 'skipped', 'failed'].map((status) => [status, outcomes.filter((outcome) => outcome.status === status).length]));
   if (summary.failed) process.exitCode = 5;
@@ -1779,66 +1800,73 @@ async function handleTasks() {
       // Idempotent creates: a key that already produced something returns it;
       // --if-absent returns the active task that already carries this title.
       const idemKey = typeof args.options['idempotency-key'] === 'string' ? args.options['idempotency-key'] : undefined;
-      if (idemKey !== undefined) {
-        const seen = lookupIdempotencyKey(idemKey, { configDir: atsConfigDir() });
-        if (seen) return await idempotentReplay(idemKey, seen, adapter, t);
-      }
-      if (args.options['if-absent'] === true) {
-        const existing = await activeTaskWithTitle(adapter, t, projectId, title);
-        if (existing) {
-          if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(existing, projectId), { configDir: atsConfigDir() });
-          return {
-            created: false,
-            existing: true,
-            reason: 'if-absent: an active task with this title already exists',
-            task: existing,
-          };
+      const binding = stableDigest({ scope: process.env.ATS_CORPUS_SCOPE, request: { projectId, title, opts, ifAbsent: args.options['if-absent'] === true } });
+      const claim = idemKey === undefined ? null : claimIdempotencyKey(idemKey,
+        { projectId, title, opts, ifAbsent: args.options['if-absent'] === true },
+        { configDir: atsConfigDir(), scope: process.env.ATS_CORPUS_SCOPE });
+      if (claim?.replayed) return await idempotentReplay(idemKey, claim.entry, adapter, t);
+      const idemOptions = { configDir: atsConfigDir(), ...(claim ? { token: claim.entry.token } : {}) };
+      try {
+        if (args.options['if-absent'] === true) {
+          const existing = await activeTaskWithTitle(adapter, t, projectId, title);
+          if (existing) {
+            if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(existing, projectId), idemOptions);
+            return {
+              created: false,
+              existing: true,
+              reason: 'if-absent: an active task with this title already exists',
+              task: existing,
+            };
+          }
         }
-      }
-      // Creates have no target metadata to consult; they stage only under the
-      // global ATS_REVIEW_ALL=1 gate.
-      const createGate = reviewGate('task.created', null, { projectId, title, opts, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
-      if (createGate) {
-        if (idemKey !== undefined) recordIdempotencyKey(idemKey, { reviewId: createGate.reviewId, projectId }, { configDir: atsConfigDir() });
-        return createGate;
-      }
-      const result = t?.create
-        ? await t.create(projectId, title, opts)
-        : await adapter.createTask({
-          title,
-          projectId: projectId || undefined,
-          content: opts.content,
-          dueDate: opts.dueDate,
-          tags: tagsToArray(opts.tags),
-        });
-      const action = auditCliWrite('task.created', result, { projectId }, { title, ...(idemKey !== undefined ? { idempotencyKey: idemKey } : {}) });
-      if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(result, projectId), { configDir: atsConfigDir() });
-      const relevance = adapter.__ext?.relevance;
-      if (relevance?.isEnabled?.({
-        relevance: !!args.options.relevance,
-        noRelevance: args.options['no-relevance'] === true,
-      })) {
-        try {
-          const block = await relevance.buildEnrichInstruction({
-            taskId: result.task?.fullId || result.task?.id,
-            projectId: result.task?.fullProjectId || result.task?.projectId || projectId,
-            title: result.task?.title || title,
-            content: opts.content || '',
-            wikiProject: wikiProject(),
+        // Creates have no target metadata to consult; they stage only under the
+        // global ATS_REVIEW_ALL=1 gate.
+        const createGate = reviewGate('task.created', null, { projectId, title, opts, ...(idemKey !== undefined ? { idempotencyKey: idemKey, idempotencyDigest: binding, idempotencyScope: process.env.ATS_CORPUS_SCOPE } : {}) });
+        if (createGate) {
+          if (idemKey !== undefined) recordIdempotencyKey(idemKey, { reviewId: createGate.reviewId, projectId }, idemOptions);
+          return createGate;
+        }
+        const result = t?.create
+          ? await t.create(projectId, title, opts)
+          : await adapter.createTask({
+            title,
+            projectId: projectId || undefined,
+            content: opts.content,
+            dueDate: opts.dueDate,
+            tags: tagsToArray(opts.tags),
           });
-          if (block) result._relevanceInstruction = block;
-        } catch (err) {
-          console.error(`Warning: relevance enrichment failed: ${err.message}`);
+        const action = auditCliWrite('task.created', result, { projectId }, { title, ...(idemKey !== undefined ? { idempotencyKey: idemKey, idempotencyDigest: binding, idempotencyScope: process.env.ATS_CORPUS_SCOPE } : {}) });
+        if (idemKey !== undefined) recordIdempotencyKey(idemKey, taskRef(result, projectId), idemOptions);
+        const relevance = adapter.__ext?.relevance;
+        if (relevance?.isEnabled?.({
+          relevance: !!args.options.relevance,
+          noRelevance: args.options['no-relevance'] === true,
+        })) {
+          try {
+            const block = await relevance.buildEnrichInstruction({
+              taskId: result.task?.fullId || result.task?.id,
+              projectId: result.task?.fullProjectId || result.task?.projectId || projectId,
+              title: result.task?.title || title,
+              content: opts.content || '',
+              wikiProject: wikiProject(),
+            });
+            if (block) result._relevanceInstruction = block;
+          } catch (err) {
+            console.error(`Warning: relevance enrichment failed: ${err.message}`);
+          }
         }
+        return attachMutationReceipt(result, mutationReceipt({
+          operation: 'create',
+          action,
+          requested: { projectId: projectId || null, title, ...opts },
+          observed: snapshotTask(result),
+          verified: taskValue(result).title === title,
+          target: taskRefFromResult(result, { projectId }),
+        }));
+      } catch (error) {
+        if (claim) { try { markIdempotencyUncertain(idemKey, idemOptions); } catch {} }
+        throw error;
       }
-      return attachMutationReceipt(result, mutationReceipt({
-        operation: 'create',
-        action,
-        requested: { projectId: projectId || null, title, ...opts },
-        observed: snapshotTask(result),
-        verified: taskValue(result).title === title,
-        target: taskRefFromResult(result, { projectId }),
-      }));
     }
     case 'update': {
       const input = args.options.input

@@ -194,3 +194,33 @@ test('authStatus reports authenticated and counts databases', async () => {
   assert.equal(s.authenticated, true);
   assert.equal(s.databases, 1);
 });
+
+
+test('native search paginates, applies configured database scope and warns about repeated cursors', async () => {
+  process.env.ATS_NOTION_DATABASES = 'db-1111';
+  let pages = 0;
+  try {
+    globalThis.fetch = async (_url, init) => {
+      const input = JSON.parse(init.body);
+      const next = input.start_cursor ? { ...PAGE2, id: 'third' } : PAGE1;
+      pages++;
+      return new globalThis.Response(JSON.stringify({ results: [next, { ...PAGE2, id: 'outside', parent: { database_id: 'other-db' } }], has_more: pages < 3, next_cursor: 'cursor-1' }));
+    };
+    const tasks = await adapter.searchByQuery('invoice');
+    assert.deepEqual(tasks.map((task) => task.id), [PAGE1.id, 'third']);
+    assert.equal(pages, 2);
+    assert.match(adapter.__searchWarnings[0].error, /repeated cursor/);
+  } finally { delete process.env.ATS_NOTION_DATABASES; }
+});
+
+test('bulk corpus preserves a healthy database and reports a failed database', async () => {
+  process.env.ATS_NOTION_DATABASES = 'db-1111,missing';
+  const healthyFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, init) => new URL(url).pathname.includes('/missing')
+      ? new globalThis.Response('{"message":"database unavailable"}', { status: 404 }) : healthyFetch(url, init);
+    assert.equal((await adapter.bulkFetch()).length, 2);
+    assert.equal(adapter.__fetchWarnings.length, 1);
+    assert.equal(adapter.__fetchWarnings[0].source, 'missing');
+  } finally { delete process.env.ATS_NOTION_DATABASES; }
+});

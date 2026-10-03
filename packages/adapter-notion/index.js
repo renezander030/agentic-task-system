@@ -92,25 +92,50 @@ const adapter = {
     const cfg = loadConfig();
     const dbs = await listDatabases(cfg);
     const tasks = [];
+    adapter.__fetchWarnings = [];
     for (const db of dbs) {
-      const pages = await queryDatabase(db.id, cfg);
-      for (const p of pages) tasks.push(pageToTask(p));
+      try {
+        const pages = await queryDatabase(db.id, cfg);
+        for (const p of pages) tasks.push(pageToTask(p));
+      } catch (error) {
+        adapter.__fetchWarnings.push({ source: db.id, error: error.message });
+      }
     }
     return tasks;
   },
 
   async searchByQuery(query) {
     const q = String(query || '').trim();
+    adapter.__searchWarnings = [];
     if (!q) return [];
     const cfg = loadConfig();
-    const res = await notion('/v1/search', {
-      method: 'POST',
-      body: { query: q, filter: { property: 'object', value: 'page' }, page_size: 100 },
-      cfg,
-    });
-    return (res.results || [])
-      .filter((r) => r.object === 'page' && r.parent?.database_id)
-      .map((p) => pageToTask(p));
+    const normalizeId = (id) => String(id).replace(/-/g, '').toLowerCase();
+    const allowed = new Set(cfg.databases.map(normalizeId));
+    const tasks = new Map();
+    const cursors = new Set();
+    let cursor;
+    for (let page = 0; page < 100; page++) {
+      const res = await notion('/v1/search', {
+        method: 'POST',
+        body: { query: q, filter: { property: 'object', value: 'page' }, page_size: 100, start_cursor: cursor },
+        cfg,
+      });
+      if (!Array.isArray(res.results)) throw new Error('Notion search: invalid results response');
+      for (const record of res.results) {
+        if (record.object !== 'page' || !record.parent?.database_id) continue;
+        if (allowed.size && !allowed.has(normalizeId(record.parent.database_id))) continue;
+        tasks.set(record.id, pageToTask(record));
+      }
+      if (!res.has_more) return [...tasks.values()];
+      cursor = res.next_cursor;
+      if (!cursor || cursors.has(cursor)) {
+        adapter.__searchWarnings.push({ source: 'notion', error: 'Notion search returned a missing or repeated cursor' });
+        return [...tasks.values()];
+      }
+      cursors.add(cursor);
+    }
+    adapter.__searchWarnings.push({ source: 'notion', error: 'Notion search reached the 100-page bound; narrow the query' });
+    return [...tasks.values()];
   },
 
   // ---- auth lifecycle --------------------------------------------------------
