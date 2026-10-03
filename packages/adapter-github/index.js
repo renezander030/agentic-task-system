@@ -91,18 +91,25 @@ const adapter = {
     const cfg = loadConfig();
     const repos = await listRepos(cfg);
     const tasks = [];
+    adapter.__fetchWarnings = [];
     for (const r of repos) {
       const { owner, repo } = splitProjectId(r.id);
-      const issues = await listIssues(owner, repo, cfg);
-      for (const it of issues) tasks.push(issueToTask(owner, repo, it));
+      try {
+        const issues = await listIssues(owner, repo, cfg);
+        for (const it of issues) tasks.push(issueToTask(owner, repo, it));
+      } catch (error) {
+        adapter.__fetchWarnings.push({ source: r.id, error: error.message });
+      }
     }
     return tasks;
   },
 
   async searchByQuery(query) {
     const q = String(query || '').trim();
+    adapter.__searchWarnings = [];
     if (!q) return [];
     const items = await searchIssues(q, loadConfig());
+    adapter.__searchWarnings = items.warnings || [];
     return items.map((it) => {
       const repoUrl = String(it.repository_url || '');
       const m = repoUrl.match(/repos\/([^/]+)\/([^/]+)\/?$/);

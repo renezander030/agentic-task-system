@@ -205,8 +205,31 @@ export async function patchIssue(owner, repo, number, body, cfg = loadConfig()) 
 export async function searchIssues(query, cfg = loadConfig()) {
   const scope = cfg.repos.map((r) => `repo:${r}`).join(' ');
   const q = `${query} is:issue${scope ? ' ' + scope : ''}`.trim();
-  const { json } = await gh('/search/issues', { query: { q, per_page: PER_PAGE }, cfg });
-  return Array.isArray(json.items) ? json.items.filter((it) => !isPullRequest(it)) : [];
+  const items = [];
+  const warnings = [];
+  const seen = new Set();
+  const allowed = new Set(cfg.repos.map((repo) => repo.toLowerCase()));
+  for (let page = 1; page <= 10; page++) {
+    const { json, res } = await gh('/search/issues', { query: { q, per_page: PER_PAGE, page }, cfg });
+    if (!Array.isArray(json.items)) throw new Error('GitHub search: invalid items response');
+    if (json.incomplete_results) warnings.push({ source: 'github', error: 'GitHub returned incomplete search results' });
+    for (const item of json.items) {
+      const repo = String(item.repository_url || '').match(/repos\/([^/]+\/[^/]+)\/?$/)?.[1];
+      if (isPullRequest(item) || (allowed.size && (!repo || !allowed.has(repo.toLowerCase())))) continue;
+      const key = `${repo}:${item.number}`;
+      if (!seen.has(key)) { seen.add(key); items.push(item); }
+    }
+    if (page === 10 && (json.total_count > 1000 || nextLink(res))) {
+      warnings.push({ source: 'github', error: 'GitHub search is capped at 1000 matches; narrow the query' });
+    }
+    if (!nextLink(res) && !(json.total_count > page * PER_PAGE)) break;
+    if (json.items.length === 0) {
+      warnings.push({ source: 'github', error: 'GitHub search stopped before the declared match count' });
+      break;
+    }
+  }
+  items.warnings = warnings;
+  return items;
 }
 
 export function urlForIssue(owner, repo, number) {

@@ -1,6 +1,21 @@
 
 # Changelog
 
+## 0.16.0 - Complete source reads, safe retries and fact freshness
+
+Unreleased.
+
+- **Scoped native search.** GitHub and Notion search follow result pages and retain configured repository/database scope. GitHub's 1000-match cap, server incompleteness, and missing/repeated Notion cursors become explicit search warnings.
+- **HTTP deadlines and cancellation.** Shared HTTP requests use a 30-second deadline through retries and response-body consumption (`ATS_HTTP_TIMEOUT_MS`). Caller cancellation stops retry waits and prevents another attempt.
+- **Per-project corpus failures.** GitHub and Notion keep healthy project records when another project fails, with source warnings that propagate through retrieval. Partial corpora remain uncached.
+- **Reviewed fact freshness.** `ats kg stale --days N` lists active facts due for review. `ats kg confirm FACT --source REF` stages new evidence for approval; ratification appends a confirmation without changing original validity or provenance.
+- **Safe mutation retries.** Reads retain transient retry behavior. Mutating requests retry only explicit rate-limit rejections; ambiguous network and gateway failures return without replay. Adapter read-only POST requests can opt in to safe retries. Long server reset times return the rejection instead of retrying too early.
+- **Fact ratification integrity.** Fact writes verify the approved payload, serialize store checks with the append, recheck conflicts, and deduplicate repeated ratification by proposal id. CLI ratification claims the approved review item before writing.
+- **Bound create keys.** Idempotency keys bind the effective request to its source configuration and acquire a durable claim before writing, including reviewed creates. Changed bindings, concurrent attempts and uncertain outcomes fail closed.
+- **Bound batch resumes.** Journals bind each item to its payload and source, record an applying claim before execution, and skip only matching completed operations. Changed, interrupted, failed or legacy unbound entries require inspection. Dry runs preserve journal bytes.
+- **Source fact dates.** `kg propose --valid-at ISO --learned-at ISO` records when a fact happened and when it was learned separately from ratification. JSONL accepts `validAt`/`learnedAt`; timestamps normalize to UTC and future/planned dates are refused. Cypher and Graphiti exports retain both times.
+
+
 ## 0.15.0 - Reviewed writes and CLI state integrity
 
 Released 2026-10-02.

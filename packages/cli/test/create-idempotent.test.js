@@ -122,3 +122,46 @@ test('keys age out and are pruned on write', () => {
   const store = JSON.parse(fs.readFileSync(path.join(configDir, 'idempotency-keys.json'), 'utf8'));
   assert.deepEqual(Object.keys(store.keys), ['fresh']);
 });
+
+
+test('a create key refuses a different payload and a corrupt store before writing', () => {
+  const before = creates();
+  run('create', 'p1', 'Bound task', '--idempotency-key', 'bound');
+  const changed = runProcess('create', 'p1', 'Different task', '--idempotency-key', 'bound');
+  assert.equal(changed.status, 3);
+  assert.match(changed.stderr, /request\/source binding/);
+  assert.equal(creates(), before + 1);
+  const file = path.join(tempDir, 'xdg', 'ats', 'idempotency-keys.json');
+  const saved = fs.readFileSync(file);
+  try {
+    fs.writeFileSync(file, '{');
+    const bad = runProcess('create', 'p1', 'Corrupt', '--idempotency-key', 'new-key');
+    assert.notEqual(bad.status, 0);
+    assert.equal(creates(), before + 1);
+  } finally { fs.writeFileSync(file, saved); }
+});
+
+test('a reviewed create keeps its binding through apply and subsequent replay', () => {
+  const previous = process.env.ATS_REVIEW_ALL;
+  process.env.ATS_REVIEW_ALL = '1';
+  try {
+    const before = creates();
+    const staged = run('create', 'p1', 'Reviewed task', '--idempotency-key', 'reviewed');
+    assert.equal(staged.staged, true);
+    assert.equal(creates(), before);
+    run('review', 'approve', staged.reviewId);
+    const applied = run('review', 'apply', staged.reviewId);
+    assert.equal(applied.applied[0].ok, true);
+    assert.equal(creates(), before + 1);
+    const replay = run('create', 'p1', 'Reviewed task', '--idempotency-key', 'reviewed');
+    assert.equal(replay.idempotent, true);
+    assert.equal(replay.task.id.startsWith('new-'), true);
+    assert.equal(creates(), before + 1);
+    const changed = runProcess('create', 'p1', 'Changed reviewed task', '--idempotency-key', 'reviewed');
+    assert.equal(changed.status, 3);
+    assert.equal(creates(), before + 1);
+  } finally {
+    if (previous === undefined) delete process.env.ATS_REVIEW_ALL;
+    else process.env.ATS_REVIEW_ALL = previous;
+  }
+});

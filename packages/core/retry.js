@@ -1,21 +1,16 @@
 /**
- * One retry policy for every adapter's HTTP path.
+ * Shared adapter HTTP retry policy. Reads retry transient network/gateway
+ * failures and rate limits. Mutations retry explicit rate-limit rejection only;
+ * a read-only POST can opt in with retrySafe. The request deadline covers
+ * attempts, backoff and response-body reads, and caller cancellation stops both
+ * requests and waits. Server waits above 60s return the original response.
  *
- * Transient upstream conditions — 429, 502/503/504, a 500 whose body names a
- * query/rate limit (TickTick's `exceed_query_limit`), a 403 that carries a
- * Retry-After or an exhausted rate-limit window (GitHub secondary limits), and
- * network-level failures (reset, timeout, DNS) — are retried with a jittered
- * exponential backoff that honors `Retry-After` and `x-ratelimit-reset`.
- * Everything else returns or throws on the first attempt: a 4xx that is not a
- * rate limit is the caller's problem, never retried.
- *
- * Knobs (env): ATS_HTTP_RETRIES (default 3, 0 disables), ATS_HTTP_RETRY_BASE_MS
- * (500), ATS_HTTP_RETRY_MAX_MS (8000). A single wait never exceeds 60s even when
- * the upstream asks for more — an agent call that would block longer than that
- * should fail loudly instead.
+ * Env: ATS_HTTP_RETRIES (3), ATS_HTTP_RETRY_BASE_MS (500),
+ * ATS_HTTP_RETRY_MAX_MS (8000), ATS_HTTP_TIMEOUT_MS (30000, positive).
  */
 
 const RATE_LIMIT_BODY = /exceed_query_limit|rate.?limit|too many requests|quota exceeded|try again later|temporarily unavailable/i;
+const EXPLICIT_RATE_LIMIT_BODY = /exceed_query_limit|rate.?limit|too many requests|quota exceeded/i;
 const TRANSIENT_NET = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR_SOCKET|UND_ERR_CONNECT_TIMEOUT|fetch failed|socket hang up|network/i;
 const MAX_WAIT_MS = 60_000;
 
@@ -91,7 +86,31 @@ export function backoffMs(attempt, policy = retryPolicy()) {
   return Math.round(raw * (0.5 + Math.random() * 0.5));
 }
 
-const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function abortReason(signal) {
+  return signal?.reason || Object.assign(new Error('Request cancelled'), { name: 'AbortError' });
+}
+
+function abortable(promise, signal) {
+  if (!signal) return Promise.resolve(promise);
+  if (signal.aborted) {
+    Promise.resolve(promise).catch(() => {});
+    return Promise.reject(abortReason(signal));
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { cleanup(); reject(abortReason(signal)); };
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(promise).then((value) => { cleanup(); resolve(value); }, (error) => { cleanup(); reject(error); });
+  });
+}
+
+const defaultSleep = (ms, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) { reject(abortReason(signal)); return; }
+  const cleanup = () => signal?.removeEventListener('abort', onAbort);
+  const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+  const onAbort = () => { clearTimeout(timer); cleanup(); reject(abortReason(signal)); };
+  signal?.addEventListener('abort', onAbort, { once: true });
+});
 
 async function peekBody(res) {
   try {
@@ -116,10 +135,12 @@ export async function withRetry(attempt, opts = {}) {
   const sleep = opts.sleep || defaultSleep;
   const label = opts.label ? `${opts.label}: ` : '';
   for (let n = 0; ; n++) {
+    if (opts.signal?.aborted) throw abortReason(opts.signal);
     let res;
     try {
-      res = await attempt(n);
+      res = await abortable(attempt(n), opts.signal);
     } catch (err) {
+      if (opts.signal?.aborted || err?.name === 'AbortError' || err?.name === 'TimeoutError') throw err;
       const retryable = opts.isRetryableError ? opts.isRetryableError(err) : isTransientError(err);
       if (!retryable || n >= policy.retries) {
         if (retryable && n > 0) err.message = `${err.message} (after ${n} retr${n === 1 ? 'y' : 'ies'})`;
@@ -127,19 +148,21 @@ export async function withRetry(attempt, opts = {}) {
       }
       const wait = backoffMs(n, policy);
       opts.onRetry?.({ attempt: n + 1, waitMs: wait, reason: err.message, label: opts.label });
-      await sleep(wait);
+      await abortable(sleep(wait, opts.signal), opts.signal);
       continue;
     }
-    const body = res && typeof res === 'object' && res.status === 500 ? await peekBody(res) : '';
+    const body = res && typeof res === 'object' && res.status === 500 ? await abortable(peekBody(res), opts.signal) : '';
     const transient = opts.isRetryableResponse ? opts.isRetryableResponse(res, body) : isTransientResponse(res, body);
     if (!transient || n >= policy.retries) {
       if (transient && res && typeof res === 'object') res.__retries = n;
       return res;
     }
     const asked = upstreamWaitMs(res);
-    const wait = Math.min(MAX_WAIT_MS, asked ?? backoffMs(n, policy));
+    // Do not retry sooner than a server's explicit reset time.
+    if (asked !== null && asked > MAX_WAIT_MS) return res;
+    const wait = asked ?? backoffMs(n, policy);
     opts.onRetry?.({ attempt: n + 1, waitMs: wait, reason: `${label}HTTP ${res.status}`, label: opts.label });
-    await sleep(wait);
+    await abortable(sleep(wait, opts.signal), opts.signal);
   }
 }
 
@@ -148,5 +171,43 @@ export async function withRetry(attempt, opts = {}) {
  * Drop-in: `const fetch = retryingFetch(globalThis.fetch, { label: 'Notion' })`.
  */
 export function retryingFetch(fetchFn = globalThis.fetch, opts = {}) {
-  return (url, init) => withRetry(() => fetchFn(url, init), opts);
+  return async (url, init = {}) => {
+    const { retrySafe, ...request } = init;
+    const method = String(request.method || 'GET').toUpperCase();
+    const safe = retrySafe === true || opts.retrySafe === true || ['GET', 'HEAD', 'OPTIONS'].includes(method);
+    const timeoutMs = opts.timeoutMs ?? envInt('ATS_HTTP_TIMEOUT_MS', 30_000);
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('HTTP timeoutMs must be a positive number');
+    const controller = new AbortController();
+    const signals = [request.signal, opts.signal, controller.signal].filter(Boolean);
+    const signal = signals.length === 1 ? signals[0] : globalThis.AbortSignal.any(signals);
+    const timer = setTimeout(() => controller.abort(Object.assign(
+      new Error(`HTTP request timed out after ${timeoutMs}ms`), { name: 'TimeoutError', code: 'ATS_TIMEOUT', exitCode: 6 }
+    )), timeoutMs);
+    let response;
+    try {
+      response = await withRetry(() => fetchFn(url, { ...request, signal }), {
+        ...opts, signal,
+        isRetryableError: (error) => safe && (opts.isRetryableError ? opts.isRetryableError(error) : isTransientError(error)),
+        isRetryableResponse: (res, body) => safe
+          ? (opts.isRetryableResponse ? opts.isRetryableResponse(res, body) : isTransientResponse(res, body))
+          : res?.status === 429 || (res?.status === 403 && upstreamWaitMs(res) !== null) || (res?.status === 500 && EXPLICIT_RATE_LIMIT_BODY.test(body)),
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      throw error;
+    }
+    // The same deadline covers the response body, not just response headers.
+    // Unconsumed responses do not keep a CLI process alive solely for this timer.
+    timer.unref?.();
+    for (const method of ['text', 'json', 'arrayBuffer', 'blob', 'formData']) {
+      if (typeof response?.[method] !== 'function') continue;
+      const read = response[method].bind(response);
+      response[method] = async (...args) => {
+        timer.ref?.();
+        try { return await abortable(read(...args), signal); }
+        finally { clearTimeout(timer); }
+      };
+    }
+    return response;
+  };
 }

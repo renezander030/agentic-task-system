@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { stableDigest, withLockSync } from '@reneza/ats-core';
 
 export function readStructuredInput(file, { allowed = [], required = [], stdin = 0 } = {}) {
   if (!file || file === true) throw new Error('--input requires a JSON file path or - for stdin.');
@@ -47,12 +49,13 @@ export function parseBatchInput(file, { stdin = 0 } = {}) {
 }
 
 export function readBatchJournal(file) {
-  if (!file || !fs.existsSync(file)) return new Set();
-  const completed = new Set();
+  if (!file || !fs.existsSync(file)) return new Map();
+  const completed = new Map();
   for (const line of fs.readFileSync(file, 'utf8').split('\n').filter((value) => value.trim())) {
     try {
       const entry = JSON.parse(line);
-      if (['applied', 'staged'].includes(entry?.status) && entry.id) completed.add(entry.id);
+      if (!entry || typeof entry.id !== 'string' || typeof entry.status !== 'string') throw new Error('invalid journal entry');
+      completed.set(entry.id, entry);
     } catch (error) {
       throw new Error(`Batch journal ${file} is invalid: ${error.message}`, { cause: error });
     }
@@ -60,10 +63,41 @@ export function readBatchJournal(file) {
   return completed;
 }
 
-export function appendBatchJournal(file, outcome) {
-  if (!file) return;
+function writeBatchJournal(file, outcome) {
   fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true, mode: 0o700 });
   fs.appendFileSync(file, JSON.stringify({ ...outcome, recordedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
+  fs.chmodSync(file, 0o600);
+}
+
+export function appendBatchJournal(file, outcome) {
+  if (!file) return;
+  withLockSync(file, () => writeBatchJournal(file, outcome), { label: 'batch journal' });
+}
+
+/** Claim before a side effect; an unfinished claim is never automatically retried. */
+export function claimBatchItem(file, item, scope) {
+  if (!file) return null;
+  const digest = stableDigest({ scope, item });
+  return withLockSync(file, () => {
+    const prior = readBatchJournal(file).get(item.id);
+    if (prior) {
+      if (prior.digest !== digest) throw new Error(`Batch precondition failed: item ${item.id} has no matching payload/source binding.`);
+      if (['applied', 'staged'].includes(prior.status)) return { replayed: true, digest };
+      if (['applying', 'failed'].includes(prior.status)) throw new Error(`Batch precondition failed: item ${item.id} has an uncertain or in-flight outcome; inspect the backend before using a fresh journal.`);
+    }
+    const claim = { id: item.id, op: item.op, status: 'applying', digest, token: randomUUID() };
+    writeBatchJournal(file, claim);
+    return claim;
+  }, { label: 'batch journal' });
+}
+
+export function finishBatchItem(file, claim, outcome) {
+  if (!file || !claim) return;
+  withLockSync(file, () => {
+    const current = readBatchJournal(file).get(outcome.id);
+    if (current?.token !== claim.token || current?.status !== 'applying') throw new Error('Batch precondition failed: applying claim changed.');
+    writeBatchJournal(file, { ...outcome, digest: claim.digest, token: claim.token });
+  }, { label: 'batch journal' });
 }
 
 export function withTimeout(promise, timeoutMs, label = 'operation') {

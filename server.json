@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.renezander030/agentic-task-system",
-  "description": "MCP server giving AI agents persistent task memory across TickTick, Notion, GitHub, Linear & Beads",
+  "description": "Persistent task context across TickTick, Notion, GitHub, Obsidian, Taskmaster and Beads",
   "title": "Agentic Task System (ATS)",
   "websiteUrl": "https://github.com/renezander030/agentic-task-system",
   "repository": {
@@ -9,13 +9,13 @@
     "source": "github",
     "subfolder": "packages/mcp"
   },
-  "version": "0.15.0",
+  "version": "0.16.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@reneza/ats-mcp",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "transport": {
         "type": "stdio"
       },

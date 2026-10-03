@@ -35,7 +35,7 @@ const VALUE_OPTIONS = new Set([
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
   'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
   'depth', 'max-depth', 'max-nodes', 'restore', 'dir', 'keep', 'dupes',
-  'status', 'stale-days', 'as-of', 'acknowledge-rejected', 'supersedes', 'object', 'dialect', 'center', 'outcome', 'done-when', 'parent-project',
+  'valid-at', 'learned-at', 'status', 'stale-days', 'as-of', 'acknowledge-rejected', 'supersedes', 'object', 'dialect', 'center', 'outcome', 'done-when', 'parent-project',
   'parent-task', 'approval-required', 'valid-from', 'valid-until', 'allow-actions',
   'allow-resources', 'deny-resources', 'approval-actions',
 ]);
@@ -788,9 +788,12 @@ every fact records who did both and from what source.
 Usage:
   ats kg propose SUBJ PRED OBJ [--domain D --source REF --confidence C --task P/T]
                 [--supersedes FACT_ID | --additive] [--acknowledge-rejected ID]
+                [--valid-at ISO --learned-at ISO]
   ats kg propose --file FILE|-              One JSON object per line, every line
                                             through the gate; --domain/--source/
                                             --confidence fill what a line lacks
+  ats kg stale [--days N --domain D]        Active facts due for evidence review
+  ats kg confirm FACT_ID --source REF       Reviewed evidence confirmation
   ats kg retract FACT_ID [--reason "..."]   Retraction proposal — reviewed too
   ats kg pending [--domain D]               What each queued proposal would do,
                                             checked against the store now
@@ -817,7 +820,9 @@ Usage:
 The gate: a duplicate of an active or queued fact is a no-op (exit 0); a
 contradiction (same subject + predicate, another object) needs --supersedes or
 --additive; a triple the reviewer declined needs --acknowledge-rejected. A
-refusal prints its report and exits 4.
+refusal prints its report and exits 4. Source timestamps use ISO timestamps
+with a timezone and cannot name future or planned dates. Confirmation is
+reviewed and retains the original validity interval and provenance.
 
 Fact proposals share the review queue: ats review list / approve / reject
 work on them (kind kg.fact). A retracted or superseded fact keeps its validity

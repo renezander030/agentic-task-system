@@ -199,3 +199,44 @@ test('authStatus reports authenticated with the login from /user', async () => {
   assert.equal(s.authenticated, true);
   assert.equal(s.login, 'octo');
 });
+
+
+test('native search follows pages, deduplicates, and preserves configured repository scope', async () => {
+  process.env.ATS_GITHUB_REPOS = 'octo/widgets';
+  try {
+    globalThis.fetch = async (url) => {
+      const page = Number(new URL(url).searchParams.get('page'));
+      const item = page === 1 ? ISSUE1 : ISSUE2;
+      return new globalThis.Response(JSON.stringify({ total_count: 101, items: [
+        { ...item, repository_url: 'https://api.github.com/repos/octo/widgets' },
+        { ...ISSUE1, number: 999, repository_url: 'https://api.github.com/repos/other/private' },
+      ] }), { headers: page === 1 ? { link: '<https://api.github.com/search/issues?page=2>; rel="next"' } : {} });
+    };
+    const tasks = await adapter.searchByQuery('invoice repo:other/private');
+    assert.deepEqual(tasks.map((task) => task.id), ['7', '8']);
+    assert.deepEqual(adapter.__searchWarnings, []);
+  } finally { delete process.env.ATS_GITHUB_REPOS; }
+});
+
+test('native search reports GitHub server incompleteness and the 1000 result ceiling', async () => {
+  globalThis.fetch = async (url) => {
+    const page = Number(new URL(url).searchParams.get('page'));
+    return new globalThis.Response(JSON.stringify({ total_count: 1200, incomplete_results: true, items: [{ ...ISSUE1, number: page, repository_url: 'https://api.github.com/repos/octo/widgets' }] }));
+  };
+  assert.equal((await adapter.searchByQuery('common')).length, 10);
+  assert.ok(adapter.__searchWarnings.some((warning) => /1000/.test(warning.error)));
+  assert.ok(adapter.__searchWarnings.some((warning) => /incomplete/.test(warning.error)));
+});
+
+test('bulk corpus preserves a healthy repository and reports a failed repository', async () => {
+  process.env.ATS_GITHUB_REPOS = 'octo/widgets,other/unavailable';
+  const healthyFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, init) => new URL(url).pathname.startsWith('/repos/other/')
+      ? new globalThis.Response('{"message":"repository unavailable"}', { status: 404 }) : healthyFetch(url, init);
+    const tasks = await adapter.bulkFetch();
+    assert.equal(tasks.length, 2);
+    assert.equal(adapter.__fetchWarnings.length, 1);
+    assert.equal(adapter.__fetchWarnings[0].source, 'other/unavailable');
+  } finally { delete process.env.ATS_GITHUB_REPOS; }
+});

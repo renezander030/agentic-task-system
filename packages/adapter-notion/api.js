@@ -62,6 +62,7 @@ export async function notion(apiPath, opts = {}) {
   const url = new URL(cfg.endpoint.replace(/\/$/, '') + apiPath);
   const init = {
     method: opts.method || 'GET',
+    retrySafe: apiPath === '/v1/search' || /^\/v1\/databases\/[^/]+\/query$/.test(apiPath),
     headers: {
       Authorization: `Bearer ${cfg.token}`,
       'Notion-Version': NOTION_VERSION,

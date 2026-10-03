@@ -133,3 +133,55 @@ test('retryingFetch wraps a fetch function transparently and reports retries', a
   assert.equal(events.length, 1);
   assert.match(events[0].reason, /Demo: HTTP 503/);
 });
+
+
+test('fetch deadline aborts a stalled request and body; backoff obeys cancellation', async () => {
+  let signal;
+  const stalled = retryingFetch(async (_url, init) => { signal = init.signal; return new Promise(() => {}); }, { timeoutMs: 15 });
+  await assert.rejects(stalled('https://example.test'), (error) => error.code === 'ATS_TIMEOUT');
+  assert.equal(signal.aborted, true);
+  const body = retryingFetch(async () => ({ status: 200, text: () => new Promise(() => {}) }), { timeoutMs: 15 });
+  const response = await body('https://example.test');
+  await assert.rejects(response.text(), (error) => error.code === 'ATS_TIMEOUT');
+
+  const controller = new AbortController();
+  let calls = 0;
+  const retry = retryingFetch(async () => { calls++; return resp(429, { headers: { 'retry-after': '50' } }); }, {
+    signal: controller.signal, onRetry: () => controller.abort(new Error('cancelled by caller')),
+  });
+  await assert.rejects(retry('https://example.test'), /cancelled by caller/);
+  assert.equal(calls, 1);
+});
+
+test('unsafe mutations are not replayed on gateway or network ambiguity; read-only POST opts in', async () => {
+  let calls = 0;
+  const gateway = retryingFetch(async () => { calls++; return resp(503); }, { sleep: noSleep });
+  assert.equal((await gateway('https://example.test', { method: 'POST' })).status, 503);
+  assert.equal(calls, 1);
+  calls = 0;
+  const ambiguous = retryingFetch(async () => { calls++; return resp(500, { body: 'temporarily unavailable; try again later' }); }, { sleep: noSleep });
+  assert.equal((await ambiguous('https://example.test', { method: 'POST' })).status, 500);
+  assert.equal(calls, 1, 'generic retry language does not prove a rejected write');
+  calls = 0;
+  const rateLimited = retryingFetch(async () => ++calls === 1 ? resp(500, { body: 'exceed_query_limit' }) : resp(200), { sleep: noSleep });
+  assert.equal((await rateLimited('https://example.test', { method: 'POST' })).status, 200);
+  assert.equal(calls, 2);
+  calls = 0;
+  const broken = retryingFetch(async () => { calls++; throw new TypeError('fetch failed'); }, { sleep: noSleep });
+  await assert.rejects(broken('https://example.test', { method: 'PATCH' }), /fetch failed/);
+  assert.equal(calls, 1);
+  calls = 0;
+  const read = retryingFetch(async (_url, init) => {
+    assert.equal(init.retrySafe, undefined, 'ATS option is not sent to fetch');
+    return ++calls === 1 ? resp(503) : resp(200);
+  }, { sleep: noSleep });
+  assert.equal((await read('https://example.test/query', { method: 'POST', retrySafe: true })).status, 200);
+  assert.equal(calls, 2);
+});
+
+test('retry does not send early when the server asks for a long reset', async () => {
+  let calls = 0;
+  const fetch = retryingFetch(async () => { calls++; return resp(429, { headers: { 'retry-after': '120' } }); }, { sleep: noSleep });
+  assert.equal((await fetch('https://example.test')).status, 429);
+  assert.equal(calls, 1);
+});

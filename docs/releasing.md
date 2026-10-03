@@ -14,8 +14,12 @@ npm ci
 npm test
 npm run check:publish
 npm run check:release
-mcp-publisher validate server.json
+# Validate server.json against its declared JSON schema without publishing.
 ```
+
+Some publisher versions advertise `validate` but do not implement it. In that
+case use a JSON Schema validator against the schema declared in `server.json`;
+do not use `publish` as a validation probe.
 
 Check npm credentials with `npm whoami`. Publish core first, then the public
 adapters, then CLI and MCP; consumers must not receive a package whose required

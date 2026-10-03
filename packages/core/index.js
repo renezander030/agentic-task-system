@@ -20,6 +20,8 @@ export {
   loadFacts,
   proposeFact,
   proposeRetract,
+  proposeConfirm,
+  staleFacts,
   ratifyFactItem,
   listKgFacts,
   askFacts,
