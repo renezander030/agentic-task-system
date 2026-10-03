@@ -1427,7 +1427,7 @@ async function executeBatchOperation(adapter, t, item, dryRun) {
     const result = t?.update
       ? await t.update(item.projectId, item.taskId, item.patch)
       : await adapter.updateTask(item.projectId, item.taskId, { ...item.patch, tags: tagsToArray(item.patch.tags) });
-    const action = auditCliWrite('task.updated', result, item, { batchId: item.id, fields: Object.keys(item.patch) }, false, snapshotTask(task));
+    const action = auditCliWrite(item.patch.claim === true ? 'task.claimed' : 'task.updated', result, item, { batchId: item.id, fields: Object.keys(item.patch) }, false, item.patch.claim === true ? undefined : snapshotTask(task));
     return { status: 'applied', result, receipt: mutationReceipt({ operation: op, action, requested: item.patch, observed: snapshotTask(result), verified: patchVerified(result, item.patch), target: { projectId: item.projectId, taskId: item.taskId } }) };
   }
   if (op === 'complete' || op === 'delete') {
@@ -2444,7 +2444,7 @@ async function handleLedger() {
 // `ats undo [ACTION_ID] [--dry-run]` — reverse the last write (or a named one) using
 // the before-image the ledger captured. Restores an update; deletes a created task.
 async function handleUndo() {
-  const id = args.positional[0];
+  const id = args.subcommand || args.positional[0];
   const dryRun = args.options['dry-run'] === true || args.options.n === true;
   if (!dryRun) {
     // Peek so we can fail clearly BEFORE loading an adapter (which needs auth).

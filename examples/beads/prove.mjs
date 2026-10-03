@@ -133,6 +133,12 @@ try {
   const approvedClaimHistory = ats(['history', project, ready.id]).revisions.filter((entry) => entry.action === 'task.claimed');
   checks.approvedClaimIsNotBodyRestore = approvedClaimHistory.length === 1 && !approvedClaimHistory[0].restorable && ats(['undo', approvedClaimHistory[0].actionId], { allowFailure: true }).status !== 0 && issue(ready.id).assignee === 'demo-worker-d';
 
+  const batchFile = path.join(root, 'claim-batch.json');
+  fs.writeFileSync(batchFile, JSON.stringify([{ id: 'claim-policy', op: 'update', projectId: project, taskId: blocker.id, patch: { claim: true, actor: 'demo-batch-worker' } }]));
+  ats(['batch', batchFile]);
+  const batchClaimHistory = ats(['history', project, blocker.id]).revisions.filter((entry) => entry.action === 'task.claimed');
+  checks.batchClaimsAreNotBodyRestores = batchClaimHistory.length === 1 && !batchClaimHistory[0].restorable && ats(['undo', batchClaimHistory[0].actionId, '--dry-run'], { allowFailure: true }).status !== 0 && issue(blocker.id).assignee === 'demo-batch-worker';
+
   console.error('Real Beads proof: write conformance');
   const conformance = ats(['adapter', 'test', '@reneza/ats-adapter-beads', '--write']);
   checks.realAdapterConformancePasses = conformance.ok && conformance.failed === 0;
