@@ -30,7 +30,7 @@ const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
   'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
   'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
-  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session',
+  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note',
   'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
   'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
@@ -778,9 +778,13 @@ undoable like any other write.
 Usage:
   ats review list [--all|--status S]    Pending items (default) or all
   ats review show ID                    Full payload of one item
-  ats review approve ID... [--by NAME]  Approve pending items
-  ats review reject ID...  [--by NAME]  Reject pending items
+  ats review approve ID... [--by NAME] [--note TEXT]  Approve pending items
+  ats review reject ID...  [--by NAME] [--note TEXT]  Reject pending items
   ats review apply <ID|--all>           Execute approved writes
+
+Approval has to come from an identity other than the one that staged the item
+(exit 4 otherwise). ATS_REVIEW_REQUIRE_HUMAN=1 also refuses approvals from a
+process acting as an agent. Each decision records the deciding actor and note.
 
 Ids may be unambiguous prefixes. Task writes claim approved items before applying.
 Interrupted items stay applying; failed writes stay failed. Inspect the backend

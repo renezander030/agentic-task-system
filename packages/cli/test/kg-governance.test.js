@@ -95,3 +95,29 @@ test('kg verify rechecks task and file sources, exits 2 on a stale one and can s
   const pending = run(['kg', 'pending'], opts);
   assert.match(JSON.stringify(pending), new RegExp(`retract ${gone.slice(0, 8)}`));
 });
+
+test('review approve refuses the identity that staged the item and records the decision note', () => {
+  const opts = { store: 'separation' };
+  const staged = run(['kg', 'propose', 'Ops team', 'owns', 'release calendar', '--source', 'task://p1/t1'], opts);
+
+  const self = runProcess(['review', 'approve', staged.reviewId], opts);
+  assert.equal(self.status, 4, self.stdout + self.stderr);
+  assert.match(self.stdout + self.stderr, /staged by agent-test; approval has to come from another identity/);
+  const byName = runProcess(['review', 'approve', staged.reviewId, '--by', 'agent-test'], { ...opts, env: { ATS_AGENT_ID: '' } });
+  assert.equal(byName.status, 4);
+
+  const strict = runProcess(['review', 'approve', staged.reviewId], { ...opts, env: { ATS_AGENT_ID: 'second-agent', ATS_REVIEW_REQUIRE_HUMAN: '1' } });
+  assert.equal(strict.status, 4);
+  assert.match(strict.stdout + strict.stderr, /needs a human approver/);
+
+  const ok = run(['review', 'approve', staged.reviewId, '--note', 'matches the plan'], { ...opts, env: { ATS_AGENT_ID: '', ATS_ACTOR_KIND: 'human', ATS_REVIEW_REQUIRE_HUMAN: '1' } });
+  assert.equal(ok.approved[0].decidedBy, 'reviewer');
+  assert.equal(ok.approved[0].decisionNote, 'matches the plan');
+  const shown = run(['review', 'show', staged.reviewId], opts);
+  assert.deepEqual(shown.decidedActor, { id: 'reviewer', kind: 'human' });
+  assert.deepEqual(shown.stagedActor, { id: 'agent-test', kind: 'agent' });
+
+  const own = run(['kg', 'propose', 'Ops team', 'skips', 'retros', '--source', 'task://p1/t1'], opts);
+  const withdrawn = run(['review', 'reject', own.reviewId, '--note', 'withdrawn'], opts);
+  assert.equal(withdrawn.rejected[0].status, 'rejected');
+});

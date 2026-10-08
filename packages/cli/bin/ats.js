@@ -1091,6 +1091,7 @@ const summarizeReviewItem = (i) => ({
   stagedAt: i.stagedAt,
   ...(i.note ? { note: i.note } : {}),
   ...(i.decidedBy ? { decidedBy: i.decidedBy } : {}),
+  ...(i.decisionNote ? { decisionNote: i.decisionNote } : {}),
   ...(i.applyError ? { applyError: i.applyError } : {}),
 });
 
@@ -1627,8 +1628,9 @@ async function handleReview() {
     }
     case 'approve':
     case 'reject': {
-      if (!args.positional.length) { console.error(`Usage: ats review ${args.subcommand} ID... [--by NAME]`); process.exit(1); }
-      const decided = args.positional.map((id) => decideReviewItem(id, args.subcommand, { by: args.options.by }));
+      if (!args.positional.length) { console.error(`Usage: ats review ${args.subcommand} ID... [--by NAME] [--note TEXT]`); process.exit(1); }
+      const note = args.options.note ?? args.options.reason;
+      const decided = args.positional.map((id) => decideReviewItem(id, args.subcommand, { by: args.options.by, note }));
       return { [args.subcommand === 'approve' ? 'approved' : 'rejected']: decided.map(summarizeReviewItem) };
     }
     case 'apply': {

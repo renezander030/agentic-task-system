@@ -119,6 +119,9 @@ export function withTimeout(promise, timeoutMs, label = 'operation') {
 export function classifyError(error) {
   const message = error?.message || String(error);
   const code = error?.code || 'ATS_ERROR';
+  if (code === 'ATS_SEPARATION') {
+    return { kind: 'policy', code, retryable: false, exitCode: 4 };
+  }
   if (error?.exitCode === 3 || /precondition|if-match|changed since/i.test(message)) {
     return { kind: 'precondition', code: 'ATS_PRECONDITION', retryable: true, exitCode: 3 };
   }
