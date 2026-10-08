@@ -169,6 +169,11 @@ test('routes TickTick task lifecycle and filter options', () => {
     op: 'tasks.completed',
     args: [{ projectIds: ['p1', 'p2'], folder: 'g1', startDate: 'a', endDate: 'b' }],
   });
+  const windowed = run('tasks', 'completed', '30', '--projects', 'p1');
+  const startMs = Date.parse(windowed.args[0].startDate.replace('+0000', 'Z'));
+  assert.match(windowed.args[0].startDate, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+0000$/);
+  assert.ok(Math.abs(Date.now() - 30 * 86400000 - startMs) < 600000);
+  assert.deepEqual(windowed.args[0].projectIds, ['p1']);
   assert.deepEqual(run('tasks', 'semantic', 'query', '--limit', '2', '--priority', 'medium'), {
     op: 'tasks.semantic',
     args: ['query', { limit: 2, priority: 'medium' }],

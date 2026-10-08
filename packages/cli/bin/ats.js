@@ -977,6 +977,11 @@ function needsTaskExt(method, sub) {
   );
 }
 
+/** TickTick's completed-listing window format: 2026-03-06T00:00:00.000+0000. */
+function tickTickTimestamp(date) {
+  return date.toISOString().replace('Z', '+0000');
+}
+
 function tagsToArray(tags) {
   if (Array.isArray(tags)) return tags;
   if (typeof tags === 'string') return tags.split(',').map((s) => s.trim()).filter(Boolean);
@@ -2075,10 +2080,16 @@ async function handleTasks() {
       return t?.priority ? await t.priority() : needsTaskExt('priority', 'priority');
     case 'completed': {
       const projectIds = tagsToArray(args.options.projects);
+      let startDate = args.options.from;
+      if (!startDate && args.positional[0] !== undefined) {
+        const days = Number(args.positional[0]);
+        if (!Number.isInteger(days) || days < 1) throw new Error('tasks completed DAYS must be a positive integer.');
+        startDate = tickTickTimestamp(new Date(Date.now() - days * 86400000));
+      }
       return t?.listCompleted ? await t.listCompleted({
         projectIds,
         folder: args.options.folder,
-        startDate: args.options.from,
+        startDate,
         endDate: args.options.to,
       }) : needsTaskExt('listCompleted', 'completed');
     }

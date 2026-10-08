@@ -1101,7 +1101,8 @@ Subcommands:
   similar <task_id>                Find semantically similar tasks
   due [days]                       Tasks due within N days (default: 7)
   priority                         High priority tasks
-  completed                        List completed tasks in a date range
+  completed [days]                 List completed tasks (last N days, or --from/--to); pages
+                                   past the 200-per-call limit and reports complete
   vector-sync [--all]              Sync tasks into vector index (--all drains the whole backfill)
   vector-status                    Check vector index health
 
@@ -1172,5 +1173,6 @@ Examples:
   ats tasks vector-sync
   ats tasks due 3
   ats tasks completed --from 2026-03-06T00:00:00.000+0000 --to 2026-03-06T23:59:59.000+0000
-  ats tasks completed --projects PROJECT_ID1,PROJECT_ID2`;
+  ats tasks completed --projects PROJECT_ID1,PROJECT_ID2
+  ats tasks completed 30 --projects PROJECT_ID --require-complete`;
 }
