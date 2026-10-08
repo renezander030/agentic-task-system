@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { classifySource, verifyFacts } from '../kg-verify.js';
+import { classifySource, verifyFacts } from '../kg.js';
 
 function writeFacts(dir, facts) {
   const factsPath = path.join(dir, 'kg-facts.jsonl');

@@ -36,10 +36,11 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-function runProcess(argv, { env = {}, store = 'main' } = {}) {
+function runProcess(argv, { env = {}, store = 'main', input } = {}) {
   const dir = path.join(tempDir, store);
   return spawnSync(process.execPath, [cli, ...argv, '--json'], {
     encoding: 'utf8',
+    input,
     env: {
       ...process.env,
       ATS_ADAPTER: adapterUrl,
@@ -120,4 +121,34 @@ test('review approve refuses the identity that staged the item and records the d
   const own = run(['kg', 'propose', 'Ops team', 'skips', 'retros', '--source', 'task://p1/t1'], opts);
   const withdrawn = run(['review', 'reject', own.reviewId, '--note', 'withdrawn'], opts);
   assert.equal(withdrawn.rejected[0].status, 'rejected');
+});
+
+test('a provenance policy refuses unsourced proposals with exit 4, per call or per domain', () => {
+  const opts = { store: 'policy' };
+  const flag = runProcess(['kg', 'propose', 'Ops team', 'prefers', 'async standups', '--require-source', 'any'], opts);
+  assert.equal(flag.status, 4, flag.stderr);
+  assert.equal(JSON.parse(flag.stdout).verdict, 'unsourced');
+
+  const env = { ATS_KG_REQUIRE_SOURCE: 'checkable', ATS_KG_REQUIRE_SOURCE_DOMAINS: 'sales' };
+  const opaque = runProcess(['kg', 'propose', 'Acme', 'buys', 'support plan', '--domain', 'sales', '--source', 'call notes'], { ...opts, env });
+  assert.equal(opaque.status, 4);
+  assert.match(JSON.parse(opaque.stdout).message, /checkable source/);
+  const checkable = run(['kg', 'propose', 'Acme', 'buys', 'support plan', '--domain', 'sales', '--source', 'https://example.com/order/1'], { ...opts, env });
+  assert.equal(checkable.staged, true);
+  const otherDomain = run(['kg', 'propose', 'Ops team', 'prefers', 'async standups', '--domain', 'ops'], { ...opts, env });
+  assert.equal(otherDomain.staged, true);
+
+  const batch = runProcess(['kg', 'propose', '--file', '-', '--domain', 'sales'], {
+    ...opts,
+    env,
+    input: [
+      JSON.stringify({ subject: 'Acme', predicate: 'renews', object: 'in March', task: 'p1/t1' }),
+      JSON.stringify({ subject: 'Acme', predicate: 'pays', object: 'net 30' }),
+    ].join('\n'),
+  });
+  assert.equal(batch.status, 4);
+  const report = JSON.parse(batch.stdout);
+  assert.equal(report.staged, 1);
+  assert.equal(report.refused, 1);
+  assert.equal(report.results[1].verdict, 'unsourced');
 });

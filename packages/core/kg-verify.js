@@ -9,25 +9,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { listKgFacts } from './kg-store.js';
+import { classifySource, listKgFacts } from './kg-store.js';
 
 const NOT_FOUND = /not\s*found|no such|does not exist|404|410|deleted/i;
-
-/** Classify a fact's source reference. */
-export function classifySource(fact = {}) {
-  const source = typeof fact.provenance?.source === 'string' ? fact.provenance.source.trim() : '';
-  if (fact.taskRef?.projectId && fact.taskRef?.taskId) {
-    return { kind: 'task', projectId: fact.taskRef.projectId, taskId: fact.taskRef.taskId, ref: `task://${fact.taskRef.projectId}/${fact.taskRef.taskId}` };
-  }
-  if (!source) return { kind: 'none', ref: null };
-  const task = /^task:\/\/([^/\s]+)\/([^/\s]+)$/.exec(source);
-  if (task) return { kind: 'task', projectId: task[1], taskId: task[2], ref: source };
-  if (/^https?:\/\//i.test(source)) return { kind: 'url', url: source, ref: source };
-  const file = /^file:(?:\/\/)?(.+)$/.exec(source);
-  if (file) return { kind: 'file', file: file[1], ref: source };
-  if (source.startsWith('/') || source.startsWith('./') || source.startsWith('../')) return { kind: 'file', file: source, ref: source };
-  return { kind: 'opaque', ref: source };
-}
 
 async function checkTask(src, getTask) {
   if (typeof getTask !== 'function') return { status: 'unverifiable', reason: 'no adapter to read task sources' };

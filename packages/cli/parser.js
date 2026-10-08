@@ -30,7 +30,7 @@ const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
   'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
   'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
-  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note',
+  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note', 'require-source',
   'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
   'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
@@ -802,10 +802,13 @@ every fact records who did both and from what source.
 Usage:
   ats kg propose SUBJ PRED OBJ [--domain D --source REF --confidence C --task P/T]
                 [--supersedes FACT_ID | --additive] [--acknowledge-rejected ID]
-                [--valid-at ISO --learned-at ISO]
+                [--valid-at ISO --learned-at ISO] [--require-source any|checkable]
   ats kg propose --file FILE|-              One JSON object per line, every line
                                             through the gate; --domain/--source/
                                             --confidence fill what a line lacks
+                                            ATS_KG_REQUIRE_SOURCE=any|checkable (optionally
+                                            per ATS_KG_REQUIRE_SOURCE_DOMAINS) refuses
+                                            unsourced proposals with exit 4
   ats kg stale [--days N --domain D]        Active facts due for evidence review
   ats kg confirm FACT_ID --source REF       Reviewed evidence confirmation
   ats kg verify [FACT_ID...] [--domain D]   Recheck each fact's source: task://P/T and

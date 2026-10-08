@@ -1197,6 +1197,7 @@ async function handleKg() {
         const text = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8');
         const report = proposeFactLines(text.split('\n'), {
           by: agentId,
+          requireSource: args.options['require-source'],
           defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence, validAt: args.options['valid-at'], learnedAt: args.options['learned-at'] },
         });
         const ok = report.refused === 0 && report.invalid === 0;
@@ -1232,6 +1233,7 @@ async function handleKg() {
           supersedes: args.options.supersedes,
           additive: !!args.options.additive,
           acknowledgeRejected: args.options['acknowledge-rejected'],
+          requireSource: args.options['require-source'],
         });
       } catch (err) {
         if (err instanceof KgGateError) return kgGateOutcome(err);
