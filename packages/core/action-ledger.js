@@ -9,6 +9,38 @@ export function actionLogPath() {
   return process.env.ATS_ACTION_LOG || path.join(configBase, 'ats', 'action-log.jsonl');
 }
 
+const ACTOR_KINDS = new Set(['agent', 'human', 'unattributed']);
+
+/**
+ * Who performs a write: `{ id, kind, session? }`.
+ * kind is `agent` when an agent identity is supplied (argument or ATS_AGENT_ID),
+ * `human` when ATS_ACTOR_KIND=human or the process runs on an interactive terminal
+ * without one, and `unattributed` otherwise. ATS_SESSION_ID binds the session.
+ */
+export function resolveActor({ agent, kind, session, env = process.env, interactive } = {}) {
+  const agentId = typeof agent === 'string' && agent.trim() ? agent.trim()
+    : (env.ATS_AGENT_ID && env.ATS_AGENT_ID.trim()) || null;
+  const tty = interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  let resolvedKind = kind || (env.ATS_ACTOR_KIND && ACTOR_KINDS.has(env.ATS_ACTOR_KIND) ? env.ATS_ACTOR_KIND : null);
+  if (!resolvedKind) resolvedKind = agentId ? 'agent' : tty ? 'human' : 'unattributed';
+  if (!ACTOR_KINDS.has(resolvedKind)) throw new Error(`Unknown actor kind: ${resolvedKind}`);
+  const id = agentId || (resolvedKind === 'human' ? env.ATS_REVIEWER || env.USER || 'human' : 'unknown-agent');
+  const actor = { id, kind: resolvedKind };
+  const sessionId = session || env.ATS_SESSION_ID;
+  if (sessionId) actor.session = String(sessionId);
+  return actor;
+}
+
+function normalizeActor(actor) {
+  if (actor === undefined || actor === null) return null;
+  if (typeof actor !== 'object' || typeof actor.id !== 'string' || !actor.id || !ACTOR_KINDS.has(actor.kind)) {
+    throw new Error('Action ledger actor requires id and kind (agent, human or unattributed).');
+  }
+  const out = { id: actor.id, kind: actor.kind };
+  if (actor.session) out.session = String(actor.session);
+  return out;
+}
+
 function buildRecord(entry) {
   if (!entry || typeof entry !== 'object') throw new Error('Action ledger entry must be an object.');
   if (!entry.action || typeof entry.action !== 'string') throw new Error('Action ledger entry requires an action.');
@@ -37,6 +69,7 @@ function buildRecord(entry) {
     id: entry.id || randomUUID(),
     ts: entry.ts || new Date().toISOString(),
     agent: entry.agent || process.env.ATS_AGENT_ID || 'unknown-agent',
+    actor: normalizeActor(entry.actor) || resolveActor(),
     action: entry.action,
     task: entry.task || null,
     sources: Array.isArray(entry.sources) ? entry.sources : [],
@@ -89,7 +122,9 @@ export function listActions(filters = {}, { logPath = actionLogPath() } = {}) {
         throw new Error(`Malformed action ledger JSON at line ${index + 1}.`, { cause: err });
       }
     })
-    .filter((entry) => !filters.agent || entry.agent === filters.agent)
+    .filter((entry) => !filters.agent || entry.agent === filters.agent || entry.actor?.id === filters.agent)
+    .filter((entry) => !filters.actorKind || (entry.actor?.kind || 'unattributed') === filters.actorKind)
+    .filter((entry) => !filters.session || entry.actor?.session === filters.session)
     .filter((entry) => !filters.action || entry.action === filters.action)
     .filter((entry) => !filters.projectId || entry.task?.projectId === filters.projectId)
     .filter((entry) => !filters.taskId || entry.task?.taskId === filters.taskId)
@@ -131,6 +166,7 @@ export function taskHistory(projectId, taskId, { limit, logPath = actionLogPath(
       ts: entry.ts,
       action: entry.action,
       agent: entry.agent,
+      ...(entry.actor ? { actor: entry.actor } : {}),
       restorable: Boolean(entry.before && Object.keys(entry.before).length),
       before: entry.before,
       after: entry.after,

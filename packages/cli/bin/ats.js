@@ -70,6 +70,7 @@ import {
   evaluateTaskHierarchy,
   contextForTask,
   recordAction,
+  resolveActor,
   listActions,
   snapshotTask,
   taskHistory,
@@ -250,6 +251,12 @@ async function main() {
       const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
       console.log(pkg.version);
       return;
+    }
+    // `--agent NAME` names the acting agent for every write in this invocation;
+    // on `ledger list` it stays a filter.
+    const listingLedger = args.command === 'ledger' && args.subcommand === 'list';
+    if (typeof args.options.agent === 'string' && args.options.agent.trim() && !listingLedger) {
+      process.env.ATS_AGENT_ID = args.options.agent.trim();
     }
     if (!args.command || (args.options.help && !args.command)) {
       console.log(getMainHelp());
@@ -1009,6 +1016,7 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false, bef
   try {
     return recordAction({
       agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      actor: resolveActor(),
       action,
       task,
       advanced,
@@ -2431,6 +2439,7 @@ async function handleLedger() {
     }
     return recordAction({
       agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      actor: resolveActor(),
       action: args.options.action,
       task: { projectId, taskId },
       sources: tagsToArray(args.options.sources) || [],
@@ -2444,6 +2453,8 @@ async function handleLedger() {
       projectId: args.options.project,
       taskId: args.options.task,
       agent: args.options.agent,
+      actorKind: args.options['actor-kind'],
+      session: args.options.session,
       action: args.options.action,
       advanced: booleanOption(args.options.advanced, 'advanced'),
       limit: parseInt(args.options.limit) || undefined,

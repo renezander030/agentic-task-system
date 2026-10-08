@@ -30,7 +30,7 @@ const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
   'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
   'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
-  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent',
+  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session',
   'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
   'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
@@ -494,6 +494,7 @@ Global options:
   --version, -v     Show version
   --format <type>   Output format: text (default) or json
   --json            Shorthand for --format json (machine-readable, pipe to jq)
+  --agent <name>    Acting agent recorded on every write (default ATS_AGENT_ID)
   --require-complete  Exit 2 for stale, degraded or explicitly incomplete reads
   --                Treat remaining arguments as literal positionals
 
@@ -667,7 +668,12 @@ Record options:
   --output <text>       Concise result or artifact reference
   --advanced <bool>     Whether the action advanced the task
 
-List filters: --project, --task, --agent, --action, --advanced, --limit`,
+List filters: --project, --task, --agent, --actor-kind agent|human|unattributed,
+              --session, --action, --advanced, --limit
+
+Every record carries actor: { id, kind, session? }. kind is agent when --agent or
+ATS_AGENT_ID names one, human for ATS_ACTOR_KIND=human or an interactive terminal,
+otherwise unattributed. ATS_SESSION_ID binds the session.`,
     security: `ats security - Portable task access policy and audited decisions
 
 Usage:
