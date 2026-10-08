@@ -172,6 +172,40 @@ function serializeScalar(value) {
   return String(value);
 }
 
+/**
+ * Rewrite only the named keys of a leading frontmatter block and keep every
+ * other line byte for byte (block lists, nested maps, comments, key case).
+ * `updates` maps key → value; keys match case-insensitively and a missing key
+ * is appended. Returns the new frontmatter block (through its closing `---`
+ * line), or null when the text has no frontmatter.
+ */
+export function patchFrontmatterBlock(raw, updates, renderEntry) {
+  const m = /^---(\r?\n)([\s\S]*?)\r?\n---(\r?\n|$)/.exec(raw);
+  if (!m) return null;
+  const eol = m[1];
+  const lines = m[2].split(/\r?\n/);
+  const pending = new Map(Object.entries(updates)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => [key.toLowerCase(), { key, value }]));
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const kv = /^([A-Za-z0-9_-]+)\s*:/.exec(lines[i]);
+    const hit = kv && pending.get(kv[1].toLowerCase());
+    if (!hit) { out.push(lines[i]); continue; }
+    while (i + 1 < lines.length && /^(\s+\S|\s*-(\s|$))/.test(lines[i + 1])) i += 1;
+    out.push(...renderEntry(kv[1], hit.value));
+    pending.delete(kv[1].toLowerCase());
+  }
+  for (const { key, value } of pending.values()) out.push(...renderEntry(key, value));
+  return { block: `---${eol}${out.join(eol)}${eol}---${m[3] || eol}`, body: raw.slice(m[0].length) };
+}
+
+function renderBlockEntry(key, value) {
+  const v = serializeScalar(value);
+  if (!Array.isArray(v)) return [`${key}: ${v}`];
+  return [`${key}:`, ...v.map((item) => `- ${item}`)];
+}
+
 export function serializeFrontmatter(data) {
   const keys = Object.keys(data).filter((k) => data[k] !== undefined);
   const lines = [];
@@ -307,16 +341,18 @@ export function patchConcept(bundleDir, taskId, patch = {}) {
 
   const raw = fs.readFileSync(abs, 'utf8');
   const { data, body } = parseFrontmatter(raw);
-  const newData = { ...data };
-  if (!newData.type) newData.type = 'Task';
-  if (patch.title !== undefined) newData.title = patch.title;
-  if (patch.tags !== undefined) newData.tags = normalizeTags(patch.tags);
-  if (patch.type !== undefined) newData.type = patch.type;
-  if (patch.description !== undefined) newData.description = patch.description;
-  if (patch.resource !== undefined) newData.resource = patch.resource;
-  newData.timestamp = nowIso();
+  const updates = {};
+  if (!data.type) updates.type = 'Task';
+  if (patch.title !== undefined) updates.title = patch.title;
+  if (patch.tags !== undefined) updates.tags = normalizeTags(patch.tags);
+  if (patch.type !== undefined) updates.type = patch.type;
+  if (patch.description !== undefined) updates.description = patch.description;
+  if (patch.resource !== undefined) updates.resource = patch.resource;
+  updates.timestamp = nowIso();
   const newBody = patch.content !== undefined ? patch.content : body;
 
-  fs.writeFileSync(abs, `${serializeFrontmatter(newData)}${newBody}`);
+  const patched = patchFrontmatterBlock(raw, updates, renderBlockEntry);
+  const front = patched ? patched.block : serializeFrontmatter({ ...data, ...updates });
+  fs.writeFileSync(abs, `${front}${newBody}`);
   return readConcept(bundleDir, abs);
 }
