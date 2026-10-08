@@ -85,6 +85,7 @@ import {
   snapshotTaskEvents,
   collectAndSpoolTaskEvents,
   normalizeTaskBody,
+  hasLiteralNewlineEscapes,
   contentHash,
   TRIAGE_TAG,
   syncCorpusCache,
@@ -986,6 +987,21 @@ function needsTaskExt(method, sub) {
   );
 }
 
+/**
+ * Normalize a body that is about to be written. A body the normalizer cannot
+ * restructure without dropping text is written verbatim, with a warning.
+ */
+function conformBody(text) {
+  if (hasLiteralNewlineEscapes(text)) {
+    console.error('Warning: the body is one line with literal \\n sequences; pass real line breaks (--input FILE, stdin, or $\'...\' quoting).');
+  }
+  const norm = normalizeTaskBody(text);
+  if (norm.skipped === 'content-loss') {
+    console.error(`Warning: body kept verbatim; normalizing would drop: ${norm.lost.join(', ')}`);
+  }
+  return norm.content;
+}
+
 /** TickTick's completed-listing window format: 2026-03-06T00:00:00.000+0000. */
 function tickTickTimestamp(date) {
   return date.toISOString().replace('Z', '+0000');
@@ -1847,7 +1863,7 @@ async function handleTasks() {
       // passed by NAME is not recognized by the skip). --raw is the per-call form:
       // a body rendered deterministically by a tool must survive byte-for-byte.
       if (opts.content && !formatSkipped(projectId) && args.options.raw !== true) {
-        opts.content = normalizeTaskBody(opts.content).content;
+        opts.content = conformBody(opts.content);
       }
       if (args.options['dry-run'] === true) {
         return {
@@ -1998,7 +2014,7 @@ async function handleTasks() {
       // --raw is the per-call form of format-skip: a body rendered
       // deterministically by a tool must survive the write byte-for-byte.
       if (patch.content !== undefined && !formatSkipped(up) && args.options.raw !== true) {
-        patch.content = normalizeTaskBody(patch.content).content;
+        patch.content = conformBody(patch.content);
       }
       if (args.options['dry-run'] === true) {
         return {

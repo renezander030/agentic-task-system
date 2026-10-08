@@ -97,3 +97,24 @@ test('body modes are exclusive', () => {
   assert.equal(proc.status, 1);
   assert.match(proc.stderr, /one of --content, --append, --prepend/);
 });
+
+test('a body with literal \\n escapes is written verbatim with a warning instead of being wiped', () => {
+  const flat = '# Goal\\nShip the release\\n\\n# Log\\n- 2026-09-01: drafted the plan with the team';
+  const proc = spawnSync(process.execPath, [cli, 'update', 'p1', 't1', '--content', flat, '--json'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ATS_ADAPTER: adapterUrl,
+      ATS_CORPUS_CACHE_DISABLE: '1',
+      ATS_USAGE_DISABLE: '1',
+      ATS_FORMAT_SKIP_PROJECTS: '',
+      ATS_ACTION_LOG: path.join(tempDir, 'action-log-guard.jsonl'),
+      XDG_CONFIG_HOME: path.join(tempDir, 'xdg-guard'),
+    },
+  });
+  assert.equal(proc.status, 0, proc.stderr);
+  const out = JSON.parse(proc.stdout);
+  assert.equal((out.task || out).content, flat);
+  assert.match(proc.stderr, /literal \\n sequences/);
+  assert.match(proc.stderr, /body kept verbatim; normalizing would drop: .*drafted/);
+});

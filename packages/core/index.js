@@ -110,5 +110,5 @@ export {
   scoreProgressEpisodes,
   formatProgressBenchmark,
 } from './progress-benchmark.js';
-export { normalizeTaskBody, contentHash, TRIAGE_TAG } from './task-format.js';
+export { normalizeTaskBody, hasLiteralNewlineEscapes, contentHash, TRIAGE_TAG } from './task-format.js';
 export { stableDigest, buildReliabilitySnapshot } from './reliability-snapshot.js';
