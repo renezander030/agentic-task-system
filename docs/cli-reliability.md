@@ -41,3 +41,34 @@ Explicit source times must be ISO timestamps with a timezone, normalize to UTC a
 Freshness age uses the last reviewed confirmation, then learned/ratified time, then legacy validity time. Age is a review signal and never automatically closes a fact. Confirmation requires source evidence, approval and ratification, then appends `lastConfirmedAt` and confirmation provenance while retaining the original fact.
 
 Every ratification checks the approved payload digest and rechecks active facts under the same lock as its append. A conflicting proposal cannot silently become current because another fact was approved first. Repeated ratification of one proposal cannot append twice. The CLI durably claims review items and reports failed ratifications with exit 5. Legacy approvals without digests need a fresh proposal and approval.
+
+## Fact source verification and provenance policy
+
+```sh
+ats kg propose "Acme" "renews" "in March" --source task://PROJECT/TASK --tier action-record
+ats kg verify --domain sales --json
+ats kg verify --network --propose-retract
+ATS_KG_REQUIRE_SOURCE=checkable ATS_KG_REQUIRE_SOURCE_DOMAINS=sales ats kg propose ...
+```
+
+`kg verify` reads each active fact's source from the system that holds it: `task://PROJECT/TASK` and `--task` references through the active adapter, `file:` and relative or absolute paths on disk, and http(s) URLs when `--network` is given. Each fact is `verified`, `changed` (a file modified after the fact was learned or last confirmed), `stale` (the record is gone) or `unverifiable` (no checkable source, or a read error that says nothing about the record). Any stale or changed source exits 2. `--propose-retract` stages a reviewed retraction for every stale fact; nothing closes without approval.
+
+`--require-source any|checkable`, or `ATS_KG_REQUIRE_SOURCE` with an optional `ATS_KG_REQUIRE_SOURCE_DOMAINS` list, refuses proposals without a source (verdict `unsourced`, exit 4). `checkable` accepts the references `kg verify` can recheck. `--tier source-fact|action-record|statement|belief` records what kind of claim a proposal makes; `kg pending` counts and filters by tier, and ratified facts keep it in their provenance.
+
+## Review separation
+
+An approval comes from an identity other than the one that staged the item, compared by reviewer name and by acting agent; a matching decision exits 4. `ATS_REVIEW_REQUIRE_HUMAN=1` also refuses approvals from a process acting as an agent. Rejecting one's own proposal stays possible. Each item records `stagedActor` and `decidedActor`, and `--note` keeps the reason for a decision.
+
+## Actors and ledger integrity
+
+Every ledger record carries `actor: { id, kind, session? }`. `kind` is `agent` when `--agent NAME` or `ATS_AGENT_ID` names one, `human` for `ATS_ACTOR_KIND=human` or an interactive terminal, and `unattributed` otherwise; `ATS_SESSION_ID` binds the session. `ats ledger list --actor-kind` and `--session` filter on them.
+
+Each record also carries `prevHash`, the SHA-256 of the previous line. `ats ledger verify` checks the chain, names each break by line and exits 2. It prints `head`, the hash of the last entry; keep it elsewhere and pass `--expect-head HASH` to detect a truncated ledger. Entries written before chaining remain valid at the start of the file.
+
+## Complete listings and body normalization
+
+`ats tasks completed [DAYS]` pages through the completion window past the backend's per-call limit, deduplicates boundary entries and reports `pages` and `complete`; a listing that stops at its page budget carries a warning and fails `--require-complete`.
+
+The Goal+Log normalizer keeps every word of the body it receives. A body it cannot restructure without loss is written verbatim, and the CLI names the words that would have moved. A body sent as one line of literal `\n` sequences gets a warning to pass real line breaks.
+
+Obsidian and OKF updates rewrite only the frontmatter keys they change; block lists, nested maps, comments, key case and unknown keys stay byte for byte.
