@@ -152,3 +152,24 @@ test('a provenance policy refuses unsourced proposals with exit 4, per call or p
   assert.equal(report.refused, 1);
   assert.equal(report.results[1].verdict, 'unsourced');
 });
+
+test('ledger verify accepts the chained ledger and exits 2 once an entry was edited', () => {
+  const opts = { store: 'ledger' };
+  run(['ledger', 'record', 'p1', 't1', '--action', 'note.added', '--output', 'first'], opts);
+  run(['ledger', 'record', 'p1', 't1', '--action', 'note.added', '--output', 'second'], opts);
+  run(['ledger', 'record', 'p1', 't1', '--action', 'note.added', '--output', 'third'], opts);
+  const ok = run(['ledger', 'verify'], opts);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.chained, 3);
+  const listed = run(['ledger', 'list', '--actor-kind', 'agent'], opts);
+  assert.equal(listed.length, 3);
+  assert.deepEqual(listed[0].actor, { id: 'agent-test', kind: 'agent' });
+
+  const logPath = path.join(tempDir, 'ledger', 'action-log.jsonl');
+  fs.writeFileSync(logPath, fs.readFileSync(logPath, 'utf8').replace('"first"', '"edited"'));
+  const broken = runProcess(['ledger', 'verify'], opts);
+  assert.equal(broken.status, 2);
+  assert.equal(JSON.parse(broken.stdout).breaks[0].line, 2);
+  const head = runProcess(['ledger', 'verify', '--expect-head', ok.head], opts);
+  assert.equal(head.status, 2);
+});

@@ -28,6 +28,7 @@ export interface ActionLedgerRecord extends ActionLedgerEntry {
   ts: string;
   agent: string;
   actor: ActionActor;
+  prevHash?: string | null;
   sources: string[];
   approvals: string[];
   advanced: boolean;
@@ -48,6 +49,16 @@ export interface RevertResult {
 }
 
 export function actionLogPath(): string;
+export interface LedgerVerification {
+  ok: boolean;
+  entries: number;
+  chained: number;
+  unchained: number;
+  breaks: Array<{ line: number; id?: string; reason: string; expected?: string | null; actual?: string | null }>;
+  head: string | null;
+  headMatches?: boolean;
+}
+export function verifyLedger(options?: { logPath?: string; expectHead?: string }): LedgerVerification;
 export function resolveActor(options?: { agent?: string; kind?: ActionActor['kind']; session?: string; env?: Record<string, string | undefined>; interactive?: boolean }): ActionActor;
 export function recordAction(entry: ActionLedgerEntry, options?: { logPath?: string }): ActionLedgerRecord | null;
 export function listActions(filters?: { agent?: string; actorKind?: ActionActor['kind']; session?: string; action?: string; projectId?: string; taskId?: string; advanced?: boolean; limit?: number }, options?: { logPath?: string }): ActionLedgerRecord[];

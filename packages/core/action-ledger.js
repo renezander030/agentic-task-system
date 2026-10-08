@@ -97,10 +97,84 @@ function buildRecord(entry) {
   return record;
 }
 
+const lineHash = (line) => createHash('sha256').update(line, 'utf8').digest('hex');
+
+/** The last non-empty line of a file, read from its tail. */
+function readLastLine(logPath) {
+  let fd;
+  try { fd = fs.openSync(logPath, 'r'); } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    let chunk = 64 * 1024;
+    while (true) {
+      const start = Math.max(0, size - chunk);
+      const buf = Buffer.alloc(size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      const text = buf.toString('utf8').replace(/\n+$/, '');
+      const nl = text.lastIndexOf('\n');
+      if (nl >= 0 || start === 0) return text.slice(nl + 1) || null;
+      chunk *= 4;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// Every appended record carries prevHash, the SHA-256 of the exact previous
+// line, so an edited, removed or reordered entry breaks the chain.
 function appendRecordUnlocked(record, logPath) {
   fs.mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
+  const last = readLastLine(logPath);
+  record.prevHash = last === null ? null : lineHash(last);
   fs.appendFileSync(logPath, JSON.stringify(record) + '\n', { mode: 0o600 });
   fs.chmodSync(logPath, 0o600);
+}
+
+/**
+ * Check the ledger's hash chain. Entries written before chaining are counted
+ * as `unchained` while they lead the file; after the first chained entry every
+ * line must carry the hash of its predecessor. `head` is the hash of the last
+ * line; `expectHead` compares it with a value recorded elsewhere, which also
+ * detects a truncated tail.
+ */
+export function verifyLedger({ logPath = actionLogPath(), expectHead } = {}) {
+  if (!fs.existsSync(logPath)) {
+    const ok = !expectHead;
+    return { ok, entries: 0, chained: 0, unchained: 0, breaks: [], head: null, ...(expectHead ? { headMatches: false } : {}) };
+  }
+  const lines = fs.readFileSync(logPath, 'utf8').split('\n').filter(Boolean);
+  const breaks = [];
+  let chained = 0;
+  let unchained = 0;
+  let chainStarted = false;
+  for (const [index, line] of lines.entries()) {
+    let entry;
+    try { entry = JSON.parse(line); } catch {
+      breaks.push({ line: index + 1, reason: 'malformed JSON' });
+      continue;
+    }
+    if (entry.prevHash === undefined) {
+      if (chainStarted) breaks.push({ line: index + 1, id: entry.id, reason: 'entry without prevHash after the chain started' });
+      else unchained += 1;
+      continue;
+    }
+    chainStarted = true;
+    chained += 1;
+    const expected = index === 0 ? null : lineHash(lines[index - 1]);
+    if (entry.prevHash !== expected) {
+      breaks.push({ line: index + 1, id: entry.id, reason: index === 0 ? 'first entry names a predecessor' : 'previous entry changed, removed or reordered', expected, actual: entry.prevHash });
+    }
+  }
+  const head = lines.length ? lineHash(lines[lines.length - 1]) : null;
+  const report = { ok: breaks.length === 0, entries: lines.length, chained, unchained, breaks, head };
+  if (expectHead) {
+    report.headMatches = head === expectHead || (head !== null && expectHead.length >= 8 && head.startsWith(expectHead));
+    if (!report.headMatches) report.ok = false;
+  }
+  return report;
 }
 
 export function recordAction(entry, { logPath = actionLogPath() } = {}) {

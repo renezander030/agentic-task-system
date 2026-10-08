@@ -87,7 +87,7 @@ export {
   evaluateTaskHierarchy,
   contextForTask,
 } from './task-context.js';
-export { actionLogPath, resolveActor, recordAction, listActions, snapshotTask, taskHistory, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
+export { actionLogPath, resolveActor, verifyLedger, recordAction, listActions, snapshotTask, taskHistory, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
 export {
   TASK_EVENT_STATE_VERSION,
   TASK_EVENT_SPOOL_VERSION,

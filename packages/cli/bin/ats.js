@@ -71,6 +71,7 @@ import {
   contextForTask,
   recordAction,
   resolveActor,
+  verifyLedger,
   listActions,
   snapshotTask,
   taskHistory,
@@ -2511,6 +2512,14 @@ async function handleLedger() {
       output: args.options.output,
       advanced: booleanOption(args.options.advanced, 'advanced') ?? false,
     });
+  }
+  if (args.subcommand === 'verify') {
+    const report = verifyLedger({ expectHead: args.options['expect-head'] });
+    if (!report.ok) {
+      console.log(formatOutput(report, args.options.format));
+      process.exit(2);
+    }
+    return report;
   }
   if (args.subcommand === 'list') {
     return listActions({

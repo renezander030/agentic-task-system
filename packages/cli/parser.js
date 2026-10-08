@@ -30,7 +30,7 @@ const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
   'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
   'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
-  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note', 'require-source',
+  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note', 'require-source', 'expect-head',
   'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
   'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
@@ -660,6 +660,7 @@ matches on its title and intent as \`related\` — each with provenance.
 Usage:
   ats ledger record PROJECT_ID TASK_ID --action NAME [options]
   ats ledger list [options]
+  ats ledger verify [--expect-head HASH]
 
 Record options:
   --agent <id>          Agent identity (default ATS_AGENT_ID or ats-cli)
@@ -673,7 +674,11 @@ List filters: --project, --task, --agent, --actor-kind agent|human|unattributed,
 
 Every record carries actor: { id, kind, session? }. kind is agent when --agent or
 ATS_AGENT_ID names one, human for ATS_ACTOR_KIND=human or an interactive terminal,
-otherwise unattributed. ATS_SESSION_ID binds the session.`,
+otherwise unattributed. ATS_SESSION_ID binds the session.
+
+Every record carries prevHash, the SHA-256 of the previous line. verify checks the
+chain, reports breaks (exit 2) and prints head, the hash of the last entry; keep
+head elsewhere and pass it as --expect-head to detect a truncated ledger.`,
     security: `ats security - Portable task access policy and audited decisions
 
 Usage:
