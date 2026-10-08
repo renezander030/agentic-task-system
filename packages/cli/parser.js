@@ -24,7 +24,7 @@ const BOOLEAN_OPTIONS = new Set([
   'force', 'write', 'dry-run', 'once', 'close', 'relevance', 'no-relevance',
   'no-facts', 'semantic', 'lexical', 'include-retracted', 'cypher', 'graphiti',
   'additive', 'clear-parent', 'allow-missing', 'live', 'require-complete',
-  'if-absent', 'non-interactive', 'claim', 'native', 'n',
+  'if-absent', 'non-interactive', 'claim', 'native', 'n', 'network', 'propose-retract',
 ]);
 const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
@@ -804,6 +804,10 @@ Usage:
                                             --confidence fill what a line lacks
   ats kg stale [--days N --domain D]        Active facts due for evidence review
   ats kg confirm FACT_ID --source REF       Reviewed evidence confirmation
+  ats kg verify [FACT_ID...] [--domain D]   Recheck each fact's source: task://P/T and
+                                            --task refs through the adapter, file: paths,
+                                            URLs with --network; exit 2 when stale or
+                                            changed; --propose-retract stages retractions
   ats kg retract FACT_ID [--reason "..."]   Retraction proposal — reviewed too
   ats kg pending [--domain D]               What each queued proposal would do,
                                             checked against the store now

@@ -107,6 +107,8 @@ import {
   proposeRetract,
   proposeConfirm,
   staleFacts,
+  verifyFacts,
+  classifySource,
   ratifyFactItem,
   listKgFacts,
   askFacts,
@@ -1227,6 +1229,48 @@ async function handleKg() {
     }
     case 'stale':
       return staleFacts({ domain: args.options.domain, days: args.options.days === undefined ? 60 : Number(args.options.days), limit: args.options.limit === undefined ? 50 : Number(args.options.limit) });
+    case 'verify': {
+      // Recheck each active fact's source against the system that holds it.
+      // Exit 2 when any source is stale or changed.
+      const needsAdapter = listKgFacts({ domain: args.options.domain }).some((fact) => classifySource(fact).kind === 'task');
+      let getTask;
+      if (needsAdapter) {
+        try {
+          const adapter = await loadAdapter();
+          getTask = (projectId, taskId) => adapter.getTask(projectId, taskId);
+        } catch (err) {
+          console.error(`Warning: task sources unverifiable — adapter unavailable: ${err.message}`);
+        }
+      }
+      const timeoutMs = args.options['timeout-ms'] === undefined ? 8000 : Number(args.options['timeout-ms']);
+      const fetchUrl = args.options.network ? async (url) => {
+        const res = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: globalThis.AbortSignal.timeout(timeoutMs) });
+        return res.status;
+      } : undefined;
+      const report = await verifyFacts({
+        ids: args.positional,
+        domain: args.options.domain,
+        limit: args.options.limit === undefined ? undefined : Number(args.options.limit),
+        getTask,
+        fetchUrl,
+      });
+      if (args.options['propose-retract']) {
+        report.proposed = [];
+        for (const fact of report.facts.filter((f) => f.status === 'stale')) {
+          try {
+            const item = proposeRetract({ factId: fact.id, reason: `source unavailable: ${fact.source} (${fact.reason})`, by: agentId });
+            report.proposed.push({ factId: fact.id, reviewId: item.id });
+          } catch (err) {
+            report.proposed.push({ factId: fact.id, error: err.message });
+          }
+        }
+      }
+      if (!report.ok) {
+        console.log(formatOutput(report, args.options.format));
+        process.exit(2);
+      }
+      return report;
+    }
     case 'confirm': {
       const item = proposeConfirm({ factId: args.positional[0], source: args.options.source, by: agentId });
       return { staged: true, reviewId: item.id, message: 'Confirmation staged; approve it and run ats kg ratify.' };
