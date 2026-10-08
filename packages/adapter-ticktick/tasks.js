@@ -8,6 +8,9 @@ import * as usageLog from '@reneza/ats-core/usage-log';
 import * as corpusCache from '@reneza/ats-core/corpus-cache';
 import * as retrieval from '@reneza/ats-core/retrieval';
 
+const COMPLETED_PAGE = 200;
+const COMPLETED_MAX_PAGES = 50;
+
 // TickTick wants a full ISO datetime; normalize bare YYYY-MM-DD (e.g. ats --due 2026-06-20).
 function normalizeDue(d) {
   if (typeof d !== 'string' || d === '') return d;
@@ -440,7 +443,32 @@ export async function listCompleted(options = {}, deps = {}) {
   if (options.startDate) body.startDate = options.startDate;
   if (options.endDate) body.endDate = options.endDate;
 
-  const tasks = await apiRequest('POST', '/task/completed', body, deps);
+  // The endpoint answers at most COMPLETED_PAGE tasks per call, newest first. A full
+  // page moves the window's end to the oldest completion it returned (inclusive, so
+  // ties are re-read and deduplicated) until a short page or the page budget.
+  const pageSize = options.pageSize || COMPLETED_PAGE;
+  const maxPages = options.maxPages || COMPLETED_MAX_PAGES;
+  const seen = new Map();
+  let pages = 0;
+  let complete = false;
+  let windowEnd = body.endDate;
+  while (pages < maxPages) {
+    const page = await apiRequest('POST', '/task/completed', windowEnd ? { ...body, endDate: windowEnd } : body, deps);
+    pages += 1;
+    const list = Array.isArray(page) ? page : [];
+    const before = seen.size;
+    for (const t of list) if (t?.id && !seen.has(t.id)) seen.set(t.id, t);
+    if (list.length < pageSize) { complete = true; break; }
+    const oldest = list.reduce((min, t) => {
+      const ms = Date.parse(t?.completedTime);
+      return Number.isFinite(ms) && (min === null || ms < min.ms) ? { ms, raw: t.completedTime } : min;
+    }, null);
+    if (!oldest || seen.size === before) break;
+    if (body.startDate && oldest.ms <= Date.parse(body.startDate)) { complete = true; break; }
+    windowEnd = oldest.raw;
+  }
+
+  const tasks = [...seen.values()];
   const results = tasks.map((t) => ({
     id: shortId(t.id),
     fullId: t.id,
@@ -456,10 +484,16 @@ export async function listCompleted(options = {}, deps = {}) {
 
   results.sort((a, b) => new Date(b.completedTime) - new Date(a.completedTime));
 
-  return {
+  const out = {
     count: results.length,
     tasks: results,
+    pages,
+    complete,
   };
+  if (!complete) {
+    out.warnings = [`completed listing stopped after ${pages} page(s) of ${pageSize}; narrow --from/--to or --projects for the rest`];
+  }
+  return out;
 }
 
 /**

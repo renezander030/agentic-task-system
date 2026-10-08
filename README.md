@@ -244,8 +244,10 @@ ats history <project> <task> --restore <revision> --dry-run
 ats kg propose "Acme GmbH" "prefers" "invoices as PDF" --domain sales --source "call 2026-08-01"
 ats kg propose "Acme GmbH" "prefers" "invoices as XML" --domain sales --supersedes <fact-id>  # replaces, in one ratification
 ats kg propose --file facts.jsonl --domain sales   # one JSON object per line, every line through the gate
+ats kg propose "Acme GmbH" "signed" "renewal" --source task://<project>/<task> --tier action-record
 ats kg pending                                     # what each queued proposal would do to the graph
-ats review approve <id> && ats kg ratify --all
+ats review approve <id> && ats kg ratify --all     # approval comes from someone other than the proposer
+ats kg verify                                      # recheck every fact's source; exit 2 when one is gone or changed
 ats kg ask "what does Acme prefer" --domain sales --json            # + confidence.verdict
 ats kg ask "what does Acme prefer" --domain sales --as-of 2026-06-30 # what the store believed then
 ats kg ask "invoices" --center "Acme GmbH" --semantic               # anchored on one entity, embedder-backed
@@ -256,6 +258,8 @@ ats kg export --dialect falkordb           # openCypher for FalkorDB / Neo4j, re
 ats kg export --graphiti > episodes.jsonl  # Graphiti episodes with the provenance record
 ats kg export --cypher --include-retracted # closed facts too, with tInvalid and who closed them
 ats ledger record <project> <task> --action release.verified --advanced true
+ats ledger list --actor-kind agent --session <id>   # who acted, agent or human, in which session
+ats ledger verify                                   # hash-chained ledger; prints head for --expect-head
 ats security set <project> <task> --trust trusted --allow-actions read --allow-resources task:self
 ats security check <project> <task> --action read --resource task:self --reason "load context"
 ats events watch --json            # NDJSON observations; never launches agents
@@ -267,6 +271,7 @@ ats batch changes.jsonl --journal run.jsonl   # apply and resume by stable item 
 ats state doctor                              # validate local schemas and file permissions
 ats state import bundle.json --force --dry-run
 ats auth status --non-interactive             # bounded to 15s; override with --timeout-ms
+ats tasks completed 30 --projects <id> --require-complete   # every completion in the window, paged
 ats review list                 # writes staged by approvalRequired targets
 ats review approve ID && ats review apply --all
 ats cache sync                  # refresh the corpus cache (find also refreshes a stale one in the background)

@@ -24,13 +24,13 @@ const BOOLEAN_OPTIONS = new Set([
   'force', 'write', 'dry-run', 'once', 'close', 'relevance', 'no-relevance',
   'no-facts', 'semantic', 'lexical', 'include-retracted', 'cypher', 'graphiti',
   'additive', 'clear-parent', 'allow-missing', 'live', 'require-complete',
-  'if-absent', 'non-interactive', 'claim', 'native', 'n',
+  'if-absent', 'non-interactive', 'claim', 'native', 'n', 'network', 'propose-retract',
 ]);
 const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
   'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
   'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
-  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent',
+  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note', 'require-source', 'expect-head', 'tier',
   'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
   'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
@@ -494,6 +494,7 @@ Global options:
   --version, -v     Show version
   --format <type>   Output format: text (default) or json
   --json            Shorthand for --format json (machine-readable, pipe to jq)
+  --agent <name>    Acting agent recorded on every write (default ATS_AGENT_ID)
   --require-complete  Exit 2 for stale, degraded or explicitly incomplete reads
   --                Treat remaining arguments as literal positionals
 
@@ -659,6 +660,7 @@ matches on its title and intent as \`related\` — each with provenance.
 Usage:
   ats ledger record PROJECT_ID TASK_ID --action NAME [options]
   ats ledger list [options]
+  ats ledger verify [--expect-head HASH]
 
 Record options:
   --agent <id>          Agent identity (default ATS_AGENT_ID or ats-cli)
@@ -667,7 +669,16 @@ Record options:
   --output <text>       Concise result or artifact reference
   --advanced <bool>     Whether the action advanced the task
 
-List filters: --project, --task, --agent, --action, --advanced, --limit`,
+List filters: --project, --task, --agent, --actor-kind agent|human|unattributed,
+              --session, --action, --advanced, --limit
+
+Every record carries actor: { id, kind, session? }. kind is agent when --agent or
+ATS_AGENT_ID names one, human for ATS_ACTOR_KIND=human or an interactive terminal,
+otherwise unattributed. ATS_SESSION_ID binds the session.
+
+Every record carries prevHash, the SHA-256 of the previous line. verify checks the
+chain, reports breaks (exit 2) and prints head, the hash of the last entry; keep
+head elsewhere and pass it as --expect-head to detect a truncated ledger.`,
     security: `ats security - Portable task access policy and audited decisions
 
 Usage:
@@ -772,9 +783,13 @@ undoable like any other write.
 Usage:
   ats review list [--all|--status S]    Pending items (default) or all
   ats review show ID                    Full payload of one item
-  ats review approve ID... [--by NAME]  Approve pending items
-  ats review reject ID...  [--by NAME]  Reject pending items
+  ats review approve ID... [--by NAME] [--note TEXT]  Approve pending items
+  ats review reject ID...  [--by NAME] [--note TEXT]  Reject pending items
   ats review apply <ID|--all>           Execute approved writes
+
+Approval has to come from an identity other than the one that staged the item
+(exit 4 otherwise). ATS_REVIEW_REQUIRE_HUMAN=1 also refuses approvals from a
+process acting as an agent. Each decision records the deciding actor and note.
 
 Ids may be unambiguous prefixes. Task writes claim approved items before applying.
 Interrupted items stay applying; failed writes stay failed. Inspect the backend
@@ -792,15 +807,24 @@ every fact records who did both and from what source.
 Usage:
   ats kg propose SUBJ PRED OBJ [--domain D --source REF --confidence C --task P/T]
                 [--supersedes FACT_ID | --additive] [--acknowledge-rejected ID]
-                [--valid-at ISO --learned-at ISO]
+                [--valid-at ISO --learned-at ISO] [--require-source any|checkable]
+                [--tier source-fact|action-record|statement|belief]
   ats kg propose --file FILE|-              One JSON object per line, every line
                                             through the gate; --domain/--source/
                                             --confidence fill what a line lacks
+                                            ATS_KG_REQUIRE_SOURCE=any|checkable (optionally
+                                            per ATS_KG_REQUIRE_SOURCE_DOMAINS) refuses
+                                            unsourced proposals with exit 4
   ats kg stale [--days N --domain D]        Active facts due for evidence review
   ats kg confirm FACT_ID --source REF       Reviewed evidence confirmation
+  ats kg verify [FACT_ID...] [--domain D]   Recheck each fact's source: task://P/T and
+                                            --task refs through the adapter, file: paths,
+                                            URLs with --network; exit 2 when stale or
+                                            changed; --propose-retract stages retractions
   ats kg retract FACT_ID [--reason "..."]   Retraction proposal — reviewed too
-  ats kg pending [--domain D]               What each queued proposal would do,
-                                            checked against the store now
+  ats kg pending [--domain D --tier T]      What each queued proposal would do,
+                                            checked against the store now, with
+                                            its claimed tier and a count per tier
   ats kg ratify <ID...|--all>               Write APPROVED proposals to the store
   ats kg ask "QUESTION" [--domain D --limit N --include-retracted]
                         [--as-of DATE] [--center ENTITY] [--semantic | --lexical]
@@ -1101,7 +1125,8 @@ Subcommands:
   similar <task_id>                Find semantically similar tasks
   due [days]                       Tasks due within N days (default: 7)
   priority                         High priority tasks
-  completed                        List completed tasks in a date range
+  completed [days]                 List completed tasks (last N days, or --from/--to); pages
+                                   past the 200-per-call limit and reports complete
   vector-sync [--all]              Sync tasks into vector index (--all drains the whole backfill)
   vector-status                    Check vector index health
 
@@ -1172,5 +1197,6 @@ Examples:
   ats tasks vector-sync
   ats tasks due 3
   ats tasks completed --from 2026-03-06T00:00:00.000+0000 --to 2026-03-06T23:59:59.000+0000
-  ats tasks completed --projects PROJECT_ID1,PROJECT_ID2`;
+  ats tasks completed --projects PROJECT_ID1,PROJECT_ID2
+  ats tasks completed 30 --projects PROJECT_ID --require-complete`;
 }

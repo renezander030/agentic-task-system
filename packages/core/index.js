@@ -41,6 +41,9 @@ export {
   askFactsSemantic,
   kgVectorsPath,
   listEntities,
+  verifyFacts,
+  verifyFactSource,
+  classifySource,
 } from './kg.js';
 export { rrf, fuse, find, loadCorpus, similar, syncCorpusCache, projectScope, findConfidence, RRF_K } from './retrieval.js';
 export { detectDuplicates, formatDedup } from './dedup.js';
@@ -84,7 +87,7 @@ export {
   evaluateTaskHierarchy,
   contextForTask,
 } from './task-context.js';
-export { actionLogPath, recordAction, listActions, snapshotTask, taskHistory, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
+export { actionLogPath, resolveActor, verifyLedger, recordAction, listActions, snapshotTask, taskHistory, findAction, mostRecentUndoable, revertAction } from './action-ledger.js';
 export {
   TASK_EVENT_STATE_VERSION,
   TASK_EVENT_SPOOL_VERSION,
@@ -107,5 +110,5 @@ export {
   scoreProgressEpisodes,
   formatProgressBenchmark,
 } from './progress-benchmark.js';
-export { normalizeTaskBody, contentHash, TRIAGE_TAG } from './task-format.js';
+export { normalizeTaskBody, hasLiteralNewlineEscapes, contentHash, TRIAGE_TAG } from './task-format.js';
 export { stableDigest, buildReliabilitySnapshot } from './reliability-snapshot.js';

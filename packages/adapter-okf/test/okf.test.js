@@ -180,3 +180,22 @@ test('core find() retrieves over the OKF bundle with provenance', async () => {
     cleanup(dir);
   }
 });
+
+test('patchConcept keeps unknown keys, block lists and nested maps while it updates the patched ones', async () => {
+  const bundle = await import('../bundle.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-okf-fm-'));
+  try {
+    const file = path.join(dir, 'concept.md');
+    const kept = ['type: Task', 'aliases:', '- first', '- second', 'meta:', '  owner: team', 'Custom-Key: Value'];
+    fs.writeFileSync(file, ['---', 'title: Old', ...kept, 'tags:', '- a', 'timestamp: 2026-01-01T00:00:00Z', '---', '', 'body', ''].join('\n'));
+    bundle.patchConcept(dir, 'concept', { title: 'New', tags: ['b', 'c'] });
+    const raw = fs.readFileSync(file, 'utf8');
+    assert.ok(raw.startsWith(['---', 'title: New', ...kept, 'tags:', '- b', '- c', 'timestamp: '].join('\n')));
+    assert.match(raw, /\n---\n\nbody\n$/);
+    const read = bundle.parseFrontmatter(raw).data;
+    assert.deepEqual(read.aliases, ['first', 'second']);
+    assert.equal(read['Custom-Key'], 'Value');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

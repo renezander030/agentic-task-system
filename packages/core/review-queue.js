@@ -26,6 +26,7 @@ import { randomUUID } from 'node:crypto';
 import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
 import { taskMetadataForRead } from './task-context.js';
 import { stableDigest } from './reliability-snapshot.js';
+import { resolveActor } from './action-ledger.js';
 
 export const REVIEW_QUEUE_VERSION = 1;
 
@@ -74,6 +75,7 @@ export function stageReviewItem({ kind, payload, note, by }, { queuePath = revie
     payload,
     note: note || null,
     stagedBy: by || process.env.ATS_AGENT_ID || 'unknown-agent',
+    stagedActor: resolveActor(by ? { agent: by } : {}),
     stagedAt: new Date().toISOString(),
     status: 'pending',
   };
@@ -95,15 +97,41 @@ export function findReviewItem(idOrPrefix, { queuePath = reviewQueuePath() } = {
   return matchItem(readReviewQueue({ queuePath }).items, idOrPrefix);
 }
 
+function separationError(message) {
+  const error = new Error(message);
+  error.code = 'ATS_SEPARATION';
+  error.exitCode = 4;
+  return error;
+}
+
+/**
+ * Approvals come from someone other than the stager. With
+ * ATS_REVIEW_REQUIRE_HUMAN=1 they must also come from a human actor.
+ * Rejecting one's own proposal is always allowed.
+ */
+function assertSeparateApprover(item, decidedBy, actor) {
+  const same = (a, b) => typeof a === 'string' && typeof b === 'string' && a.trim().toLowerCase() === b.trim().toLowerCase();
+  if (same(decidedBy, item.stagedBy) || (actor.kind === 'agent' && same(actor.id, item.stagedBy))) {
+    throw separationError(`Review item ${item.id} was staged by ${item.stagedBy}; approval has to come from another identity.`);
+  }
+  if (process.env.ATS_REVIEW_REQUIRE_HUMAN === '1' && actor.kind !== 'human') {
+    throw separationError(`Review item ${item.id} needs a human approver (ATS_REVIEW_REQUIRE_HUMAN=1); this process acts as ${actor.kind} ${actor.id}.`);
+  }
+}
+
 export function decideReviewItem(idOrPrefix, decision, { by, note, queuePath = reviewQueuePath() } = {}) {
   if (!['approve', 'reject'].includes(decision)) throw new Error(`Unknown review decision: ${decision}`);
   return withLockSync(queuePath, () => {
     const queue = readReviewQueue({ queuePath });
     const item = matchItem(queue.items, idOrPrefix);
     if (item.status !== 'pending') throw new Error(`Review item ${item.id} is ${item.status}, not pending.`);
+    const decidedBy = by || process.env.ATS_REVIEWER || process.env.USER || 'reviewer';
+    const actor = resolveActor();
+    if (decision === 'approve') assertSeparateApprover(item, decidedBy, actor);
     item.status = decision === 'approve' ? 'approved' : 'rejected';
     if (decision === 'approve') item.approvedDigest = stableDigest({ kind: item.kind, payload: item.payload });
-    item.decidedBy = by || process.env.ATS_REVIEWER || process.env.USER || 'reviewer';
+    item.decidedBy = decidedBy;
+    item.decidedActor = actor;
     item.decidedAt = new Date().toISOString();
     if (note) item.decisionNote = note;
     writeQueue(queue, queuePath);

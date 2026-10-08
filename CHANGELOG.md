@@ -3,6 +3,16 @@
 
 ## Unreleased
 
+- **Complete completed-task listings.** `ats tasks completed [DAYS]` pages through the completion window past the backend's per-call limit, deduplicates boundary entries, and reports `pages` and `complete`; a listing that stops at its page budget warns and fails `--require-complete`.
+- **Actor on every write.** Ledger records carry `actor: { id, kind, session? }` for agents, humans and unattributed callers. A global `--agent` names the acting agent for one invocation; `ATS_ACTOR_KIND` and `ATS_SESSION_ID` are honored, and `ats ledger list` filters by `--actor-kind` and `--session`.
+- **Fact source verification.** `ats kg verify` rechecks every active fact's source against the system that holds it — task references through the adapter, files on disk, URLs with `--network` — and reports `verified`, `changed`, `stale` or `unverifiable`. Stale or changed sources exit 2; `--propose-retract` stages reviewed retractions.
+- **Lossless body normalization.** The Goal+Log normalizer keeps every word it receives; a body it cannot restructure without loss is written verbatim with a warning naming the words, and one-line bodies of literal `\n` sequences get a hint to pass real line breaks.
+- **Review separation of duties.** Approvals come from an identity other than the one that staged the item (exit 4 otherwise); `ATS_REVIEW_REQUIRE_HUMAN=1` also requires a human approver. Items record the staging and deciding actor, and `review approve|reject` accept `--note`.
+- **Provenance policy for facts.** `kg propose --require-source any|checkable`, or `ATS_KG_REQUIRE_SOURCE` with optional `ATS_KG_REQUIRE_SOURCE_DOMAINS`, refuses unsourced proposals with verdict `unsourced` and exit 4, per line in batches too.
+- **Lossless frontmatter updates.** Obsidian and OKF updates rewrite only the keys they change; block lists, nested maps, comments, key case and unknown keys stay byte for byte.
+- **Hash-chained action ledger.** Each record carries `prevHash`; `ats ledger verify` checks the chain, names breaks by line, exits 2, and prints a `head` hash that `--expect-head` compares.
+- **Ratification tiers.** `kg propose --tier source-fact|action-record|statement|belief` records the kind of claim; `kg pending` counts and filters by tier, and ratified facts and exports keep it.
+- **Dependency maintenance.** The lockfile resolves the patched proxy-addr release; `npm audit` reports no findings.
 - **Release preparation.** Document batching pending consumer changes before review and merging repository-only maintenance without publishing unchanged packages.
 - **Beads worker setup.** Document matching ATS and Beads actor identities for claiming and completing owned issues.
 - **Cache refresh validation.** Wait for the refreshed corpus and lease cleanup together in the stale-cache CLI proof, preserving the bounded deadline and final cleanup assertion.

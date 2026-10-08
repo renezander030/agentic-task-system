@@ -70,6 +70,8 @@ import {
   evaluateTaskHierarchy,
   contextForTask,
   recordAction,
+  resolveActor,
+  verifyLedger,
   listActions,
   snapshotTask,
   taskHistory,
@@ -84,6 +86,7 @@ import {
   snapshotTaskEvents,
   collectAndSpoolTaskEvents,
   normalizeTaskBody,
+  hasLiteralNewlineEscapes,
   contentHash,
   TRIAGE_TAG,
   syncCorpusCache,
@@ -106,6 +109,8 @@ import {
   proposeRetract,
   proposeConfirm,
   staleFacts,
+  verifyFacts,
+  classifySource,
   ratifyFactItem,
   listKgFacts,
   askFacts,
@@ -250,6 +255,12 @@ async function main() {
       const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
       console.log(pkg.version);
       return;
+    }
+    // `--agent NAME` names the acting agent for every write in this invocation;
+    // on `ledger list` it stays a filter.
+    const listingLedger = args.command === 'ledger' && args.subcommand === 'list';
+    if (typeof args.options.agent === 'string' && args.options.agent.trim() && !listingLedger) {
+      process.env.ATS_AGENT_ID = args.options.agent.trim();
     }
     if (!args.command || (args.options.help && !args.command)) {
       console.log(getMainHelp());
@@ -977,6 +988,26 @@ function needsTaskExt(method, sub) {
   );
 }
 
+/**
+ * Normalize a body that is about to be written. A body the normalizer cannot
+ * restructure without dropping text is written verbatim, with a warning.
+ */
+function conformBody(text) {
+  if (hasLiteralNewlineEscapes(text)) {
+    console.error('Warning: the body is one line with literal \\n sequences; pass real line breaks (--input FILE, stdin, or $\'...\' quoting).');
+  }
+  const norm = normalizeTaskBody(text);
+  if (norm.skipped === 'content-loss') {
+    console.error(`Warning: body kept verbatim; normalizing would drop: ${norm.lost.join(', ')}`);
+  }
+  return norm.content;
+}
+
+/** TickTick's completed-listing window format: 2026-03-06T00:00:00.000+0000. */
+function tickTickTimestamp(date) {
+  return date.toISOString().replace('Z', '+0000');
+}
+
 function tagsToArray(tags) {
   if (Array.isArray(tags)) return tags;
   if (typeof tags === 'string') return tags.split(',').map((s) => s.trim()).filter(Boolean);
@@ -1004,6 +1035,7 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false, bef
   try {
     return recordAction({
       agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      actor: resolveActor(),
       action,
       task,
       advanced,
@@ -1060,6 +1092,7 @@ const summarizeReviewItem = (i) => ({
   stagedAt: i.stagedAt,
   ...(i.note ? { note: i.note } : {}),
   ...(i.decidedBy ? { decidedBy: i.decidedBy } : {}),
+  ...(i.decisionNote ? { decisionNote: i.decisionNote } : {}),
   ...(i.applyError ? { applyError: i.applyError } : {}),
 });
 
@@ -1165,7 +1198,8 @@ async function handleKg() {
         const text = file === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(file, 'utf8');
         const report = proposeFactLines(text.split('\n'), {
           by: agentId,
-          defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence, validAt: args.options['valid-at'], learnedAt: args.options['learned-at'] },
+          requireSource: args.options['require-source'],
+          defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence, validAt: args.options['valid-at'], learnedAt: args.options['learned-at'], tier: args.options.tier },
         });
         const ok = report.refused === 0 && report.invalid === 0;
         report.message = ok
@@ -1200,6 +1234,8 @@ async function handleKg() {
           supersedes: args.options.supersedes,
           additive: !!args.options.additive,
           acknowledgeRejected: args.options['acknowledge-rejected'],
+          requireSource: args.options['require-source'],
+          tier: args.options.tier,
         });
       } catch (err) {
         if (err instanceof KgGateError) return kgGateOutcome(err);
@@ -1214,6 +1250,48 @@ async function handleKg() {
     }
     case 'stale':
       return staleFacts({ domain: args.options.domain, days: args.options.days === undefined ? 60 : Number(args.options.days), limit: args.options.limit === undefined ? 50 : Number(args.options.limit) });
+    case 'verify': {
+      // Recheck each active fact's source against the system that holds it.
+      // Exit 2 when any source is stale or changed.
+      const needsAdapter = listKgFacts({ domain: args.options.domain }).some((fact) => classifySource(fact).kind === 'task');
+      let getTask;
+      if (needsAdapter) {
+        try {
+          const adapter = await loadAdapter();
+          getTask = (projectId, taskId) => adapter.getTask(projectId, taskId);
+        } catch (err) {
+          console.error(`Warning: task sources unverifiable — adapter unavailable: ${err.message}`);
+        }
+      }
+      const timeoutMs = args.options['timeout-ms'] === undefined ? 8000 : Number(args.options['timeout-ms']);
+      const fetchUrl = args.options.network ? async (url) => {
+        const res = await fetch(url, { method: 'HEAD', redirect: 'follow', signal: globalThis.AbortSignal.timeout(timeoutMs) });
+        return res.status;
+      } : undefined;
+      const report = await verifyFacts({
+        ids: args.positional,
+        domain: args.options.domain,
+        limit: args.options.limit === undefined ? undefined : Number(args.options.limit),
+        getTask,
+        fetchUrl,
+      });
+      if (args.options['propose-retract']) {
+        report.proposed = [];
+        for (const fact of report.facts.filter((f) => f.status === 'stale')) {
+          try {
+            const item = proposeRetract({ factId: fact.id, reason: `source unavailable: ${fact.source} (${fact.reason})`, by: agentId });
+            report.proposed.push({ factId: fact.id, reviewId: item.id });
+          } catch (err) {
+            report.proposed.push({ factId: fact.id, error: err.message });
+          }
+        }
+      }
+      if (!report.ok) {
+        console.log(formatOutput(report, args.options.format));
+        process.exit(2);
+      }
+      return report;
+    }
     case 'confirm': {
       const item = proposeConfirm({ factId: args.positional[0], source: args.options.source, by: agentId });
       return { staged: true, reviewId: item.id, message: 'Confirmation staged; approve it and run ats kg ratify.' };
@@ -1312,7 +1390,7 @@ async function handleKg() {
       return factHistory(args.positional[0]);
     }
     case 'pending':
-      return pendingFactProposals({ domain: args.options.domain });
+      return pendingFactProposals({ domain: args.options.domain, tier: args.options.tier });
     case 'stats':
       return kgStats({ listReviewItems });
     case 'export': {
@@ -1554,8 +1632,9 @@ async function handleReview() {
     }
     case 'approve':
     case 'reject': {
-      if (!args.positional.length) { console.error(`Usage: ats review ${args.subcommand} ID... [--by NAME]`); process.exit(1); }
-      const decided = args.positional.map((id) => decideReviewItem(id, args.subcommand, { by: args.options.by }));
+      if (!args.positional.length) { console.error(`Usage: ats review ${args.subcommand} ID... [--by NAME] [--note TEXT]`); process.exit(1); }
+      const note = args.options.note ?? args.options.reason;
+      const decided = args.positional.map((id) => decideReviewItem(id, args.subcommand, { by: args.options.by, note }));
       return { [args.subcommand === 'approve' ? 'approved' : 'rejected']: decided.map(summarizeReviewItem) };
     }
     case 'apply': {
@@ -1790,7 +1869,7 @@ async function handleTasks() {
       // passed by NAME is not recognized by the skip). --raw is the per-call form:
       // a body rendered deterministically by a tool must survive byte-for-byte.
       if (opts.content && !formatSkipped(projectId) && args.options.raw !== true) {
-        opts.content = normalizeTaskBody(opts.content).content;
+        opts.content = conformBody(opts.content);
       }
       if (args.options['dry-run'] === true) {
         return {
@@ -1941,7 +2020,7 @@ async function handleTasks() {
       // --raw is the per-call form of format-skip: a body rendered
       // deterministically by a tool must survive the write byte-for-byte.
       if (patch.content !== undefined && !formatSkipped(up) && args.options.raw !== true) {
-        patch.content = normalizeTaskBody(patch.content).content;
+        patch.content = conformBody(patch.content);
       }
       if (args.options['dry-run'] === true) {
         return {
@@ -2075,10 +2154,16 @@ async function handleTasks() {
       return t?.priority ? await t.priority() : needsTaskExt('priority', 'priority');
     case 'completed': {
       const projectIds = tagsToArray(args.options.projects);
+      let startDate = args.options.from;
+      if (!startDate && args.positional[0] !== undefined) {
+        const days = Number(args.positional[0]);
+        if (!Number.isInteger(days) || days < 1) throw new Error('tasks completed DAYS must be a positive integer.');
+        startDate = tickTickTimestamp(new Date(Date.now() - days * 86400000));
+      }
       return t?.listCompleted ? await t.listCompleted({
         projectIds,
         folder: args.options.folder,
-        startDate: args.options.from,
+        startDate,
         endDate: args.options.to,
       }) : needsTaskExt('listCompleted', 'completed');
     }
@@ -2420,6 +2505,7 @@ async function handleLedger() {
     }
     return recordAction({
       agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      actor: resolveActor(),
       action: args.options.action,
       task: { projectId, taskId },
       sources: tagsToArray(args.options.sources) || [],
@@ -2428,11 +2514,21 @@ async function handleLedger() {
       advanced: booleanOption(args.options.advanced, 'advanced') ?? false,
     });
   }
+  if (args.subcommand === 'verify') {
+    const report = verifyLedger({ expectHead: args.options['expect-head'] });
+    if (!report.ok) {
+      console.log(formatOutput(report, args.options.format));
+      process.exit(2);
+    }
+    return report;
+  }
   if (args.subcommand === 'list') {
     return listActions({
       projectId: args.options.project,
       taskId: args.options.task,
       agent: args.options.agent,
+      actorKind: args.options['actor-kind'],
+      session: args.options.session,
       action: args.options.action,
       advanced: booleanOption(args.options.advanced, 'advanced'),
       limit: parseInt(args.options.limit) || undefined,

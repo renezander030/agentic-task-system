@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTaskBody } from '../task-format.js';
+import { normalizeTaskBody, hasLiteralNewlineEscapes } from '../task-format.js';
 
 test('lifts a buried goal: line to a wrapped # Goal at the top', () => {
   const input = 'preamble\n\ngoal: ship the normalizer\n\n- 2026-06-20: drafted spec\n- next: write core';
@@ -108,4 +108,26 @@ test('# Process re-run is a no-op (idempotent, frozen after a human edit)', () =
   const twice = normalizeTaskBody(once);
   assert.equal(twice.changed, false);
   assert.equal(twice.content, once);
+});
+
+test('a body with literal \\n escapes is kept verbatim instead of collapsing to a skeleton', () => {
+  const flat = '# Goal\\nShip the release\\n\\n# Log\\n- 2026-09-01: drafted the plan with the team';
+  assert.equal(hasLiteralNewlineEscapes(flat), true);
+  const out = normalizeTaskBody(flat);
+  assert.equal(out.content, flat);
+  assert.equal(out.changed, false);
+  assert.equal(out.skipped, 'content-loss');
+  assert.ok(out.lost.includes('drafted'));
+});
+
+test('normalization never drops a word: a heading it would truncate keeps the body verbatim', () => {
+  const body = '## Goal for the third quarter\nship it\n';
+  const out = normalizeTaskBody(body);
+  assert.equal(out.skipped, 'content-loss');
+  assert.equal(out.content, body);
+  const ok = normalizeTaskBody('some prose\n- 2026-09-02: did a thing');
+  assert.equal(ok.skipped, undefined);
+  assert.match(ok.content, /^# Goal\n::TODO — set goal::\n\n# Log\n- 2026-09-02: did a thing/);
+  assert.match(ok.content, /## Notes\nsome prose/);
+  assert.equal(hasLiteralNewlineEscapes('line one\nline two \\n'), false);
 });

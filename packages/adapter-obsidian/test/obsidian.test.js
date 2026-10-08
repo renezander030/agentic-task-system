@@ -328,3 +328,34 @@ test('createTask rejects a ../ projectId instead of writing outside the vault', 
     cleanup(dir);
   }
 });
+
+test('patchNote rewrites only the patched keys and keeps the rest of the frontmatter byte for byte', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-obsidian-fm-'));
+  try {
+    const file = path.join(dir, 'Plan.md');
+    const untouched = [
+      'Status: open',
+      'aliases:',
+      '  - Alpha',
+      '  - Beta',
+      'nested:',
+      '  owner: team',
+      '# a comment the user keeps',
+      'cssclass: wide',
+    ];
+    fs.writeFileSync(file, ['---', 'title: Old', ...untouched, 'tags: [a, b]', '---', 'body text', ''].join('\n'));
+    vault.patchNote(dir, 'Plan', { title: 'Plan: phase 2', tags: ['x', 'y'] });
+    const raw = fs.readFileSync(file, 'utf8');
+    assert.equal(raw, ['---', 'title: "Plan: phase 2"', ...untouched, 'tags: [x, y]', '---', 'body text', ''].join('\n'));
+    const read = vault.readNote(dir, file);
+    assert.equal(read.title, 'Plan: phase 2');
+    assert.deepEqual(read.tags, ['x', 'y']);
+
+    vault.patchNote(dir, 'Plan', { dueDate: '2026-10-20', content: 'new body\n' });
+    const again = fs.readFileSync(file, 'utf8');
+    assert.match(again, /\ncssclass: wide\ntags: \[x, y\]\ndue: 2026-10-20\n---\nnew body\n$/);
+    assert.ok(untouched.every((line) => again.includes(`${line}\n`)));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -71,7 +71,34 @@ function firstMeaningful(lines) {
  *   (`- <created>: <summary>`) when the task has no dated history of its own.
  * @returns {{content: string, changed: boolean, goal: string|null}}
  */
+const PLACEHOLDER_LINE = /^\s*::\s*todo\b.*set goal\s*::\s*$/gim;
+
+function wordTokens(text) {
+  return new Set((String(text).replace(PLACEHOLDER_LINE, '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
+}
+
+/**
+ * Normalize a body without losing text. Every word of the input must survive
+ * in the output; otherwise the body is returned verbatim with
+ * `skipped: 'content-loss'` and the missing words in `lost`.
+ */
 export function normalizeTaskBody(content = '', opts = {}) {
+  const original = content || '';
+  const result = normalizeUnchecked(original, opts);
+  if (!result.changed) return result;
+  const kept = wordTokens(result.content);
+  const lost = [...wordTokens(original)].filter((word) => !kept.has(word));
+  if (!lost.length) return result;
+  return { content: original, changed: false, goal: null, skipped: 'content-loss', lost: lost.slice(0, 20) };
+}
+
+/** True when a one-line body carries literal `\n` escapes instead of line breaks. */
+export function hasLiteralNewlineEscapes(content = '') {
+  const text = String(content ?? '');
+  return !text.includes('\n') && /\\n/.test(text);
+}
+
+function normalizeUnchecked(content, opts) {
   const original = content || '';
   const secs = splitSections(promoteHeadings(original));
 

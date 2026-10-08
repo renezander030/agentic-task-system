@@ -154,6 +154,43 @@ export function serializeFrontmatter(data) {
   return `---\n${lines.join('\n')}\n---\n`;
 }
 
+/**
+ * Rewrite only the named keys of a leading frontmatter block and keep every
+ * other line byte for byte (block lists, nested maps, comments, key case).
+ * `updates` maps key → value; keys match case-insensitively and a missing key
+ * is appended. Returns the new frontmatter block (through its closing `---`
+ * line), or null when the text has no frontmatter.
+ */
+export function patchFrontmatterBlock(raw, updates, renderEntry) {
+  const m = /^---(\r?\n)([\s\S]*?)\r?\n---(\r?\n|$)/.exec(raw);
+  if (!m) return null;
+  const eol = m[1];
+  const lines = m[2].split(/\r?\n/);
+  const pending = new Map(Object.entries(updates)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => [key.toLowerCase(), { key, value }]));
+  const out = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const kv = /^([A-Za-z0-9_-]+)\s*:/.exec(lines[i]);
+    const hit = kv && pending.get(kv[1].toLowerCase());
+    if (!hit) { out.push(lines[i]); continue; }
+    while (i + 1 < lines.length && /^(\s+\S|\s*-(\s|$))/.test(lines[i + 1])) i += 1;
+    out.push(...renderEntry(kv[1], hit.value));
+    pending.delete(kv[1].toLowerCase());
+  }
+  for (const { key, value } of pending.values()) out.push(...renderEntry(key, value));
+  return { block: `---${eol}${out.join(eol)}${eol}---${m[3] || eol}`, body: raw.slice(m[0].length) };
+}
+
+const NEEDS_QUOTES = /^[\s[\]{}"'#&*!|>%@`,?:-]|:\s|\s#|\s$/;
+
+function renderInlineEntry(key, value) {
+  if (Array.isArray(value)) return [`${key}: [${value.join(', ')}]`];
+  const text = String(value);
+  if (!NEEDS_QUOTES.test(text)) return [`${key}: ${text}`];
+  return [`${key}: ${text.includes('"') ? `'${text.replace(/'/g, "''")}'` : `"${text}"`}`];
+}
+
 /** Tags from frontmatter (`tags: [a, b]` / `tags: a, b`) plus inline `#tag`s. */
 export function extractTags(data, body) {
   const set = new Set();
@@ -237,12 +274,14 @@ export function patchNote(vaultDir, taskId, patch = {}) {
   const raw = fs.readFileSync(abs, 'utf8');
   const { data, body } = parseFrontmatter(raw);
 
-  const newData = { ...data };
-  if (patch.title !== undefined) newData.title = patch.title;
-  if (patch.tags !== undefined) newData.tags = normalizeTags(patch.tags);
-  if (patch.dueDate !== undefined) newData.due = patch.dueDate;
+  const updates = {};
+  if (patch.title !== undefined) updates.title = patch.title;
+  if (patch.tags !== undefined) updates.tags = normalizeTags(patch.tags);
+  if (patch.dueDate !== undefined) updates.due = patch.dueDate;
   const newBody = patch.content !== undefined ? patch.content : body;
 
-  fs.writeFileSync(abs, `${serializeFrontmatter(newData)}${newBody}`);
+  const patched = patchFrontmatterBlock(raw, updates, renderInlineEntry);
+  const front = patched ? patched.block : serializeFrontmatter({ ...data, ...updates });
+  fs.writeFileSync(abs, `${front}${newBody}`);
   return readNote(vaultDir, abs);
 }

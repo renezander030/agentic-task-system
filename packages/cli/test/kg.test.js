@@ -86,7 +86,7 @@ function run(argv, opts) {
 }
 
 function ratify(reviewId) {
-  run(['review', 'approve', reviewId]);
+  run(['review', 'approve', reviewId], { env: { ATS_AGENT_ID: '' } });
   const out = run(['kg', 'ratify', reviewId]);
   assert.equal(out.ratified[0].ok, true, JSON.stringify(out));
   return out.ratified[0];
