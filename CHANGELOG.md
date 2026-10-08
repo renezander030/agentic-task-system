@@ -1,7 +1,9 @@
 
 # Changelog
 
-## Unreleased
+## 0.18.0 - Complete listings, accountable writes and verifiable facts
+
+Released 2026-10-08.
 
 - **Complete completed-task listings.** `ats tasks completed [DAYS]` pages through the completion window past the backend's per-call limit, deduplicates boundary entries, and reports `pages` and `complete`; a listing that stops at its page budget warns and fails `--require-complete`.
 - **Actor on every write.** Ledger records carry `actor: { id, kind, session? }` for agents, humans and unattributed callers. A global `--agent` names the acting agent for one invocation; `ATS_ACTOR_KIND` and `ATS_SESSION_ID` are honored, and `ats ledger list` filters by `--actor-kind` and `--session`.
