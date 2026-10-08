@@ -168,6 +168,20 @@ export function classifySource(fact = {}) {
 const CHECKABLE_SOURCES = new Set(['task', 'file', 'url']);
 
 /**
+ * Ratification tiers a proposer can claim: `source-fact` (read from a system of
+ * record), `action-record` (records an action that happened), `statement` (a
+ * person said it), `belief` (an inference that needs judgment).
+ */
+export const FACT_TIERS = ['source-fact', 'action-record', 'statement', 'belief'];
+
+function factTier(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const tier = String(value).trim().toLowerCase();
+  if (!FACT_TIERS.includes(tier)) throw new Error(`kg: tier must be one of ${FACT_TIERS.join(', ')}, got "${value}".`);
+  return tier;
+}
+
+/**
  * Provenance policy for proposals: `any` needs a non-empty source, `checkable`
  * a task, file or URL reference that `kg verify` can recheck. Read from
  * ATS_KG_REQUIRE_SOURCE (1/any/checkable), optionally limited to the domains
@@ -269,7 +283,8 @@ export function checkFactProposal(proposal, { facts = [], reviewItems = [], supe
  * ratification; `additive` allows a second value for the same
  * subject+predicate; `acknowledgeRejected` re-opens a triple a human declined.
  */
-export function proposeFact({ subject, predicate, object, domain, source, confidence, taskRef, by, supersedes, additive, acknowledgeRejected, validAt, learnedAt, requireSource } = {}, { queuePath, factsPath } = {}) {
+export function proposeFact({ subject, predicate, object, domain, source, confidence, taskRef, by, supersedes, additive, acknowledgeRejected, validAt, learnedAt, requireSource, tier } = {}, { queuePath, factsPath } = {}) {
+  const claimedTier = factTier(tier);
   const payload = {
     op: 'add',
     ...(validAt !== undefined ? { validAt: factTimestamp(validAt, 'validAt') } : {}),
@@ -281,6 +296,7 @@ export function proposeFact({ subject, predicate, object, domain, source, confid
     source: source || null,
     confidence: confidence || 'medium',
     ...(taskRef ? { taskRef } : {}),
+    ...(claimedTier ? { tier: claimedTier } : {}),
   };
   const { facts } = loadFacts(factsPath ? { factsPath } : {});
   if (supersedes) {
@@ -349,6 +365,7 @@ export function proposeFactLines(lines, { by, defaults = {}, requireSource, queu
         additive: !!input.additive,
         acknowledgeRejected: input.acknowledgeRejected,
         requireSource,
+        tier: input.tier ?? defaults.tier,
       }, paths);
       counts.staged += 1;
       results.push({ line, ok: true, reviewId: item.id, ...(item.payload.supersedes ? { supersedes: item.payload.supersedes } : {}) });
@@ -459,7 +476,7 @@ export function ratifyFactItem(item, { factsPath = kgFactsPath(), now = new Date
       tLearned: p.learnedAt ? factTimestamp(p.learnedAt, 'learnedAt', now) : item.stagedAt && item.stagedAt <= at ? item.stagedAt : at,
       confidence: p.confidence || 'medium',
       ...(p.taskRef ? { taskRef: p.taskRef } : {}), ...(p.supersedes ? { supersedes: p.supersedes } : {}),
-      provenance: { proposedBy: item.stagedBy || null, source: p.source || null, proposalId: item.id, ratifiedBy: item.decidedBy || null, ratifiedAt: at },
+      provenance: { proposedBy: item.stagedBy || null, source: p.source || null, ...(p.tier ? { tier: p.tier } : {}), proposalId: item.id, ratifiedBy: item.decidedBy || null, ratifiedAt: at },
     };
     if (p.supersedes) {
       const old = mustBeOpen(p.supersedes, 'supersede');
@@ -830,7 +847,8 @@ export function factsForTask({ projectId, taskId, query, domain, limit = 5, fact
  * supersedes is already closed). Grouped by domain so a reviewer sees what a
  * `kg ratify --all` would promote into each graph.
  */
-export function pendingFactProposals({ domain, factsPath, queuePath } = {}) {
+export function pendingFactProposals({ domain, tier, factsPath, queuePath } = {}) {
+  const tierFilter = factTier(tier);
   const { facts } = loadFacts(factsPath ? { factsPath } : {});
   const items = listReviewItems({ kind: 'kg.fact', ...(queuePath ? { queuePath } : {}) });
   const open = items.filter((i) => i.status === 'pending' || i.status === 'approved');
@@ -847,6 +865,7 @@ export function pendingFactProposals({ domain, factsPath, queuePath } = {}) {
       ...(item.decidedBy ? { approvedBy: item.decidedBy, approvedAt: item.decidedAt || null } : {}),
     };
     if (p.op === 'retract' || p.op === 'confirm') {
+      if (tierFilter) continue;
       const target = facts.find((f) => f.id === p.factId);
       if (domain && target && target.domain !== domain) continue;
       const stale = !target ? 'no such fact' : target.status !== 'active' ? `already ${target.status} since ${target.tInvalid}` : null;
@@ -864,6 +883,7 @@ export function pendingFactProposals({ domain, factsPath, queuePath } = {}) {
     }
     const factDomain = p.domain || 'default';
     if (domain && factDomain !== domain) continue;
+    if (tierFilter && p.tier !== tierFilter) continue;
     const entry = {
       ...base,
       domain: factDomain,
@@ -871,6 +891,7 @@ export function pendingFactProposals({ domain, factsPath, queuePath } = {}) {
       predicate: p.predicate,
       object: p.object,
       source: p.source || null,
+      tier: p.tier || 'unclassified',
       confidence: p.confidence || 'medium',
       ...(p.taskRef ? { taskRef: p.taskRef } : {}),
       ...(p.supersedes ? { supersedes: p.supersedes } : {}),
@@ -898,8 +919,12 @@ export function pendingFactProposals({ domain, factsPath, queuePath } = {}) {
   }
   pending.sort((a, b) => String(a.domain).localeCompare(String(b.domain)) || String(a.stagedAt).localeCompare(String(b.stagedAt)));
   const byDomain = {};
-  for (const entry of pending) byDomain[entry.domain] = (byDomain[entry.domain] || 0) + 1;
-  return { count: pending.length, byDomain, pending };
+  const byTier = {};
+  for (const entry of pending) {
+    byDomain[entry.domain] = (byDomain[entry.domain] || 0) + 1;
+    if (entry.tier) byTier[entry.tier] = (byTier[entry.tier] || 0) + 1;
+  }
+  return { count: pending.length, byDomain, byTier, pending };
 }
 
 export function kgStats({ factsPath, listReviewItems } = {}) {
@@ -940,6 +965,7 @@ const CYPHER_FACT_PROPS = [
   ['tInvalid', (f) => f.tInvalid],
   ['confidence', (f) => f.confidence],
   ['source', (f) => f.provenance?.source],
+  ['tier', (f) => f.provenance?.tier],
   ['proposedBy', (f) => f.provenance?.proposedBy],
   ['proposalId', (f) => f.provenance?.proposalId],
   ['ratifiedBy', (f) => f.provenance?.ratifiedBy],

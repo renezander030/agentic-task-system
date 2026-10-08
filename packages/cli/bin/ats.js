@@ -1199,7 +1199,7 @@ async function handleKg() {
         const report = proposeFactLines(text.split('\n'), {
           by: agentId,
           requireSource: args.options['require-source'],
-          defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence, validAt: args.options['valid-at'], learnedAt: args.options['learned-at'] },
+          defaults: { domain: args.options.domain, source: args.options.source, confidence: args.options.confidence, validAt: args.options['valid-at'], learnedAt: args.options['learned-at'], tier: args.options.tier },
         });
         const ok = report.refused === 0 && report.invalid === 0;
         report.message = ok
@@ -1235,6 +1235,7 @@ async function handleKg() {
           additive: !!args.options.additive,
           acknowledgeRejected: args.options['acknowledge-rejected'],
           requireSource: args.options['require-source'],
+          tier: args.options.tier,
         });
       } catch (err) {
         if (err instanceof KgGateError) return kgGateOutcome(err);
@@ -1389,7 +1390,7 @@ async function handleKg() {
       return factHistory(args.positional[0]);
     }
     case 'pending':
-      return pendingFactProposals({ domain: args.options.domain });
+      return pendingFactProposals({ domain: args.options.domain, tier: args.options.tier });
     case 'stats':
       return kgStats({ listReviewItems });
     case 'export': {

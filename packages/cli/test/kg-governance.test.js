@@ -173,3 +173,26 @@ test('ledger verify accepts the chained ledger and exits 2 once an entry was edi
   const head = runProcess(['ledger', 'verify', '--expect-head', ok.head], opts);
   assert.equal(head.status, 2);
 });
+
+test('proposals carry a ratification tier into the pending view, the fact provenance and the export', () => {
+  const opts = { store: 'tier' };
+  const record = run(['kg', 'propose', 'Acme', 'signed', 'renewal', '--source', 'task://p1/t1', '--tier', 'action-record'], opts);
+  run(['kg', 'propose', 'Acme', 'likes', 'quarterly reviews', '--source', 'task://p1/t1', '--tier', 'belief'], opts);
+  run(['kg', 'propose', 'Acme', 'uses', 'the old portal', '--source', 'task://p1/t1'], opts);
+  const bad = runProcess(['kg', 'propose', 'Acme', 'is', 'big', '--tier', 'rumor'], opts);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stdout + bad.stderr, /tier must be one of/);
+
+  const pending = run(['kg', 'pending'], opts);
+  assert.deepEqual(pending.byTier, { 'action-record': 1, belief: 1, unclassified: 1 });
+  const beliefs = run(['kg', 'pending', '--tier', 'belief'], opts);
+  assert.equal(beliefs.count, 1);
+  assert.equal(beliefs.pending[0].predicate, 'likes');
+
+  const factId = approveAndRatify(record.reviewId, opts);
+  const facts = run(['kg', 'facts'], opts);
+  assert.equal((facts.facts || facts).find((f) => f.id === factId).provenance.tier, 'action-record');
+  const exported = runProcess(['kg', 'export', '--cypher', '--dialect', 'neo4j'], opts);
+  assert.equal(exported.status, 0, exported.stderr);
+  assert.match(exported.stdout, /tier/);
+});

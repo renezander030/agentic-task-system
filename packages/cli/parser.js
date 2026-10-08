@@ -30,7 +30,7 @@ const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
   'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
   'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
-  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note', 'require-source', 'expect-head',
+  'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note', 'require-source', 'expect-head', 'tier',
   'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
   'threshold', 'max-corpus', 'rerank-depth', 'min-sources', 'facts-limit',
@@ -808,6 +808,7 @@ Usage:
   ats kg propose SUBJ PRED OBJ [--domain D --source REF --confidence C --task P/T]
                 [--supersedes FACT_ID | --additive] [--acknowledge-rejected ID]
                 [--valid-at ISO --learned-at ISO] [--require-source any|checkable]
+                [--tier source-fact|action-record|statement|belief]
   ats kg propose --file FILE|-              One JSON object per line, every line
                                             through the gate; --domain/--source/
                                             --confidence fill what a line lacks
@@ -821,8 +822,9 @@ Usage:
                                             URLs with --network; exit 2 when stale or
                                             changed; --propose-retract stages retractions
   ats kg retract FACT_ID [--reason "..."]   Retraction proposal — reviewed too
-  ats kg pending [--domain D]               What each queued proposal would do,
-                                            checked against the store now
+  ats kg pending [--domain D --tier T]      What each queued proposal would do,
+                                            checked against the store now, with
+                                            its claimed tier and a count per tier
   ats kg ratify <ID...|--all>               Write APPROVED proposals to the store
   ats kg ask "QUESTION" [--domain D --limit N --include-retracted]
                         [--as-of DATE] [--center ENTITY] [--semantic | --lexical]
