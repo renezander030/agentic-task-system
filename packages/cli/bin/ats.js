@@ -2323,80 +2323,49 @@ async function nativeDependencyWrite(adapter, operation, source, target, type, {
   return { ...result, receipt: mutationReceipt({ operation: `link.${operation}`, action, requested: explain, observed: result.links, verified: true, target: source }), ...(args.options.explain ? { explain } : {}) };
 }
 
+// `link add` and `link remove` share one write path: usage check, optional native
+// dependency write, dry-run/explain, the core link write, audit and receipt.
+async function explicitLinkWrite(adapter, operation) {
+  const [sourceProjectId, sourceTaskId, targetProjectId, targetTaskId] = args.positional;
+  if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId || !args.options.type) {
+    console.error(`Usage: ats link ${operation} SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE`);
+    process.exit(1);
+  }
+  const sourceRef = () => ({ projectId: sourceProjectId, taskId: sourceTaskId });
+  const targetRef = () => ({ projectId: targetProjectId, taskId: targetTaskId });
+  if (args.options.native === true) {
+    if (args.options['allow-missing'] === true) throw new Error('Native dependencies require an existing target.');
+    return nativeDependencyWrite(adapter, operation, sourceRef(), targetRef(), args.options.type);
+  }
+  const adding = operation === 'add';
+  const current = await listTaskLinks(adapter, sourceProjectId, sourceTaskId);
+  const exists = current.links.some((link) => link.type === args.options.type && link.projectId === targetProjectId && link.taskId === targetTaskId);
+  const explain = {
+    reason: 'explicit stable source and target ids supplied by the caller',
+    source: sourceRef(),
+    target: targetRef(),
+    type: args.options.type,
+    wouldChange: adding ? !exists : exists,
+  };
+  if (args.options['dry-run'] === true) return { dryRun: true, operation: `link.${operation}`, explain };
+  const result = adding
+    ? await addTaskLink(adapter, sourceRef(), targetRef(), args.options.type, { allowMissing: args.options['allow-missing'] === true, title: args.options.title })
+    : await removeTaskLink(adapter, sourceRef(), targetRef(), args.options.type);
+  const details = { type: args.options.type, target: targetRef(), ...(adding ? {} : { removed: result.removed }) };
+  const action = auditCliWrite(adding ? 'task.link.added' : 'task.link.removed', result, sourceRef(), details);
+  const verified = adding ? true : result.removed === exists;
+  return { ...result, receipt: mutationReceipt({ operation: `link.${operation}`, action, requested: explain, observed: result.metadata?.links, verified, target: explain.source }), ...(args.options.explain ? { explain } : {}) };
+}
+
 async function handleLink() {
   const adapter = await loadAdapter();
-  if (args.subcommand === 'add') {
-    const [sourceProjectId, sourceTaskId, targetProjectId, targetTaskId] = args.positional;
-    if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId || !args.options.type) {
-      console.error('Usage: ats link add SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
-      process.exit(1);
-    }
-    if (args.options.native === true) {
-      if (args.options['allow-missing'] === true) throw new Error('Native dependencies require an existing target.');
-      return nativeDependencyWrite(adapter, 'add', { projectId: sourceProjectId, taskId: sourceTaskId }, { projectId: targetProjectId, taskId: targetTaskId }, args.options.type);
-    }
-    const current = await listTaskLinks(adapter, sourceProjectId, sourceTaskId);
-    const exists = current.links.some((link) => link.type === args.options.type && link.projectId === targetProjectId && link.taskId === targetTaskId);
-    const explain = {
-      reason: 'explicit stable source and target ids supplied by the caller',
-      source: { projectId: sourceProjectId, taskId: sourceTaskId },
-      target: { projectId: targetProjectId, taskId: targetTaskId },
-      type: args.options.type,
-      wouldChange: !exists,
-    };
-    if (args.options['dry-run'] === true) return { dryRun: true, operation: 'link.add', explain };
-    const result = await addTaskLink(
-      adapter,
-      { projectId: sourceProjectId, taskId: sourceTaskId },
-      { projectId: targetProjectId, taskId: targetTaskId },
-      args.options.type,
-      { allowMissing: args.options['allow-missing'] === true, title: args.options.title }
-    );
-    const action = auditCliWrite('task.link.added', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
-      type: args.options.type,
-      target: { projectId: targetProjectId, taskId: targetTaskId },
-    });
-    return { ...result, receipt: mutationReceipt({ operation: 'link.add', action, requested: explain, observed: result.metadata?.links, verified: true, target: explain.source }), ...(args.options.explain ? { explain } : {}) };
-  }
+  if (args.subcommand === 'add' || args.subcommand === 'remove') return explicitLinkWrite(adapter, args.subcommand);
   if (args.subcommand === 'resolve') {
     const [projectId, taskId] = args.positional;
     if (!projectId || !taskId) { console.error('Usage: ats link resolve PROJECT_ID TASK_ID'); process.exit(1); }
     const result = await resolveTaskLinks(adapter, { projectId, taskId });
     if (result.changed) auditCliWrite('task.links.resolved', result, { projectId, taskId }, { resolved: result.resolved.length });
     return result;
-  }
-  if (args.subcommand === 'remove') {
-    const [sourceProjectId, sourceTaskId, targetProjectId, targetTaskId] = args.positional;
-    if (!sourceProjectId || !sourceTaskId || !targetProjectId || !targetTaskId || !args.options.type) {
-      console.error('Usage: ats link remove SOURCE_PROJECT SOURCE_TASK TARGET_PROJECT TARGET_TASK --type TYPE');
-      process.exit(1);
-    }
-    if (args.options.native === true) {
-      if (args.options['allow-missing'] === true) throw new Error('Native dependencies require an existing target.');
-      return nativeDependencyWrite(adapter, 'remove', { projectId: sourceProjectId, taskId: sourceTaskId }, { projectId: targetProjectId, taskId: targetTaskId }, args.options.type);
-    }
-    const current = await listTaskLinks(adapter, sourceProjectId, sourceTaskId);
-    const exists = current.links.some((link) => link.type === args.options.type && link.projectId === targetProjectId && link.taskId === targetTaskId);
-    const explain = {
-      reason: 'explicit stable source and target ids supplied by the caller',
-      source: { projectId: sourceProjectId, taskId: sourceTaskId },
-      target: { projectId: targetProjectId, taskId: targetTaskId },
-      type: args.options.type,
-      wouldChange: exists,
-    };
-    if (args.options['dry-run'] === true) return { dryRun: true, operation: 'link.remove', explain };
-    const result = await removeTaskLink(
-      adapter,
-      { projectId: sourceProjectId, taskId: sourceTaskId },
-      { projectId: targetProjectId, taskId: targetTaskId },
-      args.options.type
-    );
-    const action = auditCliWrite('task.link.removed', result, { projectId: sourceProjectId, taskId: sourceTaskId }, {
-      type: args.options.type,
-      target: { projectId: targetProjectId, taskId: targetTaskId },
-      removed: result.removed,
-    });
-    return { ...result, receipt: mutationReceipt({ operation: 'link.remove', action, requested: explain, observed: result.metadata?.links, verified: result.removed === exists, target: explain.source }), ...(args.options.explain ? { explain } : {}) };
   }
   if (args.subcommand === 'list') {
     const [projectId, taskId] = args.positional;
