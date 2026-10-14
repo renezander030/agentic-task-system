@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
+import { readJsonStateSync, withLockSync, writeFileAtomicSync } from './fs-lock.js';
 import { atsStatePath } from './config-path.js';
 import { loadCorpus } from './retrieval.js';
 import { evaluateLifecycle, taskMetadataForRead } from './task-context.js';
@@ -117,17 +117,11 @@ function buildCheckpoint(corpus, { now = new Date(), dueWithinHours = 24 } = {})
 }
 
 export function readTaskEventCheckpoint({ statePath = taskEventStatePath() } = {}) {
-  if (!fs.existsSync(statePath)) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  } catch (error) {
-    throw new Error(`Invalid task event checkpoint: ${statePath}`, { cause: error });
-  }
-  if (parsed?.version !== TASK_EVENT_STATE_VERSION || !parsed.tasks || typeof parsed.tasks !== 'object') {
-    throw new Error(`Unsupported task event checkpoint: ${statePath}`);
-  }
-  return parsed;
+  return readJsonStateSync(statePath, {
+    label: 'task event checkpoint',
+    ifMissing: () => null,
+    isSupported: (parsed) => parsed?.version === TASK_EVENT_STATE_VERSION && Boolean(parsed.tasks) && typeof parsed.tasks === 'object',
+  });
 }
 
 export function writeTaskEventCheckpoint(checkpoint, { statePath = taskEventStatePath() } = {}) {
@@ -141,16 +135,11 @@ function emptySpool() {
 }
 
 export function readTaskEventSpool({ spoolPath = taskEventSpoolPath() } = {}) {
-  if (!fs.existsSync(spoolPath)) return emptySpool();
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(spoolPath, 'utf8'));
-  } catch (error) {
-    throw new Error(`Invalid task event spool: ${spoolPath}`, { cause: error });
-  }
-  if (parsed?.version !== TASK_EVENT_SPOOL_VERSION || !Array.isArray(parsed.pending)) {
-    throw new Error(`Unsupported task event spool: ${spoolPath}`);
-  }
+  const parsed = readJsonStateSync(spoolPath, {
+    label: 'task event spool',
+    ifMissing: emptySpool,
+    isSupported: (value) => value?.version === TASK_EVENT_SPOOL_VERSION && Array.isArray(value.pending),
+  });
   if (parsed.pending.some((item) => !item?.event?.id || typeof item.event.id !== 'string' || typeof item.stagedAt !== 'string')) {
     throw new Error(`Invalid task event spool entries: ${spoolPath}`);
   }

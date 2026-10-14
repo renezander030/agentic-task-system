@@ -19,9 +19,8 @@
  * Fact proposals retain their separate ratification path.
  */
 
-import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
+import { readJsonStateSync, withLockSync, writeFileAtomicSync } from './fs-lock.js';
 import { atsStatePath } from './config-path.js';
 import { taskMetadataForRead } from './task-context.js';
 import { stableDigest } from './reliability-snapshot.js';
@@ -38,17 +37,11 @@ function emptyQueue() {
 }
 
 export function readReviewQueue({ queuePath = reviewQueuePath() } = {}) {
-  if (!fs.existsSync(queuePath)) return emptyQueue();
-  let parsed;
-  try {
-    parsed = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-  } catch (error) {
-    throw new Error(`Invalid review queue: ${queuePath}`, { cause: error });
-  }
-  if (parsed?.version !== REVIEW_QUEUE_VERSION || !Array.isArray(parsed.items)) {
-    throw new Error(`Unsupported review queue: ${queuePath}`);
-  }
-  return parsed;
+  return readJsonStateSync(queuePath, {
+    label: 'review queue',
+    ifMissing: emptyQueue,
+    isSupported: (parsed) => parsed?.version === REVIEW_QUEUE_VERSION && Array.isArray(parsed.items),
+  });
 }
 
 function writeQueue(queue, queuePath) {
