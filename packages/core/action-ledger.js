@@ -186,15 +186,7 @@ export function recordAction(entry, { logPath = actionLogPath() } = {}) {
 }
 
 export function listActions(filters = {}, { logPath = actionLogPath() } = {}) {
-  if (!fs.existsSync(logPath)) return [];
-  const records = fs.readFileSync(logPath, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line, index) => {
-      try { return JSON.parse(line); } catch (err) {
-        throw new Error(`Malformed action ledger JSON at line ${index + 1}.`, { cause: err });
-      }
-    })
+  const records = actionsInAppendOrder({ logPath })
     .filter((entry) => !filters.agent || entry.agent === filters.agent || entry.actor?.id === filters.agent)
     .filter((entry) => !filters.actorKind || (entry.actor?.kind || 'unattributed') === filters.actorKind)
     .filter((entry) => !filters.session || entry.actor?.session === filters.session)
