@@ -12,11 +12,10 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
+import { atsStatePath } from './config-path.js';
 
-const CACHE_PATH = process.env.ATS_CORPUS_CACHE ||
-  path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'ats', 'corpus-cache.json');
+const CACHE_PATH = atsStatePath('ATS_CORPUS_CACHE', 'corpus-cache.json');
 
 const TTL_MS = Number(process.env.ATS_CORPUS_TTL_MS) || 5 * 60 * 1000; // 5 min
 

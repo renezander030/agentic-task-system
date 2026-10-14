@@ -1,7 +1,6 @@
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
+import { atsStatePath } from './config-path.js';
 import { loadCorpus } from './retrieval.js';
 import { evaluateLifecycle, taskMetadataForRead } from './task-context.js';
 import { stableDigest as digest } from './reliability-snapshot.js';
@@ -10,13 +9,11 @@ export const TASK_EVENT_STATE_VERSION = 1;
 export const TASK_EVENT_SPOOL_VERSION = 1;
 
 export function taskEventStatePath() {
-  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return process.env.ATS_EVENT_STATE || path.join(configBase, 'ats', 'task-events.json');
+  return atsStatePath('ATS_EVENT_STATE', 'task-events.json');
 }
 
 export function taskEventSpoolPath() {
-  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return process.env.ATS_EVENT_SPOOL || path.join(configBase, 'ats', 'task-event-spool.json');
+  return atsStatePath('ATS_EVENT_SPOOL', 'task-event-spool.json');
 }
 
 function isoTimestamp(value, label) {

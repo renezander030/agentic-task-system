@@ -1,12 +1,11 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { withLock, withLockSync } from './fs-lock.js';
+import { atsStatePath } from './config-path.js';
 
 export function actionLogPath() {
-  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return process.env.ATS_ACTION_LOG || path.join(configBase, 'ats', 'action-log.jsonl');
+  return atsStatePath('ATS_ACTION_LOG', 'action-log.jsonl');
 }
 
 const ACTOR_KINDS = new Set(['agent', 'human', 'unattributed']);

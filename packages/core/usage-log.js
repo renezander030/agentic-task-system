@@ -13,10 +13,9 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import { atsStatePath } from './config-path.js';
 
-const LOG_PATH = process.env.ATS_USAGE_LOG ||
-  path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'ats', 'search-log.jsonl');
+const LOG_PATH = atsStatePath('ATS_USAGE_LOG', 'search-log.jsonl');
 
 let dirEnsured = false;
 

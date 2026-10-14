@@ -20,10 +20,9 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
+import { atsStatePath } from './config-path.js';
 import { taskMetadataForRead } from './task-context.js';
 import { stableDigest } from './reliability-snapshot.js';
 import { resolveActor } from './action-ledger.js';
@@ -31,8 +30,7 @@ import { resolveActor } from './action-ledger.js';
 export const REVIEW_QUEUE_VERSION = 1;
 
 export function reviewQueuePath() {
-  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return process.env.ATS_REVIEW_QUEUE || path.join(configBase, 'ats', 'review-queue.json');
+  return atsStatePath('ATS_REVIEW_QUEUE', 'review-queue.json');
 }
 
 function emptyQueue() {

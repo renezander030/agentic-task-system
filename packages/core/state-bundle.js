@@ -25,20 +25,16 @@ import { taskEventStatePath, taskEventSpoolPath } from './task-events.js';
 import { logPath as usageLogPath } from './usage-log.js';
 import { cachePath as corpusCachePath } from './corpus-cache.js';
 import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
+import { atsStateDir, atsStatePath } from './config-path.js';
 
 export const STATE_BUNDLE_VERSION = 1;
-
-function configDir() {
-  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(base, 'ats');
-}
 
 /**
  * The whitelist of state files a bundle carries. Names are stable bundle
  * keys; paths honor the same env overrides the owning modules use.
  */
 export function stateFileRegistry() {
-  const dir = configDir();
+  const dir = atsStateDir();
   return [
     { name: 'action-ledger', path: actionLogPath(), format: 'jsonl' },
     { name: 'review-queue', path: reviewQueuePath(), format: 'json', version: 1 },
@@ -48,8 +44,8 @@ export function stateFileRegistry() {
     { name: 'corpus-cache', path: corpusCachePath, format: 'json' },
     { name: 'format-skip', path: path.join(dir, 'format-skip.txt'), format: 'text' },
     { name: 'triage-budget', path: path.join(dir, 'get-triage-budget.json'), format: 'json' },
-    { name: 'vector-index-meta', path: process.env.ATS_TICKTICK_VECTOR_META || path.join(dir, 'vector-index-meta.json'), format: 'json' },
-    { name: 'kg-facts', path: process.env.ATS_KG_FACTS || path.join(dir, 'kg-facts.jsonl'), format: 'jsonl' },
+    { name: 'vector-index-meta', path: atsStatePath('ATS_TICKTICK_VECTOR_META', 'vector-index-meta.json'), format: 'json' },
+    { name: 'kg-facts', path: atsStatePath('ATS_KG_FACTS', 'kg-facts.jsonl'), format: 'jsonl' },
   ];
 }
 
