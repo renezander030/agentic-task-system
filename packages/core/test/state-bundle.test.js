@@ -108,3 +108,14 @@ test('export checksums detect tampering while valid legacy bundles still import'
   delete bundle.files['action-ledger'].sha256;
   assert.ok(importState(bundle, { force: true }).imported > 0);
 });
+
+test('the format-skip entry honors ATS_FORMAT_SKIP_FILE like the CLI', () => {
+  const entry = () => stateFileRegistry().find((e) => e.name === 'format-skip').path;
+  assert.equal(entry(), path.join(process.env.XDG_CONFIG_HOME, 'ats', 'format-skip.txt'));
+  process.env.ATS_FORMAT_SKIP_FILE = path.join(tmp, 'skip-elsewhere.txt');
+  try {
+    assert.equal(entry(), process.env.ATS_FORMAT_SKIP_FILE);
+  } finally {
+    delete process.env.ATS_FORMAT_SKIP_FILE;
+  }
+});

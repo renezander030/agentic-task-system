@@ -42,7 +42,7 @@ export function stateFileRegistry() {
     { name: 'event-spool', path: taskEventSpoolPath(), format: 'json', version: 1 },
     { name: 'usage-log', path: usageLogPath(), format: 'jsonl' },
     { name: 'corpus-cache', path: corpusCachePath, format: 'json' },
-    { name: 'format-skip', path: path.join(dir, 'format-skip.txt'), format: 'text' },
+    { name: 'format-skip', path: atsStatePath('ATS_FORMAT_SKIP_FILE', 'format-skip.txt'), format: 'text' },
     { name: 'triage-budget', path: path.join(dir, 'get-triage-budget.json'), format: 'json' },
     { name: 'vector-index-meta', path: atsStatePath('ATS_TICKTICK_VECTOR_META', 'vector-index-meta.json'), format: 'json' },
     { name: 'kg-facts', path: atsStatePath('ATS_KG_FACTS', 'kg-facts.jsonl'), format: 'jsonl' },

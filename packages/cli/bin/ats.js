@@ -630,7 +630,7 @@ function helpFor(command) {
 }
 
 const COMPLETION_COMMANDS = [
-  'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'hybrid', 'similar',
+  'setup', 'find', 'dedup', 'open', 'get', 'url', 'links', 'create', 'update', 'workstream', 'hybrid', 'similar',
   'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security', 'events',
   'doctor', 'status', 'cache', 'bench', 'usage', 'fmt', 'sync', 'adapter', 'init', 'config', 'auth', 'review', 'state', 'history', 'snapshot', 'batch', 'agent-setup', 'garden', 'kg',
   'projects', 'tasks', 'notes', 'help', 'completion', 'undo',

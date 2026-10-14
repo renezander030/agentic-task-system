@@ -461,17 +461,23 @@ Commands:
   workstream     Scaffold + gate a work stream (parent + 2-3 verified sub-tasks)
   hybrid <query> Dense+sparse retrieval (embedder-backed adapters)
   similar <id>   Find related items (embedder-backed adapters)
+  dedup          Find near-duplicate or conflicting items; 'dedup apply' links them
+  garden         List stale active items with the command to archive each
   intent         Read or set an item's outcome, constraints, and authority
   promote        Convert exploratory material into a scoped execution item
   hierarchy      Set goal/project/task role and evaluate parent alignment
   lifecycle      Manage validity windows and active/archived/superseded state
   link           Add or list typed relationships between tasks
+  relate         Route a relevant target into the right section of an item
+  reference      Track external URLs and reference notes a task consults
   graph          Traverse the typed task graph around an item
   context        Assemble valid linked + retrieved context with provenance
   snapshot       Emit a content-addressed context + graph snapshot
   history        Inspect or restore version-addressed task write history
   batch          Apply resumable JSON/JSONL mutation batches
   ledger         Record or inspect agent actions and work advancement
+  review         Inspect and approve the staging queue for gated writes
+  kg             Durable facts beside your tasks (propose, review, ratify)
   undo [id]      Reverse the last write (or a named one) from the ledger before-image
   security       Define task trust/resource scope and audit access decisions
   events         Snapshot, poll, or watch observation-only task state changes
@@ -480,12 +486,16 @@ Commands:
   cache          Inspect or refresh the adapter's centralized cache
   sync vector    Synchronize the vector index
   bench          Run and score retrieval benchmarks or analyze usage
+  usage          Summarize retrieval usage: volume, empty and error rates, latency
+  state          Export, import or check ATS state between machines
   adapter        Conformance-test or scaffold a storage adapter
   config         Select the adapter and configure the wiki project
   auth           Authentication management
   projects       Project operations
   tasks          Task operations
   notes          Wiki/note operations through the active adapter
+  fmt            Normalize a Goal+Log task body from stdin (no adapter needed)
+  agent-setup    Print the agent policy block for this install
   completion     Generate bash, zsh, or fish completion
   help           Show command help
 
