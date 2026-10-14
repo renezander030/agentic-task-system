@@ -172,21 +172,36 @@ function wikiProject() {
   return process.env.ATS_WIKI_PROJECT || readGlobalConfig().wikiProject;
 }
 
-function adapterSpecifier(requested) {
+// A local adapter target (a file, or a directory resolved via its package.json
+// "main") as an importable file URL; undefined when it names a package.
+function localAdapterUrl(requested) {
   const looksLikePath = requested.startsWith('.') || requested.startsWith('/') || fs.existsSync(requested);
-  if (looksLikePath) {
-    let abs = path.resolve(requested);
-    if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
-      const pkgJson = path.join(abs, 'package.json');
-      const main = fs.existsSync(pkgJson)
-        ? JSON.parse(fs.readFileSync(pkgJson, 'utf8')).main || 'index.js'
-        : 'index.js';
-      abs = path.join(abs, main);
-    }
-    return pathToFileURL(abs).href;
+  if (!looksLikePath) return undefined;
+  let abs = path.resolve(requested);
+  if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
+    const pkgJson = path.join(abs, 'package.json');
+    const main = fs.existsSync(pkgJson)
+      ? JSON.parse(fs.readFileSync(pkgJson, 'utf8')).main || 'index.js'
+      : 'index.js';
+    abs = path.join(abs, main);
   }
+  return pathToFileURL(abs).href;
+}
+
+function adapterSpecifier(requested) {
+  const local = localAdapterUrl(requested);
+  if (local) return local;
   if (requested.startsWith('@') || requested.includes('/')) return requested;
   return `@reneza/ats-adapter-${requested}`;
+}
+
+// Persist the active adapter choice (`config use`, `init`); returns the stored specifier.
+function selectAdapter(requested) {
+  const adapterPkg = adapterSpecifier(requested);
+  const dir = atsConfigDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(dir, 'adapter'), adapterPkg + '\n');
+  return adapterPkg;
 }
 
 // Resolve which adapter package is active and where that choice came from.
@@ -209,20 +224,7 @@ async function loadAdapter() {
 // Import an arbitrary adapter target (package name OR a local path/dir) for
 // `ats adapter test`. Directories resolve via their package.json "main".
 async function importAdapterTarget(target) {
-  const looksLikePath = target.startsWith('.') || target.startsWith('/') || fs.existsSync(target);
-  let specifier = target;
-  if (looksLikePath) {
-    let abs = path.resolve(target);
-    if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
-      const pkgJson = path.join(abs, 'package.json');
-      const main = fs.existsSync(pkgJson)
-        ? JSON.parse(fs.readFileSync(pkgJson, 'utf8')).main || 'index.js'
-        : 'index.js';
-      abs = path.join(abs, main);
-    }
-    specifier = pathToFileURL(abs).href;
-  }
-  const mod = await import(specifier);
+  const mod = await import(localAdapterUrl(target) || target);
   return mod.default || mod;
 }
 
@@ -567,10 +569,7 @@ function withContentHash(result) {
 
 async function handleConfig() {
   if (args.subcommand === 'use' && args.positional[0]) {
-    const adapterPkg = adapterSpecifier(args.positional[0]);
-    const dir = atsConfigDir();
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(dir, 'adapter'), adapterPkg + '\n');
+    const adapterPkg = selectAdapter(args.positional[0]);
     return { success: true, adapter: adapterPkg };
   }
   if (args.subcommand === 'set' && args.positional[0] === 'wiki-project' && args.positional[1]) {
@@ -682,10 +681,7 @@ function printCompletion(shell) {
 async function handleInit() {
   const requested = args.subcommand || args.positional[0];
   if (requested) {
-    const adapterPkg = adapterSpecifier(requested);
-    const dir = atsConfigDir();
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(dir, 'adapter'), adapterPkg + '\n');
+    const adapterPkg = selectAdapter(requested);
     console.log(`Active adapter set to ${adapterPkg}`);
   } else {
     console.log(`Active adapter: ${resolveAdapterPkg().pkg} (set one with: ats init <adapter>)`);
