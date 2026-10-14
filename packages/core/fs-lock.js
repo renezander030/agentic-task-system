@@ -155,6 +155,23 @@ export async function withLock(targetPath, run, { staleMs = DEFAULT_STALE_MS, ti
 }
 
 /**
+ * Read a versioned JSON state file: `ifMissing()` when it does not exist,
+ * `Invalid <label>` when it does not parse, `Unsupported <label>` when
+ * `isSupported` rejects its version or shape.
+ */
+export function readJsonStateSync(filePath, { label, ifMissing, isSupported }) {
+  if (!fs.existsSync(filePath)) return ifMissing();
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Invalid ${label}: ${filePath}`, { cause: error });
+  }
+  if (!isSupported(parsed)) throw new Error(`Unsupported ${label}: ${filePath}`);
+  return parsed;
+}
+
+/**
  * Replace `filePath` atomically: write a sibling temp file, then rename.
  * Readers see either the old or the new content, never a prefix.
  */

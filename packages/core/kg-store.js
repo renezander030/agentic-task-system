@@ -32,16 +32,15 @@
  */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { stableDigest } from './reliability-snapshot.js';
 import { withLockSync } from './fs-lock.js';
+import { atsStatePath } from './config-path.js';
 import { stageReviewItem, listReviewItems } from './review-queue.js';
 
 export function kgFactsPath() {
-  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return process.env.ATS_KG_FACTS || path.join(configBase, 'ats', 'kg-facts.jsonl');
+  return atsStatePath('ATS_KG_FACTS', 'kg-facts.jsonl');
 }
 
 // One lock, one write: events that belong together (close the old fact, add
@@ -667,8 +666,7 @@ export function askFacts(question, { domain, limit = 8, includeRetracted = false
 }
 
 export function kgVectorsPath() {
-  const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return process.env.ATS_KG_VECTORS || path.join(configBase, 'ats', 'kg-vectors.json');
+  return atsStatePath('ATS_KG_VECTORS', 'kg-vectors.json');
 }
 
 const factText = (f) => `${f.subject} ${f.predicate} ${f.object}`;

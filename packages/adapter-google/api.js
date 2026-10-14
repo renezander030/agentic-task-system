@@ -103,22 +103,27 @@ export function buildAuthUrl(cfg = loadConfig()) {
   return u.toString();
 }
 
+/** POST a grant to Google's token endpoint; `step` names it in the error. */
+async function tokenRequest(fields, step) {
+  const res = await googleFetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(fields),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(`Google token ${step} failed: ${json.error_description || json.error || res.status}`);
+  return json;
+}
+
 /** Trade an authorization code for a refresh token and persist it. */
 export async function exchangeCode(code, cfg = loadConfig()) {
-  const body = new URLSearchParams({
+  const json = await tokenRequest({
     code,
     client_id: cfg.clientId,
     client_secret: cfg.clientSecret,
     redirect_uri: cfg.redirectUri,
     grant_type: 'authorization_code',
-  });
-  const res = await googleFetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Google token exchange failed: ${json.error_description || json.error || res.status}`);
+  }, 'exchange');
   if (json.refresh_token) saveConfig({ refreshToken: json.refresh_token });
   return json;
 }
@@ -134,19 +139,12 @@ export async function getAccessToken(cfg = loadConfig()) {
   if (!cfg.refreshToken) throw new Error('Google: not authenticated. Run `ats config use` / authLogin to grant the dedicated user.');
   const now = Date.now();
   if (tokenCache.accessToken && tokenCache.exp - 60_000 > now) return tokenCache.accessToken;
-  const body = new URLSearchParams({
+  const json = await tokenRequest({
     client_id: cfg.clientId,
     client_secret: cfg.clientSecret,
     refresh_token: cfg.refreshToken,
     grant_type: 'refresh_token',
-  });
-  const res = await googleFetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(`Google token refresh failed: ${json.error_description || json.error || res.status}`);
+  }, 'refresh');
   tokenCache = { accessToken: json.access_token, exp: now + (json.expires_in || 3600) * 1000 };
   return tokenCache.accessToken;
 }
