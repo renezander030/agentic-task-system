@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { withLockSync, writeFileAtomicSync } from './fs-lock.js';
 import { loadCorpus } from './retrieval.js';
 import { evaluateLifecycle, taskMetadataForRead } from './task-context.js';
+import { stableDigest as digest } from './reliability-snapshot.js';
 
 export const TASK_EVENT_STATE_VERSION = 1;
 export const TASK_EVENT_SPOOL_VERSION = 1;
@@ -17,16 +17,6 @@ export function taskEventStatePath() {
 export function taskEventSpoolPath() {
   const configBase = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   return process.env.ATS_EVENT_SPOOL || path.join(configBase, 'ats', 'task-event-spool.json');
-}
-
-function stable(value) {
-  if (Array.isArray(value)) return value.map(stable);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
-}
-
-function digest(value) {
-  return createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
 }
 
 function isoTimestamp(value, label) {
