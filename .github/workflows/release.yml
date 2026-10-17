@@ -1,0 +1,49 @@
+name: Release
+
+# Tag-driven release: pushing a vX.Y.Z tag publishes every public workspace
+# package at that version to npm with provenance and creates the GitHub release
+# with generated notes. All packages share one version (npm run check:release).
+# Needs the repo secret NPM_TOKEN (an npm automation token).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release
+      id-token: write   # npm provenance (--provenance)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run check:release
+      - run: npm run check:publish
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} != package.json ${PKG}" >&2
+            exit 1
+          fi
+
+      - name: Publish the workspace packages to npm with provenance
+        run: npm publish --workspaces --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          generate_release_notes: true
