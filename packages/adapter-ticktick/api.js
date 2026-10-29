@@ -184,17 +184,16 @@ export function getAuthorizationUrl(config) {
 }
 
 /**
- * Exchange authorization code for tokens
+ * POST one OAuth form to the region's token endpoint and return the stored token shape.
+ * `label` names the operation in the error message.
  */
-export async function exchangeCode(config, code, deps = {}) {
+async function tokenRequest(config, fields, label, deps) {
   const { fetchFn = fetch } = deps;
   const urls = OAUTH_URLS[validateRegion(config.region)];
   const body = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
-    code,
-    grant_type: 'authorization_code',
-    redirect_uri: config.redirectUri,
+    ...fields,
   });
 
   const response = await fetchFn(urls.token, {
@@ -205,7 +204,7 @@ export async function exchangeCode(config, code, deps = {}) {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Token exchange failed: ${error}`);
+    throw new Error(`${label} failed: ${error}`);
   }
 
   const data = await response.json();
@@ -219,37 +218,24 @@ export async function exchangeCode(config, code, deps = {}) {
 }
 
 /**
+ * Exchange authorization code for tokens
+ */
+export async function exchangeCode(config, code, deps = {}) {
+  return tokenRequest(config, {
+    code,
+    grant_type: 'authorization_code',
+    redirect_uri: config.redirectUri,
+  }, 'Token exchange', deps);
+}
+
+/**
  * Refresh access token
  */
 export async function refreshAccessToken(config, refreshToken, deps = {}) {
-  const { fetchFn = fetch } = deps;
-  const urls = OAUTH_URLS[validateRegion(config.region)];
-  const body = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
+  return tokenRequest(config, {
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
-  });
-
-  const response = await fetchFn(urls.token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token refresh failed: ${error}`);
-  }
-
-  const data = await response.json();
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-    tokenType: data.token_type,
-    storedAt: Date.now(),
-  };
+  }, 'Token refresh', deps);
 }
 
 /**

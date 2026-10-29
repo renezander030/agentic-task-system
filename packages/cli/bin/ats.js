@@ -493,6 +493,26 @@ function taskRef(result, fallbackProjectId) {
 
 // Replay what an idempotency key already produced: the task it created (read
 // back when possible), or the review item it staged.
+/**
+ * Write a patch through the tasks extension when the adapter has one, else
+ * through the base adapter, which takes `tags` as an array. `opts` is passed
+ * to the extension only when given.
+ */
+function writeTaskPatch(adapter, t, projectId, taskId, patch, opts) {
+  if (!t?.update) return adapter.updateTask(projectId, taskId, { ...patch, tags: tagsToArray(patch?.tags) });
+  return opts === undefined ? t.update(projectId, taskId, patch) : t.update(projectId, taskId, patch, opts);
+}
+
+/**
+ * Read one task through the tasks extension when the adapter has one, else
+ * through the base adapter. `opts` is passed to the extension only when given;
+ * the base adapter takes none.
+ */
+function readTask(adapter, t, projectId, taskId, opts) {
+  if (!t?.get) return adapter.getTask(projectId, taskId);
+  return opts === undefined ? t.get(projectId, taskId) : t.get(projectId, taskId, opts);
+}
+
 async function idempotentReplay(key, seen, adapter, t) {
   if (seen.reviewId && !seen.taskId) {
     return {
@@ -506,7 +526,7 @@ async function idempotentReplay(key, seen, adapter, t) {
   }
   let task = { id: seen.taskId, projectId: seen.projectId };
   try {
-    const got = t?.get ? await t.get(seen.projectId, seen.taskId) : await adapter.getTask(seen.projectId, seen.taskId);
+    const got = await readTask(adapter, t, seen.projectId, seen.taskId);
     task = got?.task || got || task;
   } catch {}
   return { created: false, idempotent: true, key, task };
@@ -854,7 +874,7 @@ async function handleDedup() {
       const entry = { dupe, linked: type };
       if (args.options.close) {
         let current;
-        try { current = t?.get ? await t.get(dupeProject, dupeTask) : await adapter.getTask(dupeProject, dupeTask); } catch { current = null; }
+        try { current = await readTask(adapter, t, dupeProject, dupeTask); } catch { current = null; }
         const gate = reviewGate('task.completed', current, { projectId: dupeProject, taskId: dupeTask });
         if (gate) {
           entry.closed = `staged for review: ${gate.reviewId.slice(0, 8)}`;
@@ -977,6 +997,11 @@ async function handleProjects() {
 // A task subcommand that needs an adapter-specific capability the active
 // adapter doesn't expose. Generic adapters (Obsidian, plain markdown) get
 // list/get/create/update/find/similar via core + the contract instead.
+/** The identity this CLI process writes as: --agent, else ATS_AGENT_ID, else 'ats-cli'. */
+function cliAgentId() {
+  return args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli';
+}
+
 function needsTaskExt(method, sub) {
   throw new Error(
     `'ats tasks ${sub}' needs the '${method}' capability, which the active adapter doesn't provide. ` +
@@ -1030,7 +1055,7 @@ function auditCliWrite(action, result, fallback, metadata, advanced = false, bef
   if (!task.projectId || !task.taskId) return null;
   try {
     return recordAction({
-      agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      agent: cliAgentId(),
       actor: resolveActor(),
       action,
       task,
@@ -1074,7 +1099,7 @@ function reviewGate(action, currentTask, payload) {
     action,
     target: currentTask,
     payload,
-    by: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+    by: cliAgentId(),
   });
 }
 
@@ -1092,15 +1117,34 @@ const summarizeReviewItem = (i) => ({
   ...(i.applyError ? { applyError: i.applyError } : {}),
 });
 
+/**
+ * `tasks complete` / `tasks delete`: read the live task, answer --dry-run,
+ * pass the review gate, write through the tasks extension, then audit and
+ * attach the mutation receipt. A failed read is tolerated unless every write
+ * is reviewed (ATS_REVIEW_ALL=1), because the gate needs the task.
+ */
+async function terminalTaskWrite(args, adapter, t, { operation, event, method, advanced, observeResult }) {
+  const [projectId, taskId] = args.positional;
+  if (!projectId || !taskId) { console.error(`Usage: ats tasks ${operation} PROJECT_ID TASK_ID`); process.exit(1); }
+  let current = null;
+  try { current = await readTask(adapter, t, projectId, taskId, { live: true }); } catch (error) {
+    if (process.env.ATS_REVIEW_ALL === '1') throw error;
+  }
+  if (args.options['dry-run'] === true) return { dryRun: true, operation, target: { projectId, taskId }, before: snapshotTask(current) };
+  const gate = reviewGate(event, current, { projectId, taskId });
+  if (gate) return gate;
+  const result = t?.[method] ? await t[method](projectId, taskId) : needsTaskExt(method, operation);
+  const action = auditCliWrite(event, result, { projectId, taskId }, undefined, advanced, snapshotTask(current));
+  return attachMutationReceipt(result, mutationReceipt({ operation, action, requested: {}, observed: observeResult ? snapshotTask(result) : null, verified: true, target: { projectId, taskId } }));
+}
+
 async function applyReviewedWrite(item, adapter, t) {
   const p = item.payload;
   const approvals = [item.decidedBy].filter(Boolean);
   if (p.expectedRevision !== undefined) {
     let actualRevision;
     try {
-      const current = t?.get
-        ? await t.get(p.projectId, p.taskId, { live: true })
-        : await adapter.getTask(p.projectId, p.taskId);
+      const current = await readTask(adapter, t, p.projectId, p.taskId, { live: true });
       actualRevision = reviewTargetRevision(current);
     } catch (error) {
       throw withExitCode(new Error(`Precondition failed: cannot read reviewed target ${p.projectId}/${p.taskId}; ${error.message}`, { cause: error }), 3);
@@ -1114,7 +1158,7 @@ async function applyReviewedWrite(item, adapter, t) {
       let before;
       let curTask = null;
       try {
-        const cur = t?.get ? await t.get(p.projectId, p.taskId) : await adapter.getTask(p.projectId, p.taskId);
+        const cur = await readTask(adapter, t, p.projectId, p.taskId);
         curTask = cur?.task || cur;
         before = snapshotTask(curTask);
       } catch { before = undefined; }
@@ -1125,9 +1169,7 @@ async function applyReviewedWrite(item, adapter, t) {
           throw new Error(`Precondition failed: ${p.projectId}/${p.taskId} changed since the write was staged (content hash ${actual}, expected ${p.ifMatch}).`);
         }
       }
-      const result = t?.update
-        ? await t.update(p.projectId, p.taskId, p.patch, { live: true })
-        : await adapter.updateTask(p.projectId, p.taskId, { ...p.patch, tags: tagsToArray(p.patch?.tags) });
+      const result = await writeTaskPatch(adapter, t, p.projectId, p.taskId, p.patch, { live: true });
       auditCliWrite(p.patch?.claim === true ? 'task.claimed' : 'task.updated', result, { projectId: p.projectId, taskId: p.taskId }, { fields: Object.keys(p.patch || {}), reviewId: item.id }, false, p.patch?.claim === true ? undefined : before, approvals);
       return result;
     }
@@ -1182,7 +1224,7 @@ function kgGateOutcome(err) {
 }
 
 async function handleKg() {
-  const agentId = args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli';
+  const agentId = cliAgentId();
   switch (args.subcommand) {
     case 'propose': {
       if (args.options.file) {
@@ -1489,7 +1531,7 @@ async function executeBatchOperation(adapter, t, item, dryRun) {
   }
   if (op === 'update') {
     if (!item.projectId || !item.taskId || !item.patch || typeof item.patch !== 'object') throw new Error('update requires projectId, taskId, and patch');
-    const current = t?.get ? await t.get(item.projectId, item.taskId) : await adapter.getTask(item.projectId, item.taskId);
+    const current = await readTask(adapter, t, item.projectId, item.taskId);
     const task = current?.task || current;
     if (item.ifMatch !== undefined) {
       const actual = contentHash(task?.content || '');
@@ -1498,15 +1540,13 @@ async function executeBatchOperation(adapter, t, item, dryRun) {
     if (dryRun) return { status: 'planned', plan: { op, target: { projectId: item.projectId, taskId: item.taskId }, before: snapshotTask(task), patch: item.patch } };
     const gate = reviewGate('task.updated', current, { projectId: item.projectId, taskId: item.taskId, patch: item.patch, ...(item.ifMatch ? { ifMatch: String(item.ifMatch) } : {}) });
     if (gate) return { status: 'staged', result: gate };
-    const result = t?.update
-      ? await t.update(item.projectId, item.taskId, item.patch)
-      : await adapter.updateTask(item.projectId, item.taskId, { ...item.patch, tags: tagsToArray(item.patch.tags) });
+    const result = await writeTaskPatch(adapter, t, item.projectId, item.taskId, item.patch);
     const action = auditCliWrite(item.patch.claim === true ? 'task.claimed' : 'task.updated', result, item, { batchId: item.id, fields: Object.keys(item.patch) }, false, item.patch.claim === true ? undefined : snapshotTask(task));
     return { status: 'applied', result, receipt: mutationReceipt({ operation: op, action, requested: item.patch, observed: snapshotTask(result), verified: patchVerified(result, item.patch), target: { projectId: item.projectId, taskId: item.taskId } }) };
   }
   if (op === 'complete' || op === 'delete') {
     if (!item.projectId || !item.taskId) throw new Error(`${op} requires projectId and taskId`);
-    const current = t?.get ? await t.get(item.projectId, item.taskId) : await adapter.getTask(item.projectId, item.taskId);
+    const current = await readTask(adapter, t, item.projectId, item.taskId);
     if (dryRun) return { status: 'planned', plan: { op, target: { projectId: item.projectId, taskId: item.taskId }, before: snapshotTask(current) } };
     const actionName = op === 'complete' ? 'task.completed' : 'task.deleted';
     const gate = reviewGate(actionName, current, { projectId: item.projectId, taskId: item.taskId });
@@ -1752,9 +1792,7 @@ async function formatTriageOnGet(t, adapter, proj, id, task) {
 
   const patch = { content: finalBody };
   if (newTags) patch.tags = [...curTags.filter((x) => !TRIAGE_TAG.test(x)), ...newTags];
-  const res = t?.update
-    ? await t.update(proj, id, patch)
-    : await adapter.updateTask(proj, id, { ...patch, tags: tagsToArray(patch.tags) });
+  const res = await writeTaskPatch(adapter, t, proj, id, patch);
   auditCliWrite('task.updated', res, { projectId: proj, taskId: id }, { fields: Object.keys(patch), via: 'get-format' }, false, snapshotTask(task));
   return res.task || res;
 }
@@ -1802,9 +1840,7 @@ async function handleTasks() {
       // --live bypasses the local cache. A gate decided on a cached read is not
       // a gate; the cache stays the default for retrieval.
       const live = args.options.live === true;
-      const got = t?.get
-        ? await t.get(gp, gid, ...(live ? [{ live: true }] : []))
-        : await adapter.getTask(gp, gid);
+      const got = await readTask(adapter, t, gp, gid, live ? { live: true } : undefined);
       if (args.options['no-format'] === true || process.env.ATS_GET_NOFORMAT) return withContentHash(got);
       return withContentHash(await formatTriageOnGet(t, adapter, gp, gid, got));
     }
@@ -1812,7 +1848,7 @@ async function handleTasks() {
       // Structure-only backfill (no triage/LLM): lift Goal, ensure Log, preserve Notes.
       if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks normalize PROJECT_ID TASK_ID'); process.exit(1); }
       const [np, nid] = args.positional;
-      const task = t?.get ? await t.get(np, nid) : await adapter.getTask(np, nid);
+      const task = await readTask(adapter, t, np, nid);
       const ntask = task?.task || task;
       if (formatSkipped(ntask?.fullProjectId || ntask?.projectId || np)) {
         return { task: { projectId: np, taskId: nid }, changed: false, skipped: 'format-skip' };
@@ -1988,7 +2024,7 @@ async function handleTasks() {
       let before;
       let current = null;
       try {
-        current = t?.get ? await t.get(up, uid, { live: true }) : await adapter.getTask(up, uid);
+        current = await readTask(adapter, t, up, uid, { live: true });
         before = snapshotTask(current?.task || current);
       } catch { before = undefined; }
       const currentTask = current?.task || current;
@@ -2035,10 +2071,7 @@ async function handleTasks() {
         ...(ifMatch !== undefined ? { ifMatch: String(ifMatch) } : {}),
       });
       if (gate) return gate;
-      const result = t?.update
-        ? await t.update(up, uid, patch,
-          ...(args.options.live === true ? [{ live: true }] : []))
-        : await adapter.updateTask(up, uid, { ...patch, tags: tagsToArray(patch.tags) });
+      const result = await writeTaskPatch(adapter, t, up, uid, patch, args.options.live === true ? { live: true } : undefined);
       const action = auditCliWrite(patch.claim === true ? 'task.claimed' : 'task.updated', result, { projectId: up, taskId: uid }, {
         fields: Object.keys(patch).filter((key) => patch[key] !== undefined),
         ...(bodyMode && bodyMode !== 'content' ? { mode: bodyMode } : {}),
@@ -2053,32 +2086,10 @@ async function handleTasks() {
         target: { projectId: up, taskId: uid },
       }));
     }
-    case 'complete': {
-      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks complete PROJECT_ID TASK_ID'); process.exit(1); }
-      let current = null;
-      try { current = t?.get ? await t.get(args.positional[0], args.positional[1], { live: true }) : await adapter.getTask(args.positional[0], args.positional[1]); } catch (error) {
-        if (process.env.ATS_REVIEW_ALL === '1') throw error;
-      }
-      if (args.options['dry-run'] === true) return { dryRun: true, operation: 'complete', target: { projectId: args.positional[0], taskId: args.positional[1] }, before: snapshotTask(current) };
-      const gate = reviewGate('task.completed', current, { projectId: args.positional[0], taskId: args.positional[1] });
-      if (gate) return gate;
-      const result = t?.complete ? await t.complete(args.positional[0], args.positional[1]) : needsTaskExt('complete', 'complete');
-      const action = auditCliWrite('task.completed', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, true, snapshotTask(current));
-      return attachMutationReceipt(result, mutationReceipt({ operation: 'complete', action, requested: {}, observed: snapshotTask(result), verified: true, target: { projectId: args.positional[0], taskId: args.positional[1] } }));
-    }
-    case 'delete': {
-      if (!args.positional[0] || !args.positional[1]) { console.error('Usage: ats tasks delete PROJECT_ID TASK_ID'); process.exit(1); }
-      let current = null;
-      try { current = t?.get ? await t.get(args.positional[0], args.positional[1], { live: true }) : await adapter.getTask(args.positional[0], args.positional[1]); } catch (error) {
-        if (process.env.ATS_REVIEW_ALL === '1') throw error;
-      }
-      if (args.options['dry-run'] === true) return { dryRun: true, operation: 'delete', target: { projectId: args.positional[0], taskId: args.positional[1] }, before: snapshotTask(current) };
-      const gate = reviewGate('task.deleted', current, { projectId: args.positional[0], taskId: args.positional[1] });
-      if (gate) return gate;
-      const result = t?.remove ? await t.remove(args.positional[0], args.positional[1]) : needsTaskExt('remove', 'delete');
-      const action = auditCliWrite('task.deleted', result, { projectId: args.positional[0], taskId: args.positional[1] }, undefined, false, snapshotTask(current));
-      return attachMutationReceipt(result, mutationReceipt({ operation: 'delete', action, requested: {}, observed: null, verified: true, target: { projectId: args.positional[0], taskId: args.positional[1] } }));
-    }
+    case 'complete':
+      return terminalTaskWrite(args, adapter, t, { operation: 'complete', event: 'task.completed', method: 'complete', advanced: true, observeResult: true });
+    case 'delete':
+      return terminalTaskWrite(args, adapter, t, { operation: 'delete', event: 'task.deleted', method: 'remove', advanced: false, observeResult: false });
     case 'ready':
       return t?.ready ? await t.ready({ limit, projectId: args.options.project }) : needsTaskExt('ready', 'ready');
     case 'find': {
@@ -2469,7 +2480,7 @@ async function handleLedger() {
       process.exit(1);
     }
     return recordAction({
-      agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+      agent: cliAgentId(),
       actor: resolveActor(),
       action: args.options.action,
       task: { projectId, taskId },
@@ -2556,7 +2567,7 @@ async function handleSecurity() {
     process.exit(1);
   }
   return checkTaskAccess(adapter, projectId, taskId, {
-    agent: args.options.agent || process.env.ATS_AGENT_ID || 'ats-cli',
+    agent: cliAgentId(),
     action: args.options.action,
     resource: args.options.resource,
     reason: args.options.reason,

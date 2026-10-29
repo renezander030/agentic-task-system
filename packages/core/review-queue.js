@@ -44,9 +44,19 @@ export function readReviewQueue({ queuePath = reviewQueuePath() } = {}) {
   });
 }
 
-function writeQueue(queue, queuePath) {
-  queue.updatedAt = new Date().toISOString();
-  writeFileAtomicSync(queuePath, JSON.stringify(queue, null, 2) + '\n');
+/**
+ * Change the queue under its lock: re-read it inside the lock, let `change`
+ * edit it and return the affected item, then stamp and atomically write it.
+ * A throw from `change` leaves the file untouched.
+ */
+function mutateQueue(queuePath, change) {
+  return withLockSync(queuePath, () => {
+    const queue = readReviewQueue({ queuePath });
+    const item = change(queue);
+    queue.updatedAt = new Date().toISOString();
+    writeFileAtomicSync(queuePath, JSON.stringify(queue, null, 2) + '\n');
+    return item;
+  }, { label: 'review queue' });
 }
 
 function matchItem(items, idOrPrefix) {
@@ -70,12 +80,10 @@ export function stageReviewItem({ kind, payload, note, by }, { queuePath = revie
     stagedAt: new Date().toISOString(),
     status: 'pending',
   };
-  return withLockSync(queuePath, () => {
-    const queue = readReviewQueue({ queuePath });
+  return mutateQueue(queuePath, (queue) => {
     queue.items.push(item);
-    writeQueue(queue, queuePath);
     return item;
-  }, { label: 'review queue' });
+  });
 }
 
 export function listReviewItems({ status, kind, queuePath = reviewQueuePath() } = {}) {
@@ -112,8 +120,7 @@ function assertSeparateApprover(item, decidedBy, actor) {
 
 export function decideReviewItem(idOrPrefix, decision, { by, note, queuePath = reviewQueuePath() } = {}) {
   if (!['approve', 'reject'].includes(decision)) throw new Error(`Unknown review decision: ${decision}`);
-  return withLockSync(queuePath, () => {
-    const queue = readReviewQueue({ queuePath });
+  return mutateQueue(queuePath, (queue) => {
     const item = matchItem(queue.items, idOrPrefix);
     if (item.status !== 'pending') throw new Error(`Review item ${item.id} is ${item.status}, not pending.`);
     const decidedBy = by || process.env.ATS_REVIEWER || process.env.USER || 'reviewer';
@@ -125,15 +132,13 @@ export function decideReviewItem(idOrPrefix, decision, { by, note, queuePath = r
     item.decidedActor = actor;
     item.decidedAt = new Date().toISOString();
     if (note) item.decisionNote = note;
-    writeQueue(queue, queuePath);
     return item;
-  }, { label: 'review queue' });
+  });
 }
 
 /** Claim the approved payload durably before any external side effect. */
 export function claimReviewItem(id, { queuePath = reviewQueuePath() } = {}) {
-  return withLockSync(queuePath, () => {
-    const queue = readReviewQueue({ queuePath });
+  return mutateQueue(queuePath, (queue) => {
     const item = matchItem(queue.items, id);
     if (item.status !== 'approved') throw new Error(`Review item ${item.id} is ${item.status}, not approved.`);
     const digest = stableDigest({ kind: item.kind, payload: item.payload });
@@ -144,9 +149,8 @@ export function claimReviewItem(id, { queuePath = reviewQueuePath() } = {}) {
     item.applyToken = randomUUID();
     item.applyStartedAt = new Date().toISOString();
     item.applyPid = process.pid;
-    writeQueue(queue, queuePath);
     return item;
-  }, { label: 'review queue' });
+  });
 }
 
 /**
@@ -154,8 +158,7 @@ export function claimReviewItem(id, { queuePath = reviewQueuePath() } = {}) {
  * `failed`; legacy unclaimed callers retain their approved-error behavior.
  */
 export function markReviewItemApplied(id, { result, error, applyToken, queuePath = reviewQueuePath() } = {}) {
-  return withLockSync(queuePath, () => {
-    const queue = readReviewQueue({ queuePath });
+  return mutateQueue(queuePath, (queue) => {
     const item = matchItem(queue.items, id);
     if (item.status === 'applying') {
       if (!applyToken || applyToken !== item.applyToken) throw new Error(`Review item ${item.id} requires its applying claim token.`);
@@ -173,9 +176,8 @@ export function markReviewItemApplied(id, { result, error, applyToken, queuePath
       if (result !== undefined) item.result = result;
       delete item.applyError;
     }
-    writeQueue(queue, queuePath);
     return item;
-  }, { label: 'review queue' });
+  });
 }
 
 /**

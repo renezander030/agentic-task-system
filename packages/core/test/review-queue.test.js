@@ -101,3 +101,14 @@ test('writeRequiresApproval honors the declared metadata', () => {
   assert.equal(writeRequiresApproval({ content: 'plain body, no metadata' }, 'task.updated'), false);
   assert.equal(writeRequiresApproval(null, 'task.updated'), false);
 });
+
+test('a refused transition leaves the queue file byte-for-byte unchanged', () => {
+  const queuePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ats-review-refuse-')), 'q.json');
+  const item = stageReviewItem({ kind: 'create', payload: { title: 'x' }, by: 'agent-a' }, { queuePath });
+  decideReviewItem(item.id, 'reject', { by: 'reviewer-b', queuePath });
+  const before = fs.readFileSync(queuePath, 'utf8');
+  assert.throws(() => decideReviewItem(item.id, 'approve', { by: 'reviewer-b', queuePath }), /is rejected, not pending/);
+  assert.throws(() => markReviewItemApplied(item.id, { queuePath }), /is rejected, not approved/);
+  assert.throws(() => decideReviewItem('no-such-id', 'reject', { queuePath }), /No review item no-such-id/);
+  assert.equal(fs.readFileSync(queuePath, 'utf8'), before);
+});

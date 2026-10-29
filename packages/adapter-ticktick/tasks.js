@@ -101,6 +101,21 @@ export async function get(projectId, taskId, deps = {}) {
 }
 
 /**
+ * Copy the due date, priority, tags and reminder a caller asked for onto a
+ * TickTick task payload. Tags may be an array or a comma-separated string;
+ * an empty reminder parse leaves the reminders alone.
+ */
+function applyScheduleOptions(input, options, { parsePriority, parseReminder }) {
+  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
+  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
+  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
+  if (options.reminder !== undefined) {
+    const reminder = parseReminder(options.reminder);
+    if (reminder) input.reminders = [reminder];
+  }
+}
+
+/**
  * Create a new task
  * @param {string} projectId - Project ID
  * @param {string} title - Task title
@@ -126,13 +141,7 @@ export async function create(projectId, title, options = {}, deps = {}) {
   // A real TickTick sub-task: the Open API accepts parentId on create, though
   // the create response does not echo it back (the readback does).
   if (options.parentId !== undefined) input.parentId = options.parentId;
-  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
-  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
-  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
-  if (options.reminder !== undefined) {
-    const reminder = parseReminder(options.reminder);
-    if (reminder) input.reminders = [reminder];
-  }
+  applyScheduleOptions(input, options, { parsePriority, parseReminder });
 
   const task = await apiRequest('POST', '/task', input, deps);
   return {
@@ -194,13 +203,7 @@ export async function update(projectId, taskId, options = {}, deps = {}) {
 
   if (options.title !== undefined) input.title = options.title;
   if (options.content !== undefined) input.content = options.content;
-  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
-  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
-  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
-  if (options.reminder !== undefined) {
-    const reminder = parseReminder(options.reminder);
-    if (reminder) input.reminders = [reminder];
-  }
+  applyScheduleOptions(input, options, { parsePriority, parseReminder });
 
   const task = await apiRequest('POST', `/task/${encodeURIComponent(resolvedTaskId)}`, input, deps);
   return {
