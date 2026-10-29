@@ -1,6 +1,19 @@
 
 # Changelog
 
+## 0.19.0 - Safe short ids and an agent-safe command line
+
+- **Ambiguous short ids are refused.** A TickTick task or project id prefix that matches more than one id is refused with the matching ids listed, instead of resolving to whichever came first. A prefix that is unique inside the named project still resolves there.
+- **Unknown subcommands fail.** `ats tasks|kg|review|projects|state|auth|adapter|notes <unknown>` exits 1 with a message on stderr instead of printing help and exiting 0. The bare command still prints its help.
+- **Usage errors in JSON.** With `--format json`, a missing argument leaves through the standard error envelope (`ok: false`, `kind: validation`); text mode keeps the plain usage line and exit 1.
+- **Unknown options are reported.** An option the CLI does not know is named on stderr with the closest known option (`--reminders` → `--reminder`); the command still runs.
+- **Numeric priorities.** The TickTick adapter accepts its own levels 0, 1, 3 and 5 as numbers or digit strings, as structured input sends them; other numbers are refused with the valid levels.
+- **One-line text rows.** Line breaks and tabs in titles, project names and tags no longer break text-mode rows, and terminal control characters are dropped.
+- **`ats context --brief`.** A short text index of a task's context: one line per related task and fact, titles only, untrusted items marked, for session-start hooks and other small budgets.
+- **Repeat rules.** `ats tasks create|update --repeat <RRULE|none>` sets or clears a task's repeat rule on adapters that declare it (TickTick); other adapters refuse the write instead of dropping the field. Adapters list such optional fields in `taskFields`.
+- **Dependency maintenance.** The MCP transport resolves the patched `@hono/node-server` 2.x and the lockfile the patched releases of the other flagged packages; `npm audit` reports no findings.
+- **Tidy-up.** Eight behavior-preserving refactors: one token request for TickTick OAuth, one cache loader, one locked review-queue write, one write pipeline for complete and delete, one task read and write path, one agent identity, and one schedule-field mapping for TickTick create and update.
+
 ## 0.18.0 - Complete listings, accountable writes and verifiable facts
 
 Released 2026-10-08.

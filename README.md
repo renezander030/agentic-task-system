@@ -212,6 +212,7 @@ ats find <query> --min-sources 2   # keep only results two branches agree on
 ats find <query> --fresh           # refresh a stale corpus cache before answering
 ats open <project> <task>          # open any adapter item by explicit ids
 ats context <project> <task>       # task + valid linked/retrieved context
+ats context <project> <task> --brief  # one line per related task and fact, for hooks
 ats link list <project> <task>     # list portable typed links
 ats hybrid <query>                 # dense+sparse retrieval when embeddings exist
 ats similar <id>                   # related items when embeddings exist

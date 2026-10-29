@@ -25,11 +25,12 @@ const BOOLEAN_OPTIONS = new Set([
   'no-facts', 'semantic', 'lexical', 'include-retracted', 'cypher', 'graphiti',
   'additive', 'clear-parent', 'allow-missing', 'live', 'require-complete',
   'if-absent', 'non-interactive', 'claim', 'native', 'n', 'network', 'propose-retract',
+  'brief',
 ]);
 const VALUE_OPTIONS = new Set([
   'format', 'content', 'append', 'prepend', 'title', 'project', 'projects',
   'limit', 'budget-ms', 'timeout-ms', 'input', 'output', 'file', 'out', 'journal',
-  'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder',
+  'if-match', 'idempotency-key', 'due', 'priority', 'tags', 'reminder', 'repeat',
   'domain', 'source', 'subject', 'predicate', 'confidence', 'task', 'by', 'agent', 'actor-kind', 'session', 'note', 'require-source', 'expect-head', 'tier',
   'reason', 'url', 'type', 'desc', 'display', 'extract', 'folder', 'from', 'to',
   'days', 'since', 'state', 'spool', 'interval', 'due-within-hours', 'max',
@@ -160,10 +161,10 @@ function formatArray(arr) {
     lines.push('-'.repeat(80));
     for (const item of arr) {
       const id = (item.id || '').padEnd(8);
-      const title = truncate(item.title || '', 30).padEnd(30);
+      const title = truncate(oneLine(item.title), 30).padEnd(30);
       const due = (item.dueDate ? item.dueDate.slice(0, 10) : '').padEnd(10);
       const pri = (item.priority || 'none').padEnd(6);
-      const tags = (item.tags || []).join(', ');
+      const tags = oneLine((item.tags || []).join(', '));
       lines.push(`${id} | ${title} | ${due} | ${pri} | ${tags}`);
     }
   } else if ('name' in first) {
@@ -234,7 +235,7 @@ function formatObject(obj) {
 
   // Handle similar tasks results
   if (obj.source && obj.similar) {
-    lines.push(`Similar to: "${obj.source.title}" (${obj.source.id})`);
+    lines.push(`Similar to: "${oneLine(obj.source.title)}" (${obj.source.id})`);
     lines.push(`Found: ${obj.similar.length} similar tasks`);
     lines.push('');
     if (obj.similar.length > 0) {
@@ -285,7 +286,7 @@ function formatObject(obj) {
  */
 function formatTaskDetail(task) {
   const lines = [];
-  lines.push(`Title: ${task.title}`);
+  lines.push(`Title: ${oneLine(task.title)}`);
   lines.push(`ID: ${task.id}${task.fullId ? ` (${task.fullId})` : ''}`);
   if (task.projectId) lines.push(`Project: ${task.projectId}`);
   if (task.content) lines.push(`Description: ${task.content}`);
@@ -333,8 +334,8 @@ function formatScoredResults(results) {
   lines.push('-'.repeat(90));
   for (const r of results) {
     const score = String(r.score).padEnd(5);
-    const title = truncate(r.title || '', 30).padEnd(30);
-    const project = truncate(r.project || '', 20).padEnd(20);
+    const title = truncate(oneLine(r.title), 30).padEnd(30);
+    const project = truncate(oneLine(r.project), 20).padEnd(20);
     const pri = (r.priority || 'none').padEnd(6);
     const due = r.dueDate ? r.dueDate.slice(0, 10) : '';
     lines.push(`${score} | ${title} | ${project} | ${pri} | ${due}`);
@@ -385,7 +386,7 @@ function formatFindResults(obj) {
   }
 
   obj.tasks.forEach((t, i) => {
-    lines.push(`${i + 1}. ${t.title || '(untitled)'}`);
+    lines.push(`${i + 1}. ${oneLine(t.title) || '(untitled)'}`);
     const meta = [];
     if (t.projectName) meta.push(t.projectName);
     if (t.rrf != null) meta.push(`rrf ${t.rrf}`);
@@ -403,6 +404,15 @@ function formatFindResults(obj) {
 /**
  * Truncate string to max length
  */
+/**
+ * A value as one text-mode line: line breaks and tabs become spaces, other
+ * control characters (terminal escapes included) are dropped.
+ */
+function oneLine(value) {
+  // eslint-disable-next-line no-control-regex
+  return String(value ?? '').replace(/\r\n|[\n\r\t\v\f]/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '');
+}
+
 function truncate(str, maxLen) {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 1) + '…';
@@ -657,14 +667,16 @@ Returns nodes, typed edges, lifecycle validity, and unresolved references.`,
     context: `ats context - Assemble execution context for a task
 
 Usage:
-  ats context PROJECT_ID TASK_ID [--limit N] [--no-facts] [--facts-limit N] [--domain D]
+  ats context PROJECT_ID TASK_ID [--limit N] [--no-facts] [--facts-limit N] [--domain D] [--brief]
 
 Typed links are returned first. Retrieval then discovers additional candidates.
 Archived, expired, future, and superseded items are excluded with reasons.
 The ratified facts about the task ride along in \`facts\`: those proposed from
 it (\`ats kg propose ... --task P/T\`) as \`linked\`, then the best lexical
 matches on its title and intent as \`related\` — each with provenance.
---no-facts leaves the facts layer out; --domain scopes it.`,
+--no-facts leaves the facts layer out; --domain scopes it.
+--brief prints a short text index instead: one line per related task and fact,
+titles only, for a session-start hook or another small budget.`,
     ledger: `ats ledger - Append-only agent action log
 
 Usage:
@@ -1147,6 +1159,9 @@ Create/Update options:
   --priority <level>     Priority: none, low, medium, high
   --tags <tags>          Comma-separated tags
   --reminder <time>      Reminder: 15m, 1h, 1d (before due)
+  --repeat <rule>        Repeat rule as an RRULE (FREQ=WEEKLY;BYDAY=MO), or
+                         none to stop repeating. Adapters that cannot store
+                         it refuse the write.
   --title <text>         New title (update only)
   --claim --agent NAME  (update) Atomically claim a Beads issue for a distinct
                          worker; use separately from field updates
@@ -1209,4 +1224,121 @@ Examples:
   ats tasks completed --from 2026-03-06T00:00:00.000+0000 --to 2026-03-06T23:59:59.000+0000
   ats tasks completed --projects PROJECT_ID1,PROJECT_ID2
   ats tasks completed 30 --projects PROJECT_ID --require-complete`;
+}
+
+/** The help text for a command; the main help for anything else. */
+export function helpFor(command) {
+  switch (command) {
+    case 'auth': return getAuthHelp();
+    case 'projects': return getProjectsHelp();
+    case 'tasks': return getTasksHelp();
+    case 'workstream': return getWorkstreamHelp();
+    case 'notes': return getNotesHelp();
+    case 'adapter': return getAdapterHelp();
+    case 'open': return getOpenHelp();
+    case 'config': return getConfigHelp();
+    case 'cache': return getCacheHelp();
+    case 'review': return getReviewHelp();
+    case 'state': return getStateHelp();
+    case 'history': return 'Usage: ats history PROJECT_ID TASK_ID [--limit N] [--restore REVISION] [--dry-run]\n\nLists version-addressable ledger revisions with field diffs. --restore applies the selected before-image; use --dry-run to preview.';
+    case 'snapshot': return 'Usage: ats snapshot PROJECT_ID TASK_ID [--depth N] [--max-nodes N] [--limit N] [--no-facts]\n\nEmits one content-addressed context + graph snapshot with an explicit completeness verdict.';
+    case 'batch': return 'Usage: ats batch FILE|- [--dry-run] [--journal FILE] [--json]\n\nRuns JSON/JSONL create, update, complete, delete, link.add, and link.remove operations with a stable id per item, per-item outcomes, and a resumable journal.';
+    case 'kg': return getKgHelp();
+    case 'bench': return getBenchHelp();
+    case 'completion': return getCompletionHelp();
+    case 'events': return getEventsHelp();
+    case 'intent':
+    case 'promote':
+    case 'hierarchy':
+    case 'lifecycle':
+    case 'link':
+    case 'reference':
+    case 'relate':
+    case 'graph':
+    case 'context':
+    case 'ledger':
+    case 'security': return getAgentLayerHelp(command);
+    default: return getMainHelp();
+  }
+}
+
+/** Every command with its own help text, so the known options come from all of them. */
+export const HELP_COMMANDS = Object.freeze(['auth', 'projects', 'tasks', 'workstream', 'notes', 'adapter', 'open', 'config', 'cache', 'review', 'state', 'history', 'snapshot', 'batch', 'kg', 'bench', 'completion', 'events', 'intent', 'promote', 'hierarchy', 'lifecycle', 'link', 'reference', 'relate', 'graph', 'context', 'ledger', 'security']);
+
+// Read by handlers but not yet named in any help text.
+const UNDOCUMENTED_OPTIONS = ['next', 'goal'];
+let knownOptions = null;
+
+function editDistance(a, b) {
+  const row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cur = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+  }
+  return row[b.length];
+}
+
+/**
+ * Options the CLI does not know, each with the closest known option when one
+ * is within two edits. Known means parsed explicitly or named in a help text.
+ */
+export function unknownOptions(options) {
+  if (!knownOptions) {
+    const help = [getMainHelp(), ...HELP_COMMANDS.map(helpFor)].join('\n');
+    knownOptions = new Set([...BOOLEAN_OPTIONS, ...VALUE_OPTIONS, ...UNDOCUMENTED_OPTIONS,
+      ...[...help.matchAll(/--([a-z][a-z0-9-]*)/g)].map((m) => m[1])]);
+  }
+  return Object.keys(options || {}).filter((name) => !knownOptions.has(name)).map((name) => {
+    let suggestion = null;
+    let best = 3;
+    for (const known of knownOptions) {
+      const d = editDistance(name, known);
+      if (d < best) { best = d; suggestion = known; }
+    }
+    return { option: name, suggestion };
+  });
+}
+
+/**
+ * `ats context --brief`: the context bundle as a short text index, one line per
+ * related task and fact, for places with a small budget such as a session-start
+ * hook. Titles only, no bodies; anything not marked trusted says so.
+ */
+function brief(value) {
+  return oneLine(value).trim();
+}
+
+function trustNote(security) {
+  const trust = security?.contentTrust;
+  return trust && trust !== 'trusted' ? ` (${trust})` : '';
+}
+
+export function formatContextBrief(context) {
+  const lines = [];
+  const task = context?.task || {};
+  lines.push(`Task: ${brief(task.title) || '(untitled)'} [${task.projectId || '?'}/${task.id || '?'}]${trustNote(context?.security)}`);
+  if (context?.intent?.outcome) lines.push(`Outcome: ${brief(context.intent.outcome)}`);
+  const items = context?.context || [];
+  const counts = context?.counts || {};
+  lines.push(`Related: ${items.length}${counts.excluded ? ` (${counts.excluded} excluded)` : ''}`);
+  for (const item of items) {
+    const linked = (item.provenance || []).some((entry) => entry.kind === 'typed-link');
+    lines.push(`- ${brief(item.task?.title) || '(untitled)'} [${item.task?.projectId}/${item.task?.id}] ${linked ? 'linked' : 'discovered'}${trustNote(item.security)}`);
+  }
+  const facts = [...(context?.facts?.linked || []), ...(context?.facts?.related || [])];
+  if (facts.length) {
+    lines.push(`Facts: ${facts.length}`);
+    for (const fact of facts) {
+      lines.push(`- ${brief(fact.subject)} ${brief(fact.predicate)} ${brief(fact.object)} [${String(fact.id || '').slice(0, 8)}${fact.via ? `, ${fact.via}` : ''}]`);
+    }
+  }
+  if (context?.completeness?.complete === false) {
+    lines.push(`Incomplete: ${(context.completeness.reasons || []).map(brief).join('; ')}`);
+  }
+  return lines.join('\n');
 }
