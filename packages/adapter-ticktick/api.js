@@ -184,17 +184,16 @@ export function getAuthorizationUrl(config) {
 }
 
 /**
- * Exchange authorization code for tokens
+ * POST one OAuth form to the region's token endpoint and return the stored token shape.
+ * `label` names the operation in the error message.
  */
-export async function exchangeCode(config, code, deps = {}) {
+async function tokenRequest(config, fields, label, deps) {
   const { fetchFn = fetch } = deps;
   const urls = OAUTH_URLS[validateRegion(config.region)];
   const body = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
-    code,
-    grant_type: 'authorization_code',
-    redirect_uri: config.redirectUri,
+    ...fields,
   });
 
   const response = await fetchFn(urls.token, {
@@ -205,7 +204,7 @@ export async function exchangeCode(config, code, deps = {}) {
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Token exchange failed: ${error}`);
+    throw new Error(`${label} failed: ${error}`);
   }
 
   const data = await response.json();
@@ -219,37 +218,24 @@ export async function exchangeCode(config, code, deps = {}) {
 }
 
 /**
+ * Exchange authorization code for tokens
+ */
+export async function exchangeCode(config, code, deps = {}) {
+  return tokenRequest(config, {
+    code,
+    grant_type: 'authorization_code',
+    redirect_uri: config.redirectUri,
+  }, 'Token exchange', deps);
+}
+
+/**
  * Refresh access token
  */
 export async function refreshAccessToken(config, refreshToken, deps = {}) {
-  const { fetchFn = fetch } = deps;
-  const urls = OAUTH_URLS[validateRegion(config.region)];
-  const body = new URLSearchParams({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
+  return tokenRequest(config, {
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
-  });
-
-  const response = await fetchFn(urls.token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token refresh failed: ${error}`);
-  }
-
-  const data = await response.json();
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-    tokenType: data.token_type,
-    storedAt: Date.now(),
-  };
+  }, 'Token refresh', deps);
 }
 
 /**
@@ -381,13 +367,20 @@ export function parseReminder(reminder) {
  * @throws {Error} If priority is provided but invalid
  */
 export function parsePriority(priority) {
+  if (priority === 0) return Priority.None;
   if (!priority) return undefined;
-  const p = priority.toLowerCase();
+  // TickTick's own levels (0, 1, 3, 5) arrive as numbers from structured input.
+  if (typeof priority === 'number' || /^\d+$/.test(String(priority).trim())) {
+    const level = Number(priority);
+    if (Object.values(Priority).includes(level)) return level;
+    throw new Error(`Invalid priority "${priority}". Valid options: none, low, medium, high (or 0, 1, 3, 5)`);
+  }
+  const p = String(priority).toLowerCase();
   if (p === 'none') return Priority.None;
   if (p === 'low') return Priority.Low;
   if (p === 'medium') return Priority.Medium;
   if (p === 'high') return Priority.High;
-  throw new Error(`Invalid priority "${priority}". Valid options: none, low, medium, high`);
+  throw new Error(`Invalid priority "${priority}". Valid options: none, low, medium, high (or 0, 1, 3, 5)`);
 }
 
 /**
@@ -414,4 +407,21 @@ export function shortId(id) {
  */
 export function isShortId(id) {
   return id && id.length <= 8;
+}
+
+/**
+ * The one item whose id starts with `prefix`, or null when none does. Several
+ * matches throw instead of picking one, so a short id never writes to the
+ * wrong task or project.
+ */
+export function uniquePrefixMatch(items, prefix, kind) {
+  const matches = (items || []).filter((item) => item.id.startsWith(prefix));
+  if (matches.length > 1) {
+    const shown = matches.slice(0, 5).map((item) => item.id).join(', ');
+    const error = new Error(`Ambiguous ${kind} id "${prefix}": ${matches.length} matches (${shown}${matches.length > 5 ? ', ...' : ''}). Use more characters.`);
+    // Lookups that skip unreadable projects must still let this one through.
+    error.ambiguousId = true;
+    throw error;
+  }
+  return matches[0] || null;
 }

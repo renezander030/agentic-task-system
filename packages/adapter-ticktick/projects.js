@@ -123,7 +123,7 @@ async function resolveProjectId(projectId, deps = {}) {
 
   // Try to find matching project
   const projects = await apiRequest('GET', '/project', undefined, deps);
-  const match = projects.find((p) => p.id.startsWith(projectId));
+  const match = coreFunctions.uniquePrefixMatch(projects, projectId, 'project');
   if (match) {
     return match.id;
   }

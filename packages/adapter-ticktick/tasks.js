@@ -101,6 +101,35 @@ export async function get(projectId, taskId, deps = {}) {
 }
 
 /**
+ * A repeat rule as TickTick stores it: `RRULE:...`, or '' to stop repeating.
+ */
+function parseRepeat(rule) {
+  const text = String(rule).trim();
+  if (/^none$/i.test(text)) return '';
+  const body = text.replace(/^RRULE:/i, '');
+  if (!/^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;[A-Z]+=[A-Za-z0-9,+-]+)*$/i.test(body)) {
+    throw new Error(`Invalid repeat rule "${rule}". Use an RRULE such as FREQ=WEEKLY;BYDAY=MO, or none.`);
+  }
+  return `RRULE:${body.toUpperCase()}`;
+}
+
+/**
+ * Copy the repeat rule, due date, priority, tags and reminder a caller asked for onto a
+ * TickTick task payload. Tags may be an array or a comma-separated string;
+ * an empty reminder parse leaves the reminders alone.
+ */
+function applyScheduleOptions(input, options, { parsePriority, parseReminder }) {
+  if (options.repeat !== undefined) input.repeatFlag = parseRepeat(options.repeat);
+  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
+  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
+  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
+  if (options.reminder !== undefined) {
+    const reminder = parseReminder(options.reminder);
+    if (reminder) input.reminders = [reminder];
+  }
+}
+
+/**
  * Create a new task
  * @param {string} projectId - Project ID
  * @param {string} title - Task title
@@ -126,13 +155,7 @@ export async function create(projectId, title, options = {}, deps = {}) {
   // A real TickTick sub-task: the Open API accepts parentId on create, though
   // the create response does not echo it back (the readback does).
   if (options.parentId !== undefined) input.parentId = options.parentId;
-  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
-  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
-  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
-  if (options.reminder !== undefined) {
-    const reminder = parseReminder(options.reminder);
-    if (reminder) input.reminders = [reminder];
-  }
+  applyScheduleOptions(input, options, { parsePriority, parseReminder });
 
   const task = await apiRequest('POST', '/task', input, deps);
   return {
@@ -149,7 +172,7 @@ export async function create(projectId, title, options = {}, deps = {}) {
       tags: task.tags ?? input.tags ?? [],
       status: task.status === 2 ? 'completed' : 'active',
       reminders: task.reminders ?? input.reminders ?? [],
-      repeatFlag: task.repeatFlag ?? null,
+      repeatFlag: task.repeatFlag ?? input.repeatFlag ?? null,
       items: task.items ?? [],
       createdTime: task.createdTime,
       modifiedTime: task.modifiedTime || new Date().toISOString(),
@@ -194,13 +217,7 @@ export async function update(projectId, taskId, options = {}, deps = {}) {
 
   if (options.title !== undefined) input.title = options.title;
   if (options.content !== undefined) input.content = options.content;
-  if (options.dueDate !== undefined) input.dueDate = normalizeDue(options.dueDate);
-  if (options.priority !== undefined) input.priority = parsePriority(options.priority);
-  if (options.tags !== undefined) input.tags = Array.isArray(options.tags) ? options.tags : options.tags.split(',').map((t) => t.trim()).filter(Boolean);
-  if (options.reminder !== undefined) {
-    const reminder = parseReminder(options.reminder);
-    if (reminder) input.reminders = [reminder];
-  }
+  applyScheduleOptions(input, options, { parsePriority, parseReminder });
 
   const task = await apiRequest('POST', `/task/${encodeURIComponent(resolvedTaskId)}`, input, deps);
   return {
@@ -217,7 +234,7 @@ export async function update(projectId, taskId, options = {}, deps = {}) {
       tags: task.tags ?? input.tags ?? existing.tags ?? [],
       status: task.status === 2 ? 'completed' : 'active',
       reminders: task.reminders ?? input.reminders ?? existing.reminders ?? [],
-      repeatFlag: task.repeatFlag ?? existing.repeatFlag ?? null,
+      repeatFlag: task.repeatFlag ?? input.repeatFlag ?? null,
       items: task.items ?? existing.items ?? [],
       createdTime: task.createdTime ?? existing.createdTime,
       modifiedTime: task.modifiedTime || new Date().toISOString(),
@@ -977,7 +994,7 @@ async function resolveProjectId(projectId, deps = {}) {
   }
 
   // Try to find matching project by short ID prefix
-  const match = projects.find((p) => p.id.startsWith(projectId));
+  const match = coreFunctions.uniquePrefixMatch(projects, projectId, 'project');
   if (match) {
     return match.id;
   }
@@ -1004,11 +1021,12 @@ async function resolveTaskId(taskId, projectId = null, deps = {}) {
     // Search within specific project
     try {
       const data = await apiRequest('GET', `/project/${encodeURIComponent(projectId)}/data`, undefined, deps);
-      const match = data.tasks.find((t) => t.id.startsWith(taskId));
+      const match = coreFunctions.uniquePrefixMatch(data.tasks, taskId, 'task');
       if (match) {
         return match.id;
       }
-    } catch {
+    } catch (error) {
+      if (error.ambiguousId) throw error;
       // Fall through to search all projects
     }
   }
@@ -1016,16 +1034,20 @@ async function resolveTaskId(taskId, projectId = null, deps = {}) {
   // Search all projects
   const projects = await apiRequest('GET', '/project', undefined, deps);
 
+  // Every project is read, so a prefix shared across projects is refused
+  // rather than resolved to whichever project happens to come first.
+  const open = [];
   for (const project of projects) {
     try {
       const data = await apiRequest('GET', `/project/${encodeURIComponent(project.id)}/data`, undefined, deps);
-      const match = data.tasks.find((t) => t.id.startsWith(taskId));
-      if (match) {
-        return match.id;
-      }
+      open.push(...(data.tasks || []));
     } catch {
       // Skip projects we can't access
     }
+  }
+  const openMatch = coreFunctions.uniquePrefixMatch(open, taskId, 'task');
+  if (openMatch) {
+    return openMatch.id;
   }
 
   // /project/{id}/data only returns uncompleted tasks, so a completed task's short
@@ -1034,11 +1056,12 @@ async function resolveTaskId(taskId, projectId = null, deps = {}) {
   // it silently targets an ID that does not exist.
   try {
     const done = await apiRequest('POST', '/task/completed', {}, deps);
-    const match = (done || []).find((t) => t.id.startsWith(taskId));
+    const match = coreFunctions.uniquePrefixMatch(done, taskId, 'task');
     if (match) {
       return match.id;
     }
-  } catch {
+  } catch (error) {
+    if (error.ambiguousId) throw error;
     // Completed listing unavailable — fall through
   }
 

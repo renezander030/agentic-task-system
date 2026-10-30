@@ -31,6 +31,8 @@ function contractTask(task, fallback = {}) {
 
 // Required: 6 methods + auth lifecycle.
 const adapter = {
+  // Optional task fields this adapter stores; the CLI refuses them elsewhere.
+  taskFields: ['repeat'],
   // --- Storage ---
   listProjects: () => projects.list(),
 

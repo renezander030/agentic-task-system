@@ -33,6 +33,23 @@ function scopeMatches(parsed, scope) {
   return (parsed.scope ?? null) === (scope ?? process.env.ATS_CORPUS_SCOPE ?? null);
 }
 
+/**
+ * The cache file for this scope, parsed, when caching is enabled and it holds
+ * a task list. Null when disabled, missing, unreadable, corrupt, for another
+ * scope, or without a `tasks` array. Freshness is the caller's rule.
+ */
+function loadCache(scope) {
+  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
+  try {
+    if (!fs.existsSync(CACHE_PATH)) return null;
+    const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
+    if (!scopeMatches(parsed, scope) || !Array.isArray(parsed.tasks)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function ensureDir() {
   try {
     fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true, mode: 0o700 });
@@ -45,18 +62,11 @@ function ensureDir() {
  * @returns {Array|null} list of task objects, or null if cache missing/stale
  */
 export function read({ scope } = {}) {
-  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
-  try {
-    if (!fs.existsSync(CACHE_PATH)) return null;
-    const raw = fs.readFileSync(CACHE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!scopeMatches(parsed, scope) || !Array.isArray(parsed.tasks) || !Number.isFinite(parsed.timestamp)) return null;
-    const age = Date.now() - parsed.timestamp;
-    if (age > TTL_MS) return null;
-    return parsed.tasks;
-  } catch {
-    return null;
-  }
+  const parsed = loadCache(scope);
+  if (!parsed || !Number.isFinite(parsed.timestamp)) return null;
+  const age = Date.now() - parsed.timestamp;
+  if (age > TTL_MS) return null;
+  return parsed.tasks;
 }
 
 /**
@@ -65,17 +75,11 @@ export function read({ scope } = {}) {
  * cache is missing, still fresh (use {@link read}), or too old to serve.
  */
 export function readStale({ scope } = {}) {
-  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
-  try {
-    if (!fs.existsSync(CACHE_PATH)) return null;
-    const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
-    if (!scopeMatches(parsed, scope) || !Array.isArray(parsed.tasks) || !Number.isFinite(parsed.timestamp)) return null;
-    const age = Date.now() - parsed.timestamp;
-    if (age <= TTL_MS || age > STALE_MAX_MS) return null;
-    return { tasks: parsed.tasks, ageMs: age };
-  } catch {
-    return null;
-  }
+  const parsed = loadCache(scope);
+  if (!parsed || !Number.isFinite(parsed.timestamp)) return null;
+  const age = Date.now() - parsed.timestamp;
+  if (age <= TTL_MS || age > STALE_MAX_MS) return null;
+  return { tasks: parsed.tasks, ageMs: age };
 }
 
 /** True while a refresh lease is held (a background refresh is in flight). */
@@ -160,15 +164,9 @@ export function write(tasks, { cursor = null, scope } = {}) {
  * stale cache instead of discarding it. Returns null when missing/corrupt.
  */
 export function readAny({ scope } = {}) {
-  if (process.env.ATS_CORPUS_CACHE_DISABLE === '1') return null;
-  try {
-    if (!fs.existsSync(CACHE_PATH)) return null;
-    const parsed = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
-    if (!scopeMatches(parsed, scope) || !Array.isArray(parsed.tasks)) return null;
-    return { tasks: parsed.tasks, timestamp: parsed.timestamp ?? null, cursor: parsed.cursor ?? null };
-  } catch {
-    return null;
-  }
+  const parsed = loadCache(scope);
+  if (!parsed) return null;
+  return { tasks: parsed.tasks, timestamp: parsed.timestamp ?? null, cursor: parsed.cursor ?? null };
 }
 
 export function meta({ scope } = {}) {
