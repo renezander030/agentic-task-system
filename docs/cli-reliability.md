@@ -44,6 +44,11 @@ Every ratification checks the approved payload digest and rechecks active facts 
 
 ## Fact source verification and provenance policy
 
+Task-source verification distinguishes an unavailable source from a deleted one.
+DNS failures, cancellation, authentication failures and non-missing HTTP errors
+remain `unverifiable`; they do not become stale-source retraction proposals merely
+because their error text contains a missing-resource message.
+
 ```sh
 ats kg propose "Acme" "renews" "in March" --source task://PROJECT/TASK --tier action-record
 ats kg verify --domain sales --json

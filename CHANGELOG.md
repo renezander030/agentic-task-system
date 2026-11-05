@@ -1,6 +1,12 @@
 
 # Changelog
 
+## 0.19.1 - Retrieval integrity and source verification
+
+- Validate optional reranker results as a permutation of the candidate pool. Invalid results fall back to fused order with a degraded warning; ranking cannot replace candidate content or provenance.
+- Preserve non-ASCII letters, numbers and combining marks in sparse retrieval and built-in reranking.
+- Treat task-source DNS, cancellation, authentication and non-missing HTTP failures as unverifiable rather than deleted, avoiding unwarranted stale-source retraction proposals.
+
 ## 0.19.0 - Safe short ids and an agent-safe command line
 
 - **Ambiguous short ids are refused.** A TickTick task or project id prefix that matches more than one id is refused with the matching ids listed, instead of resolving to whichever came first. A prefix that is unique inside the named project still resolves there.
