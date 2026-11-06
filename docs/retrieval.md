@@ -1,6 +1,14 @@
 
 # Retrieval
 
+Optional rerankers return every candidate exactly once, in the desired order.
+Candidate identity includes project and task IDs. Malformed, duplicate, missing
+or foreign candidates trigger a degraded warning and preserve the original fused
+order. Task text and retrieval provenance come from the original candidates, so a
+reranker only chooses order. Callbacks receive copies of task fields, tags and
+retrieval provenance; opaque adapter `raw` data remains caller-owned. Built-in term matching includes Unicode letters,
+numbers and combining marks.
+
 ATS's retrieval is **storage-agnostic** in Core and **capability-driven**: it fans out the branches available from the active adapter and fuses them.
 
 This document describes how `ats find` actually works.

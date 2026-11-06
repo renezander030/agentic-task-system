@@ -10,8 +10,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { classifySource, listKgFacts } from './kg-store.js';
+import { isTransientError } from './retry.js';
 
-const NOT_FOUND = /not\s*found|no such|does not exist|404|410|deleted/i;
+const NOT_FOUND = /\bnot\s+found\b|\bno such\b|\bdoes not exist\b|\b(?:404|410|deleted)\b/i;
 
 async function checkTask(src, getTask) {
   if (typeof getTask !== 'function') return { status: 'unverifiable', reason: 'no adapter to read task sources' };
@@ -22,7 +23,14 @@ async function checkTask(src, getTask) {
     return { status: 'verified', reason: task.status === 'completed' ? 'task exists (completed)' : 'task exists' };
   } catch (err) {
     const message = String(err?.message || err);
-    return NOT_FOUND.test(message)
+    // Published adapters also report HTTP status in their plain Error prefix.
+    const prefix = message.match(/^(?:[A-Za-z]+ (\d{3}) on |API request failed \((\d{3})\)|(?:HTTP )?(\d{3})\b)/);
+    const status = Number(err?.status ?? err?.statusCode ?? err?.response?.status ?? prefix?.slice(1).find(Boolean));
+    const unavailable = isTransientError(err)
+      || ['AbortError', 'TimeoutError'].includes(err?.name)
+      || /AUTH|FORBIDDEN/i.test(String(err?.code || ''))
+      || (Number.isFinite(status) && status !== 404 && status !== 410);
+    return !unavailable && (status === 404 || status === 410 || NOT_FOUND.test(message))
       ? { status: 'stale', reason: `task not found: ${message}` }
       : { status: 'unverifiable', reason: `task read failed: ${message}` };
   }

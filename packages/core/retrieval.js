@@ -318,7 +318,7 @@ function taskText(task) {
 }
 
 function tokenize(value) {
-  return String(value || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+  return String(value || '').toLowerCase().match(/[\p{L}\p{N}\p{M}]+/gu) || [];
 }
 
 function cosine(a, b) {
@@ -418,7 +418,7 @@ function withDeadline(run, ms) {
  * @returns {Array<object>} candidates reordered, best first
  */
 export function builtinRerank(query, candidates) {
-  const qTokens = [...new Set(String(query || '').toLowerCase().match(/[a-z0-9]+/g) || [])];
+  const qTokens = [...new Set(tokenize(query))];
   if (qTokens.length === 0) return candidates;
   const qPhrase = String(query || '').toLowerCase().trim();
   return candidates
@@ -687,9 +687,28 @@ export async function find(query, cfg = {}) {
     const reranker = typeof rerank === 'function' ? rerank : builtinRerank;
     const rerankStart = Date.now();
     try {
-      const out = await reranker(query, tasks);
-      tasks = (Array.isArray(out) ? out : tasks).slice(0, limit);
-      reranked = Array.isArray(out);
+      // Ranking can choose order, but cannot replace source data or provenance.
+      // Give callbacks a copy so a failed in-place sort cannot alter fallback.
+      const input = tasks.map((doc) => ({
+        ...doc,
+        ...(Array.isArray(doc.tags) ? { tags: [...doc.tags] } : {}),
+        sources: [...doc.sources],
+        ...(doc.explain ? { explain: doc.explain.map((part) => ({ ...part })) } : {}),
+      }));
+      const out = await reranker(query, input);
+      if (!Array.isArray(out) || out.length !== tasks.length) throw new Error('reranker must return every candidate exactly once');
+      const key = (doc) => JSON.stringify([doc.projectId, doc.id]);
+      const candidates = new Map(tasks.map((doc) => [key(doc), doc]));
+      const ordered = Array.from(out, (doc) => {
+        if (!doc || typeof doc !== 'object') throw new Error('reranker returned an invalid candidate');
+        const identity = key(doc);
+        const original = candidates.get(identity);
+        if (!original) throw new Error('reranker returned an unknown or duplicate candidate');
+        candidates.delete(identity);
+        return original;
+      });
+      tasks = ordered.slice(0, limit);
+      reranked = true;
     } catch (err) {
       tasks = tasks.slice(0, limit);
       settled.push({ name: 'rerank', ok: false, value: [], error: err.message, elapsedMs: Date.now() - rerankStart });

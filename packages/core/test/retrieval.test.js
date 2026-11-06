@@ -357,3 +357,80 @@ test('a failing reranker degrades gracefully and keeps the fused results', async
   assert.ok(res.warnings.some((w) => w.includes('rerank') && w.includes('oom')));
   assert.ok(res.tasks.length > 0); // fell back to fused order, still returns results
 });
+
+test('malformed reranker output retains the fused candidates and reports degradation', async () => {
+  const corpus = [
+    { id: 'a', title: 'deploy alpha', content: '', projectId: 'p1', tags: [] },
+    { id: 'b', title: 'deploy beta', content: '', projectId: 'p1', tags: [] },
+  ];
+  const options = { loadCorpus: async () => ({ corpus, fromCache: false }), includeNative: false, limit: 2 };
+  const baseline = await find('deploy', options);
+  for (const rerank of [
+    async () => null,
+    async () => [null],
+    async () => [],
+    async (_query, docs) => Array(docs.length),
+    async (_query, docs) => { const out = [...docs]; delete out[0]; return out; },
+    async (_query, docs) => [docs[0], docs[0]],
+    async (_query, docs) => [{ ...docs[0], id: 'foreign' }, docs[1]],
+    async (_query, docs) => [{ ...docs[0], projectId: 'p2' }, docs[1]],
+    async (_query, docs) => { docs.reverse(); throw new Error('response lost'); },
+  ]) {
+    const result = await find('deploy', { ...options, rerank });
+    assert.equal(result.degraded, true);
+    assert.equal(result.reranked, false);
+    assert.deepEqual(result.tasks, baseline.tasks);
+    assert.ok(result.warnings.some((warning) => warning.includes('rerank')));
+  }
+});
+
+test('a reranker chooses order without replacing candidate data or provenance', async () => {
+  const corpus = [{ id: 'a', title: 'deploy alpha', content: '', projectId: 'p1', tags: [] }];
+  const result = await find('deploy', {
+    loadCorpus: async () => ({ corpus, fromCache: false }), includeNative: false,
+    rerank: async (_query, docs) => docs.map((doc) => ({ ...doc, title: 'changed', sources: ['invented'] })),
+  });
+  assert.equal(result.degraded, false);
+  assert.equal(result.reranked, true);
+  assert.equal(result.tasks[0].title, 'deploy alpha');
+  assert.deepEqual(result.tasks[0].sources, ['keyword']);
+});
+
+test('builtin reranking preserves non-ASCII query terms', () => {
+  for (const query of ['计划', 'خطة', 'échéance']) {
+    const docs = [
+      { id: 'weak', title: 'other', content: query, rrf: 0.9 },
+      { id: 'strong', title: query, content: '', rrf: 0.1 },
+    ];
+    assert.equal(builtinRerank(query, docs)[0].id, 'strong', query);
+  }
+});
+
+
+test('reranking accepts opaque adapter data and isolates task fields', async () => {
+  const raw = { getName() { return 'opaque'; } };
+  const docs = [
+    { id: 'a', title: 'other', content: 'deploy', projectId: 'p', tags: ['original'], raw },
+    { id: 'b', title: 'deploy', content: '', projectId: 'p', tags: [], raw },
+  ];
+  const options = {
+    adapter: { searchByQuery: async () => docs },
+    loadCorpus: async () => ({ corpus: [], fromCache: false }),
+    includeKeyword: false, explain: true,
+  };
+  const builtin = await find('deploy', { ...options, rerank: true });
+  assert.equal(builtin.degraded, false);
+  assert.equal(builtin.reranked, true);
+  assert.equal(builtin.tasks[0].id, 'b');
+  const baseline = await find('deploy', options);
+  const custom = await find('deploy', { ...options, rerank: async (_query, candidates) => {
+    assert.equal(candidates[0].raw.getName(), 'opaque');
+    candidates[0].title = 'modified';
+    candidates[0].tags.push('modified');
+    candidates[0].sources.push('modified');
+    candidates[0].explain[0].source = 'modified';
+    return candidates.reverse();
+  } });
+  assert.equal(custom.degraded, false);
+  assert.deepEqual(custom.tasks, [...baseline.tasks].reverse());
+});
