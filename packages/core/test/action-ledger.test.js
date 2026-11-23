@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { listActions, recordAction, snapshotTask, revertAction, mostRecentUndoable, findAction } from '../action-ledger.js';
+import { listActions, recordAction, snapshotTask, revertAction, mostRecentUndoable, findAction, taskHistory } from '../action-ledger.js';
 
 // Minimal in-memory adapter for revert tests: updateTask patches, deleteTask removes.
 function fakeAdapter(initial = {}) {
@@ -126,6 +126,29 @@ test('revertAction refuses actions with no before-image and reports missing ids'
     await assert.rejects(() => revertAction(adapter, readOnly.id, { logPath }), /not undoable/);
     await assert.rejects(() => revertAction(adapter, 'nope', { logPath }), /No action nope/);
     await assert.rejects(() => revertAction(adapter, undefined, { logPath }), /No undoable write/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('task history skips a malformed ledger line, names it, and every write path stays strict', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-action-ledger-skip-'));
+  const logPath = path.join(dir, 'action-log.jsonl');
+  try {
+    const task = { projectId: 'demo', taskId: 'plan' };
+    const first = recordAction({ agent: 'a', action: 'update', task, before: { title: 'One' }, after: { title: 'Two' } }, { logPath });
+    fs.appendFileSync(logPath, '{"id": "cut-off-write\n');
+    const second = recordAction({ agent: 'a', action: 'update', task, before: { title: 'Two' }, after: { title: 'Three' } }, { logPath });
+    const history = taskHistory('demo', 'plan', { logPath });
+    assert.equal(history.count, 2);
+    assert.deepEqual(history.revisions.map((r) => r.actionId).sort(), [first.id, second.id].sort());
+    assert.deepEqual(history.skipped, { count: 1, lines: [2] });
+    assert.deepEqual(taskHistory('demo', 'plan', { logPath: path.join(dir, 'none.jsonl') }).skipped, { count: 0, lines: [] });
+    // listing stays strict by default; reverts, undo and lookups refuse the damaged ledger
+    assert.throws(() => listActions({}, { logPath }), /Malformed action ledger JSON at line 2/);
+    assert.throws(() => findAction(first.id, { logPath }), /Malformed action ledger JSON at line 2/);
+    assert.throws(() => mostRecentUndoable({ logPath }), /Malformed action ledger JSON at line 2/);
+    await assert.rejects(() => revertAction({}, first.id, { apply: false, logPath }), /Malformed action ledger JSON at line 2/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

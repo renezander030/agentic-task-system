@@ -152,3 +152,20 @@ test('undo targets a named older action and refuses an unknown id without writin
   assert.equal(restored.data.undone, older.actionId);
   assert.equal(JSON.parse(fs.readFileSync(state)).title, initial.title);
 });
+
+
+test('history reads past a malformed ledger line and says so on stderr; restore still refuses', (t) => {
+  const { run, env, state } = fixture(t);
+  assert.equal(run(['update', 'p1', 't1', '--title', 'First update']).status, 0);
+  fs.appendFileSync(env.ATS_ACTION_LOG, '{"id": "cut-off-write\n');
+  assert.equal(run(['update', 'p1', 't1', '--title', 'Second update']).status, 0);
+  const history = run(['history', 'p1', 't1']);
+  assert.equal(history.status, 0, history.stderr);
+  assert.equal(history.data.count, 2);
+  assert.deepEqual(history.data.skipped, { count: 1, lines: [2] });
+  assert.match(history.stderr, /^ats history: skipped 1 malformed ledger line \(line 2\) in .+action/m);
+  const restore = run(['history', 'p1', 't1', '--restore', history.data.revisions[1].revision]);
+  assert.notEqual(restore.status, 0);
+  assert.match(restore.stderr, /Malformed action ledger JSON at line 2/);
+  assert.equal(JSON.parse(fs.readFileSync(state)).title, 'Second update');
+});
