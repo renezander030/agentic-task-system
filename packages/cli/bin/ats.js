@@ -66,6 +66,7 @@ import {
   listActions,
   snapshotTask,
   taskHistory,
+  actionLogPath,
   revertAction,
   mostRecentUndoable,
   taskEventStatePath,
@@ -1465,6 +1466,10 @@ async function handleHistory() {
   const taskId = args.positional[0];
   if (!projectId || !taskId) throw new Error('Usage: ats history PROJECT_ID TASK_ID [--restore REVISION] [--dry-run]');
   const history = taskHistory(projectId, taskId, { limit: parseInt(args.options.limit) || undefined });
+  if (history.skipped.count) {
+    const n = history.skipped.count;
+    process.stderr.write(`ats history: skipped ${n} malformed ledger line${n === 1 ? '' : 's'} (line${n === 1 ? '' : 's'} ${history.skipped.lines.join(', ')}) in ${actionLogPath()}\n`);
+  }
   if (!args.options.restore) return history;
   const matches = history.revisions.filter((revision) =>
     revision.revision === args.options.restore

@@ -185,8 +185,8 @@ export function recordAction(entry, { logPath = actionLogPath() } = {}) {
   return record;
 }
 
-export function listActions(filters = {}, { logPath = actionLogPath() } = {}) {
-  const records = actionsInAppendOrder({ logPath })
+export function listActions(filters = {}, { logPath = actionLogPath(), skipped } = {}) {
+  const records = actionsInAppendOrder({ logPath, skipped })
     .filter((entry) => !filters.agent || entry.agent === filters.agent || entry.actor?.id === filters.agent)
     .filter((entry) => !filters.actorKind || (entry.actor?.kind || 'unattributed') === filters.actorKind)
     .filter((entry) => !filters.session || entry.actor?.session === filters.session)
@@ -221,10 +221,14 @@ function snapshotDiff(before = {}, after = {}) {
 
 /** Return version-addressable write history for one task. */
 export function taskHistory(projectId, taskId, { limit, logPath = actionLogPath() } = {}) {
-  const actions = listActions({ projectId, taskId, limit }, { logPath });
+  // History is a read: one unparseable line must not hide every revision. It is skipped and named,
+  // never silently; undo, revert and restore read the ledger strictly and still refuse it.
+  const skipped = [];
+  const actions = listActions({ projectId, taskId, limit }, { logPath, skipped });
   return {
     task: { projectId, taskId },
     count: actions.length,
+    skipped: { count: skipped.length, lines: skipped },
     revisions: actions.map((entry) => ({
       revision: entry.revision || entry.id,
       actionId: entry.id,
@@ -244,16 +248,19 @@ export function taskHistory(projectId, taskId, { limit, logPath = actionLogPath(
 // Append order == chronological, and is unambiguous even when many writes share a
 // millisecond (rapid agent loops). "Most recent" scans this from the end, so it never
 // depends on an ISO-timestamp tie-break the way the ts-sorted listActions() does.
-function actionsInAppendOrder({ logPath = actionLogPath() } = {}) {
+// `skipped`, an array, turns a malformed line from an error into its 1-based line number pushed there (reads
+// only); without it every caller fails closed.
+function actionsInAppendOrder({ logPath = actionLogPath(), skipped } = {}) {
   if (!fs.existsSync(logPath)) return [];
-  return fs.readFileSync(logPath, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line, index) => {
-      try { return JSON.parse(line); } catch (err) {
-        throw new Error(`Malformed action ledger JSON at line ${index + 1}.`, { cause: err });
-      }
-    });
+  const records = [];
+  fs.readFileSync(logPath, 'utf8').split('\n').forEach((line, index) => {
+    if (!line) return;
+    try { records.push(JSON.parse(line)); } catch (err) {
+      if (!Array.isArray(skipped)) throw new Error(`Malformed action ledger JSON at line ${index + 1}.`, { cause: err });
+      skipped.push(index + 1);
+    }
+  });
+  return records;
 }
 
 // Reversible = a restore snapshot exists, or it was a create (inverse = delete).
